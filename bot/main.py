@@ -70,6 +70,25 @@ bot: Bot = None  # type: ignore  # создаётся в main()
 BOT_USERNAME = ""
 dp = Dispatcher()
 
+# Открытые SSE-клиенты получают только сигнал «данные изменились».
+SSE_CLIENTS = set()
+MUTATING_API = {
+    "/api/register", "/api/request/create", "/api/request/update", "/api/request/action",
+    "/api/626/create", "/api/626/action", "/api/chat", "/api/read", "/api/verify",
+    "/api/user/role", "/api/user/delete", "/api/category/block", "/api/equip/add",
+    "/api/equip/del", "/api/equip/remove", "/api/equip/restore", "/api/favset/add",
+    "/api/favset/del", "/api/resync", "/api/equipment/unit/update",
+}
+
+
+async def sse_broadcast() -> None:
+    for queue in list(SSE_CLIENTS):
+        try:
+            if queue.empty():
+                queue.put_nowait("change")
+        except (asyncio.QueueFull, RuntimeError):
+            SSE_CLIENTS.discard(queue)
+
 
 # ================= БД =================
 
@@ -96,7 +115,7 @@ def init_db() -> None:
           dfrom_iso TEXT DEFAULT '', dto_iso TEXT DEFAULT '',
           tfrom TEXT DEFAULT '', tto TEXT DEFAULT '',
           created_ts REAL DEFAULT 0, notif TEXT DEFAULT '{}', escalated INTEGER DEFAULT 0,
-          nums TEXT DEFAULT '{}');
+          nums TEXT DEFAULT '{}', issued_by INTEGER, returned_by INTEGER);
         CREATE TABLE IF NOT EXISTS b626(
           id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, day TEXT, slot TEXT,
           goal TEXT, needs TEXT DEFAULT '[]', status TEXT DEFAULT 'new',
@@ -122,6 +141,10 @@ def init_db() -> None:
           action TEXT, ts TEXT);
         CREATE TABLE IF NOT EXISTS extra_admins(
           user_id INTEGER PRIMARY KEY, added_by INTEGER, added_ts TEXT);
+        CREATE TABLE IF NOT EXISTS equipment_units(
+          short TEXT, num INTEGER, serial TEXT DEFAULT '', note TEXT DEFAULT '',
+          state TEXT DEFAULT 'ready', updated_at TEXT DEFAULT '', updated_by INTEGER,
+          PRIMARY KEY(short, num));
         """)
 
 
@@ -131,7 +154,8 @@ def _migrate() -> None:
         "requests": {"dfrom_iso": "TEXT DEFAULT ''", "dto_iso": "TEXT DEFAULT ''",
                      "tfrom": "TEXT DEFAULT ''", "tto": "TEXT DEFAULT ''",
                      "created_ts": "REAL DEFAULT 0", "notif": "TEXT DEFAULT '{}'",
-                     "escalated": "INTEGER DEFAULT 0", "nums": "TEXT DEFAULT '{}'"},
+                     "escalated": "INTEGER DEFAULT 0", "nums": "TEXT DEFAULT '{}'",
+                     "issued_by": "INTEGER", "returned_by": "INTEGER"},
         "b626": {"created_ts": "REAL DEFAULT 0", "notif": "TEXT DEFAULT '{}'"},
         "users": {"block_until": "TEXT DEFAULT ''"},
         "messages": {"role": "TEXT DEFAULT ''"},
@@ -143,6 +167,8 @@ def _migrate() -> None:
             c.execute("CREATE TABLE actions(id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER, kind TEXT, ref INTEGER, action TEXT, ts TEXT)")
         if "extra_admins" not in tables:
             c.execute("CREATE TABLE extra_admins(user_id INTEGER PRIMARY KEY, added_by INTEGER, added_ts TEXT)")
+        if "equipment_units" not in tables:
+            c.execute("CREATE TABLE equipment_units(short TEXT, num INTEGER, serial TEXT DEFAULT '', note TEXT DEFAULT '', state TEXT DEFAULT 'ready', updated_at TEXT DEFAULT '', updated_by INTEGER, PRIMARY KEY(short, num))")
     with db() as c:
         for table, cols in adds.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
@@ -261,6 +287,24 @@ def org_ok(name: str) -> bool:
 _DIR_CACHE = {"ts": 0.0, "data": None}
 
 
+def sync_equipment_units() -> None:
+    """Создаёт паспорта всех известных экземпляров, не стирая заполненные данные."""
+    with db() as c:
+        for short, meta in CATALOG_META.items():
+            for num in range(1, int(meta.get("total") or 1) + 1):
+                c.execute("INSERT OR IGNORE INTO equipment_units(short, num, updated_at) VALUES(?,?,?)", (short, num, datetime.now(MSK).strftime("%Y-%m-%d %H:%M")))
+
+
+def ready_numbers(short: str) -> list:
+    """Номера экземпляров в состоянии ready."""
+    total = int(CATALOG_META.get(short, {}).get("total") or 0)
+    if total < 1:
+        return []
+    with db() as c:
+        rows = c.execute("SELECT num FROM equipment_units WHERE short=? AND num<=? AND state='ready' ORDER BY num", (short, total)).fetchall()
+    return [r["num"] for r in rows]
+
+
 def directory() -> dict:
     """Словарь username -> {name, deps: [], role}. None - справочник не настроен."""
     p = Path(DIRECTORY_FILE)
@@ -314,7 +358,7 @@ def check_availability(items, d1, d2, exclude_rid=0):
         return None
     busy = busy_map(d1, d2, exclude_rid)
     bad = [s for s, q in items
-           if s in TOTALS and busy.get(s, 0) + int(q) > TOTALS[s]]
+           if s in TOTALS and busy.get(s, 0) + int(q) > len(ready_numbers(s))]
     if bad:
         return "На выбранные даты уже занято: " + ", ".join(bad) + ". Уберите позиции или смените даты."
     return None
@@ -403,14 +447,17 @@ def used_numbers(short, d1, d2, exclude_rid=0):
     return used
 
 
-def assign_numbers(items, d1, d2, exclude_rid=0):
-    result = {}
+def assign_numbers(items, d1, d2, exclude_rid=0, preferred=None):
+    """Назначает только исправные и незанятые номера; preferred приходит из чек-листа админа."""
+    result, preferred = {}, preferred or {}
     for short, qty in items:
-        total = CATALOG_META[short]["total"]
-        if total <= 1: continue
-        free = [n for n in range(1, total + 1) if n not in used_numbers(short, d1, d2, exclude_rid)]
-        if len(free) < qty: return None, "?? ???????? ????????? ??????????? ??????? ?%s?." % short
-        result[short] = free[:qty]
+        used = used_numbers(short, d1, d2, exclude_rid)
+        free = [n for n in ready_numbers(short) if n not in used]
+        wanted = _numbers_from_value(preferred.get(short))
+        chosen = wanted if len(wanted) == int(qty) else free[:int(qty)]
+        if len(set(chosen)) != int(qty) or any(n not in free for n in chosen):
+            return None, "Не хватает исправных свободных экземпляров позиции «%s»." % short
+        result[short] = chosen
     return result, None
 
 
@@ -614,6 +661,41 @@ def _cat_until_passed(s: str) -> bool:
     return False
 
 
+def unit_summary() -> list:
+    with db() as c:
+        rows = c.execute("SELECT * FROM equipment_units ORDER BY short COLLATE NOCASE, num").fetchall()
+    return [{"short": r["short"], "num": r["num"], "serial": r["serial"], "note": r["note"],
+             "state": r["state"], "updatedAt": r["updated_at"],
+             "updatedBy": _disp_user(r["updated_by"]) if r["updated_by"] else "система"} for r in rows]
+
+
+def unit_passport(short: str, num: int):
+    with db() as c:
+        unit = c.execute("SELECT * FROM equipment_units WHERE short=? AND num=?", (short, num)).fetchone()
+        reqs = c.execute("SELECT * FROM requests WHERE nums<>'{}' ORDER BY id DESC").fetchall()
+    if not unit:
+        return None
+    history = []
+    for r in reqs:
+        try:
+            nums = json.loads(r["nums"] or "{}")
+        except (TypeError, ValueError):
+            nums = {}
+        if num not in _numbers_from_value(nums.get(short)):
+            continue
+        history.append({
+            "requestId": r["id"], "user": _disp_user(r["user_id"]),
+            "from": r["dfrom"], "to": r["dto"], "status": r["status"],
+            "issuedBy": _disp_user(r["issued_by"]) if r["issued_by"] else "—",
+            "returnedBy": _disp_user(r["returned_by"]) if r["returned_by"] else "—",
+            "takenAt": r["taken_at"] or "—", "returnedAt": r["returned_at"] or "—",
+        })
+    return {"short": unit["short"], "num": unit["num"], "serial": unit["serial"],
+            "note": unit["note"], "state": unit["state"], "updatedAt": unit["updated_at"],
+            "updatedBy": _disp_user(unit["updated_by"]) if unit["updated_by"] else "система",
+            "history": history}
+
+
 def boot_payload(uid: int) -> dict:
     u = get_user(uid)
     if u and u["verified"] == "blocked" and _block_expired(u["block_until"]):
@@ -638,6 +720,8 @@ def boot_payload(uid: int) -> dict:
         "dayload": dayload_map(),
         "busy626": busy626_map(),
     }
+    if adm:
+        out["equipmentUnits"] = unit_summary()
     with db() as c:  # каталог: добавленные позиции и блокировки категорий - всем (каталог у юзеров это учитывает)
         out["extraItems"] = [{"cat": r["cat"], "short": r["short"], "full": r["full"],
                               "total": r["total"], "level": r["level"] or None}
@@ -798,8 +882,41 @@ def auth(handler):
         if not tg_user:
             return jerr("Не удалось проверить подпись Telegram. Откройте приложение из Telegram.", 401)
         touch_user(tg_user)
-        return await handler(request, body, tg_user["id"])
+        response = await handler(request, body, tg_user["id"])
+        if request.path in MUTATING_API and response.status < 400:
+            await sse_broadcast()
+        return response
     return wrapped
+
+
+async def api_events(request: web.Request):
+    """Авторизованный SSE: только сообщает клиенту, что пора заново запросить /api/me."""
+    tg_user = check_init_data(request.query.get("initData", ""))
+    if not tg_user and DEV_USER_ID:
+        tg_user = {"id": DEV_USER_ID, "username": "dev", "first_name": "Dev"}
+    if not tg_user:
+        raise web.HTTPUnauthorized(text="Telegram initData required")
+    touch_user(tg_user)
+    response = web.StreamResponse(status=200, headers={
+        "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+        "Connection": "keep-alive", "X-Accel-Buffering": "no-cache",
+    })
+    await response.prepare(request)
+    queue = asyncio.Queue(maxsize=1)
+    SSE_CLIENTS.add(queue)
+    try:
+        await response.write(b"event: ready\ndata: connected\n\n")
+        while True:
+            try:
+                await asyncio.wait_for(queue.get(), timeout=20)
+                await response.write(b"event: change\ndata: refresh\n\n")
+            except asyncio.TimeoutError:
+                await response.write(b": keepalive\n\n")
+    except (ConnectionResetError, asyncio.CancelledError, RuntimeError):
+        pass
+    finally:
+        SSE_CLIENTS.discard(queue)
+    return response
 
 
 PHOTO_MAX = 5
@@ -971,10 +1088,51 @@ async def api_req_update(request, body, uid):
 @auth
 async def api_availability(request, body, uid):
     """Занятость позиций на диапазон дат (для каталога в мастере)."""
-    return web.json_response({
-        "ok": True,
-        "busy": busy_map(body.get("d1") or "", body.get("d2") or "", int(body.get("exclude") or 0)),
-    })
+    d1, d2, exclude = body.get("d1") or "", body.get("d2") or "", int(body.get("exclude") or 0)
+    busy = busy_map(d1, d2, exclude)
+    shorts = [pair[0] for pair in (body.get("items") or []) if isinstance(pair, list) and pair]
+    free_nums = {}
+    for short in shorts:
+        if short in CATALOG_META:
+            used = used_numbers(short, d1, d2, exclude)
+            free_nums[short] = [n for n in ready_numbers(short) if n not in used]
+    return web.json_response({"ok": True, "busy": busy, "freeNums": free_nums})
+
+
+@auth
+async def api_equipment_unit(request, body, uid):
+    if not is_admin(uid):
+        return jerr("Только для админов.", 403)
+    short = (body.get("short") or "").strip()
+    try:
+        num = int(body.get("num"))
+    except (TypeError, ValueError):
+        return jerr("Некорректный номер экземпляра.")
+    passport = unit_passport(short, num)
+    if not passport:
+        return jerr("Экземпляр не найден.", 404)
+    return web.json_response({"ok": True, "unit": passport})
+
+
+@auth
+async def api_equipment_unit_update(request, body, uid):
+    if not is_admin(uid):
+        return jerr("Только для админов.", 403)
+    short = (body.get("short") or "").strip()
+    try:
+        num = int(body.get("num"))
+    except (TypeError, ValueError):
+        return jerr("Некорректный номер экземпляра.")
+    state = (body.get("state") or "ready").strip()
+    if state not in ("ready", "repair", "retired"):
+        return jerr("Некорректное состояние экземпляра.")
+    if not unit_passport(short, num):
+        return jerr("Экземпляр не найден.", 404)
+    with db() as c:
+        c.execute("UPDATE equipment_units SET serial=?, note=?, state=?, updated_at=?, updated_by=? WHERE short=? AND num=?",
+                  (clean_text(body.get("serial"), 120), clean_text(body.get("note"), 1000),
+                   state, datetime.now(MSK).strftime("%Y-%m-%d %H:%M"), uid, short, num))
+    return web.json_response(boot_payload(uid))
 
 
 def _push_hist(table: str, rid: int, status: str, note: str = "") -> None:
@@ -1061,10 +1219,10 @@ async def api_req_action(request, body, uid):
         async with BOOKING_LOCK:
             err = check_availability(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid)
             if err: return jerr(err)
-            nums, err = assign_numbers(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid)
+            nums, err = assign_numbers(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid, preferred=body.get("nums"))
             if err: return jerr(err)
             with db() as c:
-                c.execute("UPDATE requests SET items=?, status='issued', taken_at=?, nums=? WHERE id=?", (json.dumps(items, ensure_ascii=False), now_str(), json.dumps(nums, ensure_ascii=False), rid))
+                c.execute("UPDATE requests SET items=?, status='issued', taken_at=?, nums=?, issued_by=? WHERE id=?", (json.dumps(items, ensure_ascii=False), now_str(), json.dumps(nums, ensure_ascii=False), uid, rid))
         note = "?????? ???????" if items != json.loads(r["items"]) else ""
         _push_hist("requests", rid, "issued", (note + (" ? " + comment if comment else "")).strip(" ?"))
         _log_action(uid, "requests", rid, "issue")
@@ -1083,7 +1241,7 @@ async def api_req_action(request, body, uid):
             await notify_seniors(f"? ?????????? ??????? ?? ?????? ID {rid}: '{comment}'. ????????? ? ??????????.")
         else:
             if r["escalated"] and not is_senior(uid): return jerr("???? ??????? ??????? ??????? ???????.")
-            with db() as c: c.execute("UPDATE requests SET status='closed', escalated=0, returned_at=COALESCE(returned_at, ?) WHERE id=?", (now_str(), rid))
+            with db() as c: c.execute("UPDATE requests SET status='closed', escalated=0, returned_at=COALESCE(returned_at, ?), returned_by=? WHERE id=?", (now_str(), uid, rid))
             _push_hist("requests", rid, "closed"); _log_action(uid, "requests", rid, "return_closed")
             await notify(owner, f"? ??????? ?? ?????? ID {rid} ??????, ?????? ???????. ???????!")
     else:
@@ -1385,6 +1543,7 @@ async def api_equip_add(request, body, uid):
         c.execute("INSERT INTO extra_items(cat, short, full, total, level, created) VALUES(?,?,?,?,?,?)",
                   (cat, short, full, total, level, now_str()))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1396,6 +1555,7 @@ async def api_equip_del(request, body, uid):
     with db() as c:
         c.execute("DELETE FROM extra_items WHERE short=?", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1410,6 +1570,7 @@ async def api_equip_remove(request, body, uid):
     with db() as c:
         c.execute("INSERT OR IGNORE INTO removed_items(short) VALUES(?)", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1421,6 +1582,7 @@ async def api_equip_restore(request, body, uid):
     with db() as c:
         c.execute("DELETE FROM removed_items WHERE short=?", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1861,103 +2023,119 @@ def weekly_backup() -> None:
 async def run_checks() -> None:
     now = datetime.now(MSK)
     ts = time.time()
+    data_changed = False
     with db() as c:
         rows = c.execute("SELECT * FROM requests WHERE status IN ('new','curator','approved','issued')").fetchall()
     for r in rows:
         rid = r["id"]
         notif = _get_notif("requests", r)
+        start_at = parse_dt(r["dfrom_iso"], r["tfrom"])
         deadline = parse_dt(r["dto_iso"], r["tto"])
         changed = False
 
         if r["status"] == "issued" and deadline:
             left = (deadline - now).total_seconds()
             if 0 < left <= 3600 and not notif.get("pre"):
-                await notify(r["user_id"], f"⏰ Через час - срок сдачи по заявке ID {rid} ({r['dto']}). Не опаздывайте!")
+                await notify(r["user_id"], f"Через час нужно вернуть оборудование по заявке ID {rid} — до {r['dto']}. Откройте Оборудыш, зайдите в карточку заявки и нажмите «Сдать оборудование», приложив фото комплекта.")
                 notif["pre"] = 1; changed = True
-            elif left <= 0 and ts - notif.get("over", 0) > 7200:  # просрочка: раз в 2 часа
-                await notify(r["user_id"], f"❗ Просрочка сдачи по заявке ID {rid} (срок был {r['dto']}). "
-                                           f"Верните оборудование как можно скорее.")
+            elif left <= 0 and ts - notif.get("over", 0) > 7200:
+                await notify(r["user_id"], f"Возврат по заявке ID {rid} просрочен: срок был {r['dto']}. Как можно скорее откройте карточку заявки в Оборудыше, нажмите «Сдать оборудование» и приложите фото комплекта.")
                 notif["over"] = ts; changed = True
 
-        # напоминания в общий канал о зависших (порог 6 ч, повтор раз в 6 ч)
+        if r["curator"] and r["status"] == "approved" and start_at:
+            left = (start_at - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("cur_issue_24"):
+                await notify(r["curator"], f"Заявка ID {rid}: выдача через сутки, {r['dfrom']}. Подготовьте комплект и откройте эту заявку в Оборудыше к времени выдачи.")
+                notif["cur_issue_24"] = 1; changed = True
+            if 0 < left <= 3600 and not notif.get("cur_issue_1"):
+                await notify(r["curator"], f"Заявка ID {rid}: через час нужно выдать оборудование, время {r['dfrom']}. Откройте заявку в Оборудыше и нажмите «Выдать оборудование».")
+                notif["cur_issue_1"] = 1; changed = True
+
+        if r["curator"] and r["status"] == "issued" and deadline:
+            left = (deadline - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("cur_return_24"):
+                await notify(r["curator"], f"Заявка ID {rid}: возврат через сутки, {r['dto']}. Откройте заявку в Оборудыше и будьте готовы принять комплект.")
+                notif["cur_return_24"] = 1; changed = True
+            if 0 < left <= 3600 and not notif.get("cur_return_1"):
+                await notify(r["curator"], f"Заявка ID {rid}: через час возврат, время {r['dto']}. Откройте заявку в Оборудыше; после сдачи проверьте комплект и нажмите «Принять возврат».")
+                notif["cur_return_1"] = 1; changed = True
+
         STALE = 6 * 3600
         if r["status"] == "new" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("nocur", 0) > STALE:
-            await notify(ADMIN_CHAT_ID, f"🕓 Заявка ID {rid} без куратора уже {int((ts - r['created_ts']) // 3600)} ч - возьмите в работу.")
+            await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} без куратора уже {int((ts - r['created_ts']) // 3600)} ч — возьмите в работу.")
             notif["nocur"] = ts; changed = True
         if r["status"] == "curator" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("noappr", 0) > STALE:
-            await notify(ADMIN_CHAT_ID, f"🕓 Заявка ID {rid} у куратора {_disp_user(r['curator'])} не согласована - проверьте.")
+            await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} у куратора {_disp_user(r['curator'])} не согласована — проверьте.")
             notif["noappr"] = ts; changed = True
 
         auto_cancel = None
         if r["status"] in ("new", "curator") and r["created_ts"] and ts - r["created_ts"] > 3 * 86400:
             auto_cancel = "не рассмотрена за 3 дня"
-        elif r["status"] == "approved" and deadline and now > deadline:
+        elif r["status"] == "approved" and start_at and now > start_at:
             auto_cancel = "срок получения истёк"
         if auto_cancel:
             with db() as c:
                 c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
             _push_hist("requests", rid, "canceled", "автоотмена: " + auto_cancel)
-            await notify(r["user_id"], f"⏳ Заявка ID {rid} отменена автоматически: {auto_cancel}. "
-                                       f"Оборудование освобождено - можно подать заново.")
+            await notify(r["user_id"], f"Заявка ID {rid} отменена автоматически: {auto_cancel}. Оборудование освобождено — можно подать заново.")
             with db() as c:
                 row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
             await send_or_update_card("requests", row)
+            data_changed = True
             continue
         if changed:
             _set_notif("requests", rid, notif)
+            data_changed = True
 
     with db() as c:
         rows = c.execute("SELECT * FROM b626 WHERE status='approved'").fetchall()
     for b in rows:
         notif = _get_notif("b626", b)
         bounds = _slot_bounds(b["slot"])
-        end_hm = bounds[1] if bounds else "23:59"
-        end = parse_dt(b["day"], end_hm)
-        if end and now > end and not notif.get("handover"):
-            await notify(b["user_id"], f"🏛 Бронь 626 №{b['id']} закончилась - не забудьте сдать аудиторию "
-                                       f"(фото в приложении).")
-            notif["handover"] = 1
+        end = parse_dt(b["day"], bounds[1] if bounds else "23:59")
+        changed = False
+        if end and now > end and not notif.get("handover_user"):
+            await notify(b["user_id"], f"Бронь 626 №{b['id']} завершилась. Откройте её карточку в Оборудыше, нажмите «Сдать аудиторию» и приложите фото убранного помещения.")
+            notif["handover_user"] = 1; changed = True
+        if end and now > end and b["curator"] and not notif.get("handover_curator"):
+            await notify(b["curator"], f"Бронь 626 №{b['id']} завершилась ({b['day']} {b['slot']}). Откройте бронь в Оборудыше и после фото пользователя примите аудиторию.")
+            notif["handover_curator"] = 1; changed = True
+        if changed:
             _set_notif("b626", b["id"], notif)
+            data_changed = True
 
-    # 626 без согласования >6 ч - напоминание в канал
     with db() as c:
         rows = c.execute("SELECT * FROM b626 WHERE status='new'").fetchall()
     for b in rows:
         notif = _get_notif("b626", b)
         if b["created_ts"] and ts - b["created_ts"] > 6 * 3600 and ts - notif.get("noappr", 0) > 6 * 3600:
-            await notify(ADMIN_CHAT_ID, f"🕓 Бронь 626 №{b['id']} ждёт согласования старшими ({b['day']} {b['slot']}).")
+            await notify(ADMIN_CHAT_ID, f"Бронь 626 №{b['id']} ждёт согласования старшими ({b['day']} {b['slot']}).")
             notif["noappr"] = ts
             _set_notif("b626", b["id"], notif)
+            data_changed = True
 
-    # ежедневная сводка в 22:00 (раз в день) + автобэкап раз в неделю (храним 3)
     today = now.strftime("%Y-%m-%d")
     if now.hour >= 22 and _meta_get("digest_date") != today:
-        _meta_set("digest_date", today)
-        await daily_digest()
+        _meta_set("digest_date", today); await daily_digest()
     last_bk = _meta_get("backup_date")
     stale_bk = True
     if last_bk:
-        try:
-            stale_bk = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(last_bk, "%Y-%m-%d")).days >= 7
-        except ValueError:
-            stale_bk = True
+        try: stale_bk = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(last_bk, "%Y-%m-%d")).days >= 7
+        except ValueError: stale_bk = True
     if stale_bk:
-        _meta_set("backup_date", today)
-        weekly_backup()
-
-    # месячная сводка в 1-го числа в 12:00
+        _meta_set("backup_date", today); weekly_backup()
     if now.day == 1 and now.hour >= 12 and _meta_get("monthly_digest") != today:
-        _meta_set("monthly_digest", today)
-        await monthly_digest()
+        _meta_set("monthly_digest", today); await monthly_digest()
 
-    # авто-снятие истёкших блокировок: пользователи и категории
     with db() as c:
         for row in c.execute("SELECT id, block_until FROM users WHERE verified='blocked' AND block_until<>''").fetchall():
             if _block_expired(row["block_until"]):
-                c.execute("UPDATE users SET verified='ok', block_reason='', block_until='' WHERE id=?", (row["id"],))
+                c.execute("UPDATE users SET verified='ok', block_reason='', block_until='' WHERE id=?", (row["id"],)); data_changed = True
         for row in c.execute("SELECT cat, until FROM cat_blocks WHERE until<>''").fetchall():
             if _cat_until_passed(row["until"]):
-                c.execute("DELETE FROM cat_blocks WHERE cat=?", (row["cat"],))
+                c.execute("DELETE FROM cat_blocks WHERE cat=?", (row["cat"],)); data_changed = True
+    if data_changed:
+        await sse_broadcast()
 
 
 async def scheduler_loop() -> None:
@@ -2141,6 +2319,7 @@ async def main() -> None:
     init_db()
     _migrate()
     load_catalog()
+    sync_equipment_units()
     with db() as c:
         EXTRA_ADMIN_IDS = {r["user_id"] for r in c.execute("SELECT user_id FROM extra_admins")}
     for bad in [x for x in (ADMIN_IDS | SENIOR_ADMIN_IDS) if x < 0]:
@@ -2155,6 +2334,8 @@ async def main() -> None:
     app.router.add_post("/api/request/update", api_req_update)
     app.router.add_post("/api/request/action", api_req_action)
     app.router.add_post("/api/availability", api_availability)
+    app.router.add_post("/api/equipment/unit", api_equipment_unit)
+    app.router.add_post("/api/equipment/unit/update", api_equipment_unit_update)
     app.router.add_post("/api/626/create", api_626_create)
     app.router.add_post("/api/626/action", api_626_action)
     app.router.add_post("/api/chat", api_chat)
@@ -2175,6 +2356,7 @@ async def main() -> None:
     app.router.add_post("/api/stats", api_stats)
     app.router.add_post("/api/resync", api_resync)
     app.router.add_post("/api/dev/tick", api_dev_tick)
+    app.router.add_get("/api/events", api_events)
     app.router.add_get("/{path:.*}", serve_static)
     runner = web.AppRunner(app)
     await runner.setup()
