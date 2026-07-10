@@ -1,0 +1,2278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Оборудыш — прототип Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="proto-bar">
+  <span class="tag">Прототип · роль</span>
+  <button class="proto-btn on" id="role-user"  onclick="setRole('user')">Пользователь</button>
+  <button class="proto-btn" id="role-admin" onclick="setRole('admin')">Админ</button>
+  <button class="proto-btn" id="role-senior" onclick="setRole('senior')">Старший админ</button>
+  <button class="proto-btn" id="themebtn" onclick="toggleTheme()">☀️ Тема</button>
+</div>
+
+<div class="phone dark" id="phone">
+  <div class="ph-status"><span>9:41</span><span class="r">▮▮▮ ᯤ 🔋</span></div>
+  <div class="tg-top">
+    <button class="tg-left" id="tgleft" onclick="tgLeft()">Закрыть</button>
+    <div class="tg-mid"><b>Оборудыш</b><span>mini app</span></div>
+    <button class="tg-dots" aria-hidden="true" tabindex="-1">⋯</button>
+  </div>
+  <div class="screen" id="screen"></div>
+  <div id="overlay"></div>
+</div>
+
+<script src="catalog.js"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script>
+"use strict";
+/* запрет масштабирования интерфейса: жест «щипок» и двойной тап */
+document.addEventListener("gesturestart", e=>e.preventDefault());
+document.addEventListener("gesturechange", e=>e.preventDefault());
+let _lastTouchEnd = 0;
+document.addEventListener("touchend", e=>{
+  const now = Date.now();
+  if(now - _lastTouchEnd <= 300) e.preventDefault();
+  _lastTouchEnd = now;
+}, {passive:false});
+document.addEventListener("touchmove", e=>{ if(e.touches && e.touches.length>1) e.preventDefault(); }, {passive:false});
+/* ================= TELEGRAM ================= */
+const TG = window.Telegram && window.Telegram.WebApp;
+const IN_TG = !!(TG && TG.platform && TG.platform !== "unknown");
+
+/* ================= API (бэкенд) =================
+   SRV = ответ бэкенда (роли, данные). null — демо-режим на моках (браузер / бэкенд недоступен). */
+let SRV = null;
+async function api(path, body){
+  const res = await fetch("/api/"+path, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(Object.assign({initData: TG ? TG.initData : ""}, body||{}))});
+  const d = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(d.error || ("HTTP "+res.status));
+  return d;
+}
+let _busy = false; // защита от двойных нажатий: пока запрос в полёте, повтор игнорим
+function srvDo(path, body, after){
+  if(_busy) return;
+  _busy = true;
+  api(path, body).then(d=>{ _busy=false; applyBoot(d); if(after) after(); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); });
+}
+/* экранирование строки для JS внутри HTML-атрибута onclick (short с кавычками/апострофами не ломает разметку) */
+function escJs(s){ return String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
+/* ARIA + клавиатура для псевдо-чекбоксов (.check-row): роль, состояние, Enter/Пробел = клик */
+function escHtml(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function escAttr(s){ return escHtml(s); }
+function cleanIncoming(v){
+  if(typeof v === "string") return v.replace(/[<>"']/g, "");
+  if(Array.isArray(v)) return v.map(cleanIncoming);
+  if(v && typeof v === "object"){ Object.keys(v).forEach(k=>{ v[k]=cleanIncoming(v[k]); }); }
+  return v;
+}
+function chkA(on){ return 'role="checkbox" aria-checked="'+(on?"true":"false")+'" tabindex="0" onkeydown="if(event.key===' + "' '" + '||event.key===\'Enter\'){event.preventDefault();this.click();}"'; }
+/* отметить переписку прочитанной (сброс бейджа непрочитанных) */
+function markRead(kind, id){
+  const arr = kind==="req" ? requests : bookings626;
+  const o = arr.find(x=>x.id===id); if(o) o.unread = 0;
+  if(SRV) api("read",{kind, id}).catch(()=>{});
+}
+function unreadBadge(o){ return (o && o.unread) ? '<span class="unread-b">'+o.unread+'</span>' : ""; }
+/* одно сообщение чата: подпись (кто пишет) + красный, если писал старший. invert — для панелей админа/старшего */
+function chatMsg(m, invert){
+  const who = invert ? (m.who==="me"?"them":"me") : m.who;
+  return '<div class="msg '+who+(m.senior?" senior":"")+'">'+(m.label?'<span class="who-lbl">'+m.label+'</span>':"")+m.text+'<span class="tm">'+m.tm+'</span></div>';
+}
+function applyBoot(d){
+  d = cleanIncoming(d || {});
+  SRV = d;
+  if(d.profile){
+    if(d.profile.name) profile.name = d.profile.name;
+    if(d.profile.short) profile.short = d.profile.short;
+    if(d.profile.tg) profile.tg = d.profile.tg;
+    profile.orgs = d.profile.orgs || [];
+    profile.deps = d.profile.deps || [];
+    if(d.profile.status) profile.status = d.profile.status;
+    if(d.profile.photo) profile.photo = d.profile.photo;
+  }
+  requests = d.requests || [];
+  bookings626 = d.bookings626 || [];
+  verifQueue = d.verifQueue || [];
+  if(d.users) usersDb = d.users;
+  if(d.busy626) BUSY626 = d.busy626;   // занятость 626 из boot (dayload — в SRV.dayload)
+  if(d.favSets) favSets = d.favSets;
+  rebuildCatalog(d.extraItems, d.catBlocks, d.removedItems);  // каталог = база + добавленное − скрытое + блокировки
+}
+/* куратор этой заявки — я? (в демо куратор помечен строкой "@you") */
+function myCur(x){ return SRV ? !!x.curMe : x.curator==="@you"; }
+function isoPlus(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+/* ================= ДАННЫЕ ================= */
+const TODAY_ISO = "2026-07-02";
+let MONTHS = [{y:2026,m:6},{y:2026,m:7},{y:2026,m:8}]; // демо: июль—сентябрь 2026; при SRV пересчитывается (initCalSRV)
+const MONTH_NAMES = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+const SLOTS = (()=>{const a=[];for(let h=9;h<=21;h++){a.push(String(h).padStart(2,"0")+":00");a.push(String(h).padStart(2,"0")+":30");}return a;})();
+const fmtIso = iso => iso.slice(8,10)+"."+iso.slice(5,7);
+
+/* SVG-иконки категорий (line-art, наследуют цвет) */
+const SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">';
+const ICONS = {
+ "Камеры": SVG_OPEN+'<path d="M3 8h3.2L8 6h5l1.8 2H21a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="13" cy="13" r="3.6"/><path d="M5 11h1.5"/></svg>',
+ "Объективы": SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><path d="M12 3.5l2.5 4.7M20.2 14l-5.2-.9M7.5 19.5l2.7-4.5"/></svg>',
+ "Свет": SVG_OPEN+'<rect x="6.5" y="3" width="11" height="9" rx="1.5"/><path d="M9 5.5l6 4M15 5.5l-6 4"/><path d="M12 12v4.5M7.5 21l4.5-4.5L16.5 21"/></svg>',
+ "Звук": SVG_OPEN+'<rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.8 11a6.2 6.2 0 0 0 12.4 0"/><path d="M12 17.5v4"/></svg>',
+ "Стабилизаторы": SVG_OPEN+'<rect x="12" y="3.5" width="7.5" height="5" rx="1"/><path d="M15.5 8.5v3H9V18"/><path d="M6.5 21h5"/><path d="M9 21v-3"/></svg>',
+ "Грипповка": SVG_OPEN+'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v3M12 3v3"/><path d="M8 9h8M8 13h8M8 17h8"/></svg>',
+ "Аккумы": SVG_OPEN+'<rect x="6.5" y="6" width="11" height="15" rx="2"/><path d="M10 6V3.5h4V6"/><path d="M12.8 10l-2.6 3.8h3.6L11.2 17.5"/></svg>',
+ "Штативы": SVG_OPEN+'<rect x="10" y="2.5" width="4" height="4" rx="1"/><path d="M12 6.5v8M12 9l-5.5 12M12 9l5.5 12"/><path d="M8 17.5h8"/></svg>',
+ "Хранение данных": SVG_OPEN+'<path d="M7 3h8l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9.5 3v4M12.5 3v4M15.5 3v3"/><path d="M9 15h6"/></svg>',
+ "_def": SVG_OPEN+'<rect x="3.5" y="8" width="17" height="12" rx="2"/><path d="M3.5 12h17M12 8V4.5M8 4.5h8"/></svg>'
+};
+function icon(cat, sz){ return '<span class="svg-ic" style="width:'+sz+'px;height:'+sz+'px">'+(ICONS[cat]||ICONS._def)+'</span>'; }
+/* Единый набор UI-иконок (line-art, как иконки категорий) — вместо эмодзи */
+const UICONS = {
+ box: SVG_OPEN+'<path d="M3.5 8.5 12 4l8.5 4.5v7L12 20l-8.5-4.5z"/><path d="M3.5 8.5 12 13l8.5-4.5M12 13v7"/></svg>',
+ studio: SVG_OPEN+'<path d="M4 20V9.5L12 4l8 5.5V20"/><path d="M4 20h16M9.5 20v-5h5v5"/></svg>',
+ book: SVG_OPEN+'<path d="M5 4h10.5A2.5 2.5 0 0 1 18 6.5V20H7a2 2 0 0 1-2-2V4z"/><path d="M18 16H7a2 2 0 0 0-2 2"/><path d="M8.5 8h6"/></svg>',
+ q: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="M9.4 9.4a2.7 2.7 0 1 1 4.1 2.3c-.9.6-1.5 1-1.5 2.1"/><path d="M12 17v.1"/></svg>',
+ wrench: SVG_OPEN+'<path d="M14.7 6.3a4 4 0 0 0-5.2 5L4 16.8V20h3.2l5.5-5.5a4 4 0 0 0 5-5.2l-2.9 2.9-2.5-.6-.6-2.5z"/></svg>',
+ star: SVG_OPEN+'<path d="m12 4 2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.4 7.2 18.9l.9-5.4-3.9-3.8 5.4-.8z"/></svg>',
+ users: SVG_OPEN+'<circle cx="9" cy="8.5" r="3.5"/><path d="M3.5 19.5c.5-3 2.8-4.5 5.5-4.5s5 1.5 5.5 4.5"/><path d="M15.5 5.5a3.5 3.5 0 0 1 0 6M17 15.2c1.9.6 3.2 1.9 3.5 4.3"/></svg>',
+ ban: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="M6.2 6.2l11.6 11.6"/></svg>',
+ plus: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="M12 8v8M8 12h8"/></svg>',
+ grip: SVG_OPEN+'<path d="M21 7V3H3v4m0 4h18v4H3V7"/><rect x="3" y="11" width="18" height="10" rx="2"/></svg>',
+ lock: SVG_OPEN+'<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
+ mega: SVG_OPEN+'<path d="M4 10v4l3 .5V9.5z"/><path d="M7 9.5 19 5v14l-12-4.5z"/><path d="M9.5 15.5V18a1.5 1.5 0 0 0 3 0"/></svg>',
+ chart: SVG_OPEN+'<path d="M4 4v16h16"/><path d="M8 16v-5M12 16V8M16 16v-8"/></svg>',
+ done: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-5"/></svg>',
+ doc: SVG_OPEN+'<path d="M6 4h9.5L19 7.5l-2 2.5M6 4v16h14V9.5"/><path d="M9 9.5V4.5"/></svg>',
+ refresh: SVG_OPEN+'<path d="M17 12a5 5 0 1 0-10 0"/><path d="M7 12h5"/><path d="M7 9l-3 3 3 3"/></svg>',
+};
+function uic(name, sz){ return '<span class="svg-ic" style="width:'+(sz||20)+'px;height:'+(sz||20)+'px">'+(UICONS[name]||"")+'</span>'; }
+/* фото оборудования: локальный файл prototype/img/<Короткое имя>.avif (точно как в каталоге).
+   Нет файла — остаётся SVG-иконка категории. */
+function lockOf(s){ let n=0; for(const c of s) n=(n*31+c.charCodeAt(0))%997; return n; }
+function thumb(short, sz){
+  return '<div class="eq-thumb" style="width:'+(sz||46)+'px;height:'+(sz||46)+'px">'+icon(catOf(short), Math.round((sz||46)*.48))+
+    '<img loading="lazy" alt="" src="img/'+encodeURIComponent(short)+'.avif" onerror="this.style.display=\'none\'"></div>';
+}
+/* Каталог: если рядом лежит catalog.js (генерится парсером из Google-таблицы),
+   берём его; иначе — встроенный демо-набор. Формат: [{cat, blocked?, items:[{short, full, total, level?}]}] */
+const CATALOG_BASE = window.OBORUDKA_CATALOG || [
+ {cat:"Камеры", items:[
+   {short:"Сони а7м4", full:"Фотоаппарат Sony Alpha ILCE-7M4 Body", total:1},
+   {short:"R8", full:"Фотоаппарат Canon EOS R8 body", total:2},
+   {short:"R6m2", full:"Фотоаппарат Canon EOS R6 mark II body", total:1, level:"акт"},
+   {short:"Гаш 6", full:"Беззеркальный фотоаппарат Panasonic Lumix GH6 body", total:2},
+   {short:"ГоПро 12", full:"GoPro HERO 12 Black", total:1},
+ ]},
+ {cat:"Объективы", items:[
+   {short:"24-105 RF f4-7.1", full:"Объектив Canon RF 24-105 f4-7.1 IS STM", total:1},
+   {short:"50mm EF f1.8", full:"Объектив Canon EF 50mm F1.8 STM", total:1},
+   {short:"70-200 EF f2.8", full:"Объектив Tamron SP AF 70-200mm f/2.8 G2", total:3},
+   {short:"17-70mm E f2.8", full:"Tamron 17-70mm F/2.8 Di III-A", total:1, level:"акт"},
+   {short:"12-40 MFT f2.8", full:"Объектив Olympus 12-40mm F2.8", total:1},
+ ]},
+ {cat:"Свет", items:[
+   {short:"Амаран 300", full:"Осветитель Aputure Amaran 300c", total:2},
+   {short:"Палки Амаран (2шт)", full:"Комплект Aputure Amaran PT4c Production Kit", total:4},
+   {short:"Плашка янгноу", full:"Осветитель YongNuo YN120 RGB", total:2},
+   {short:"Плашки 600ватт", full:"Aputure Nova P600C Kit + софтбокс", total:3, level:"глава"},
+ ]},
+ {cat:"Звук", items:[
+   {short:"Радиопетли RODE", full:"Радиосистема RODE Wireless GO II", total:1},
+   {short:"Пушка RODE", full:"Пушка RODE VideoMic Rycote", total:3},
+   {short:"рекордер Зум", full:"Рекордер Zoom H5", total:1},
+   {short:"холлиленд ларки макс", full:"Hollyland Lark Max Duo", total:1},
+ ]},
+ {cat:"Стабилизаторы", items:[
+   {short:"Ronin RS 3", full:"Стабилизатор DJI Ronin RS3 Combo", total:1},
+   {short:"Ronin 3 Pro Combo", full:"Стабилизатор DJI Ronin RS 3 Pro Combo", total:2},
+   {short:"dji osmo pocket", full:"Экшн-камера DJI Osmo Pocket 3", total:1},
+ ]},
+ {cat:"Аккумы", items:[
+   {short:"Аккум LP-E6", full:"Canon LP-E6", total:8},
+   {short:"NPF 970 черные", full:"Аккумулятор NP-F970", total:6},
+   {short:"V-mount", full:"ZGCine ZG-X160 V-Mount 100W", total:6},
+ ]},
+ {cat:"Штативы", items:[
+   {short:"Штатив Sirui sh15", full:"Штатив Sirui SH15", total:2},
+   {short:"Журавль на колёсах", full:"Kupo 346M стойка-журавль 183–380 см", total:4},
+   {short:"Систенд Avenger", full:"Avenger A2033LKIT C-Stand Kit", total:6},
+ ]},
+ {cat:"Хранение данных", blocked:{until:"20.12.2026", term:"полгода"}, items:[
+   {short:"Карта памяти 128 GB v90", full:"Kingston 128GB v90", total:4, level:"акт"},
+   {short:"T7 2ТБ бежевый", full:"Samsung SSD 2Tb T7 Shield", total:2},
+ ]},
+];
+let CATALOG = CATALOG_BASE;
+/* SRV: пересобрать каталог из базы + добавленных позиций и блокировок категорий (идемпотентно, на каждый boot) */
+function rebuildCatalog(extraItems, catBlocks, removedItems){
+  const base = JSON.parse(JSON.stringify(CATALOG_BASE));
+  const removed = new Set(removedItems||[]);
+  (extraItems||[]).forEach(it=>{
+    let cat = base.find(c=>c.cat===it.cat);
+    if(!cat){ cat={cat:it.cat, items:[]}; base.push(cat); }
+    if(!cat.items.some(x=>x.short===it.short))
+      cat.items.push({short:it.short, full:it.full||it.short, total:it.total||1, level:it.level||null});
+  });
+  const blocks = catBlocks||{};
+  base.forEach(c=>{
+    c.items = c.items.filter(it=>!removed.has(it.short));   // скрытые старшим — вон из каталога
+    if(blocks[c.cat]) c.blocked=blocks[c.cat]; else delete c.blocked;
+  });
+  CATALOG = base.filter(c=>c.items.length || c.blocked);
+}
+function catOf(short){ for(const c of CATALOG) if(c.items.some(i=>i.short===short)) return c.cat; return null; }
+
+const ST = {
+  new:{l:"Новая",c:"var(--info)"}, curator:{l:"Назначен куратор",c:"var(--teal)"},
+  approved:{l:"Согласована",c:"var(--warn)"}, issued:{l:"Выдана",c:"var(--ok)"},
+  ret:{l:"Возврат на проверке",c:"var(--violet)"}, closed:{l:"Закрыта",c:"var(--hint)"},
+  rejected:{l:"Отклонена",c:"var(--destructive)"}, canceled:{l:"Отменена",c:"var(--destructive)"},
+};
+const FLOW = ["new","curator","approved","issued","ret","closed"];
+const ST626 = {
+  new:{l:"Ждёт согласования",c:"var(--info)"}, approved:{l:"Согласована",c:"var(--warn)"},
+  ret:{l:"Сдача на проверке",c:"var(--violet)"}, closed:{l:"Завершена",c:"var(--hint)"},
+  rejected:{l:"Отклонена",c:"var(--destructive)"}, canceled:{l:"Отменена",c:"var(--destructive)"},
+};
+const FLOW626 = ["new","approved","ret","closed"];
+
+let requests = [
+ {id:266, me:true, author:"Птицын Фрукт Медийщикович", dep:"Видео",
+  items:[["R8",1],["50mm EF f1.8",1],["Аккум LP-E6",2]],
+  event:"Промо СтудФеста", from:"04.07, 10:00", to:"05.07, 20:00",
+  status:"curator", curator:"@Kyuller",
+  history:[["new","01.07, 18:12"],["curator","01.07, 19:40"]],
+  chat:[{who:"them",text:"Привет! Взял твою заявку. Зарядки к LP-E6 добавить?",tm:"19:41"},
+        {who:"me",text:"Да, давай одну двойную 🙏",tm:"19:44"}]},
+ {id:263, me:true, author:"Птицын Фрукт Медийщикович", dep:"Фото",
+  items:[["Амаран 300",1],["Палки Амаран (2шт)",1]],
+  event:"Съёмка в 626 — подкаст", from:"01.07, 12:00", to:"02.07, 19:00",
+  status:"issued", curator:"@Vladosiklot", dueSoon:true, takenAt:"01.07, 12:05",
+  history:[["new","29.06, 14:02"],["curator","29.06, 15:20"],["approved","29.06, 16:00"],["issued","01.07, 12:05"]], chat:[]},
+ {id:259, me:true, author:"Птицын Фрукт Медийщикович", dep:"Видео",
+  items:[["Ronin RS 3",1],["Сони а7м4",1]],
+  event:"Репортаж — день открытых дверей", from:"25.06, 09:00", to:"26.06, 21:00",
+  status:"closed", curator:"@Kyuller", takenAt:"25.06, 09:04", returnedAt:"26.06, 20:41",
+  history:[["new","23.06, 10:11"],["curator","23.06, 11:02"],["approved","23.06, 12:30"],["issued","25.06, 09:04"],["ret","26.06, 20:41"],["closed","26.06, 21:15"]], chat:[]},
+ {id:271, me:false, author:"Смирнова Алиса Викторовна", dep:"СММ",
+  items:[["ГоПро 12",1],["NPF 970 черные",2]],
+  event:"Рилсы для приёмной кампании", from:"03.07, 12:00", to:"03.07, 21:00",
+  status:"new", curator:null, history:[["new","02.07, 09:15"]], chat:[]},
+ {id:272, me:false, author:"Мустафин Ринат Айдарович", dep:"Прод",
+  items:[["Гаш 6",1],["12-40 MFT f2.8",1],["Радиопетли RODE",1]],
+  event:"Интервью с ректором", from:"06.07, 09:00", to:"06.07, 22:00",
+  status:"new", curator:null, history:[["new","02.07, 11:38"]], chat:[]},
+];
+let bookings626 = [
+ {id:31, me:true, author:"Птицын Фрукт Медийщикович", when:"2026-07-05", slot:"14:00–17:00",
+  goal:"Запись подкаста «Бауманка живая»", needs:["хромакей"], status:"approved", curator:"@Kyuller",
+  history:[["new","30.06, 17:20"],["approved","01.07, 10:00"]],
+  chat:[{who:"them",text:"Бронь согласована. Ключи у охраны, скажете что от Media Tech.",tm:"10:02"}]},
+ {id:29, me:true, author:"Птицын Фрукт Медийщикович", when:"2026-07-05", slot:"18:00–19:30",
+  goal:"Фотосъёмка портретов актива для афиш СтудФеста", needs:["чёрная ткань","помощь Media Tech"], status:"new", curator:null,
+  history:[["new","02.07, 09:15"]], chat:[]},
+ {id:30, me:false, author:"Смирнова Алиса Викторовна", when:"2026-07-08", slot:"12:00–15:00",
+  goal:"Съёмка интервью для СММ", needs:["циклорама"], status:"new", curator:null,
+  history:[["new","02.07, 12:10"]], chat:[]},
+];
+let verifQueue = [
+ {id:9012, name:"Ковалёв Даниил Сергеевич", org:"СО — Студсовет СМ", role:"глава медиа", tg:"@dkovalev"},
+];
+let usersDb = [
+ {name:"Птицын Фрукт Медийщикович", org:"Media BMSTU", dep:"Видео, Фото", role:"активист", tg:"@misterfrukt", ok:true},
+ {name:"Смирнова Алиса Викторовна", org:"Media BMSTU", dep:"СММ", role:"стажёр", tg:"@asmirnova", ok:true},
+ {name:"Мустафин Ринат Айдарович", org:"Media BMSTU", dep:"Прод", role:"активист", tg:"@rmust", ok:true},
+ {name:"Ковалёв Даниил Сергеевич", org:"СО — Студсовет СМ", dep:"—", role:"СО/ССФ", tg:"@dkovalev", ok:false},
+];
+/* загруженность дня — детерминированный мок */
+function loadOf(iso){
+  if(SRV){ return (SRV.dayload && SRV.dayload[iso]) || 0; }
+  let s=0; for(const ch of iso) s+=ch.charCodeAt(0); return [0,1,1,2,3,4,5,7,8][(s*7)%9];
+}
+let BUSY626 = {"2026-07-05":["14:00","14:30","15:00","15:30","16:00","16:30"],"2026-07-03":["18:00","18:30","19:00"],"2026-07-08":["12:00","12:30","13:00","13:30","14:00","14:30"]};
+/* SRV: календарь от реальной даты — текущий месяц + 2 следующих, с корректным переходом через Новый год */
+function initCalSRV(){
+  const now = new Date();
+  const y0 = now.getFullYear(), m0 = now.getMonth();
+  MONTHS = [];
+  for(let k=0;k<3;k++){ MONTHS.push({y: y0 + Math.floor((m0+k)/12), m: (m0+k)%12}); }
+}
+
+/* ================= СОСТОЯНИЕ ================= */
+let role = "user";
+let profile = {name:"Птицын Фрукт Медийщикович", short:"Фрукт Птицын", tg:"@misterfrukt", orgs:["Media BMSTU"], deps:["Видео","Фото"], status:"активист"};
+let stack = [];
+let wiz = null, wiz626 = null, issueCheck = null, adminTab = "queue", userQ = "";
+let favSets = []; // избранные наборы оборудки (свои)
+const $ = id => document.getElementById(id);
+
+/* ================= НАВИГАЦИЯ ================= */
+function navTo(name, params){ stack.push({name, params: params||{}}); render(); }
+function goBack(){ if(stack.length>1){ stack.pop(); render(); } }
+function resetTo(name, params){ stack = [{name, params: params||{}}]; render(); }
+function cur(){ return stack[stack.length-1]; }
+function tgLeft(){
+  const s = cur();
+  if(s.name==="wizard" && wiz.step>1){ wiz.step--; render(); return; }
+  if(stack.length>1){ goBack(); return; }
+  toast("Здесь Mini App свернётся в чат с ботом");
+}
+function setRole(r){
+  if(SRV && r!=="user" && !(r==="senior" ? SRV.isSenior : SRV.isAdmin)){ toast("Доступно только админам"); return; }
+  role = r;
+  ["user","admin","senior"].forEach(x=>{ const b=$("role-"+x); if(b) b.classList.toggle("on", x===r); });
+  resetTo(r==="user" ? "home" : r==="admin" ? "adminHub" : "seniorHub");
+}
+function toggleTheme(){
+  const ph = $("phone");
+  ph.classList.toggle("dark");
+  const tb = $("themebtn"); if(tb) tb.textContent = ph.classList.contains("dark") ? "☀️ Тема" : "🌙 Тема";
+}
+/* тумблер темы в приложении: переключает и запоминает выбор (перебивает тему Telegram) */
+function userToggleTheme(){
+  toggleTheme();
+  try{ localStorage.setItem("obor_theme", $("phone").classList.contains("dark") ? "dark" : "light"); }catch(e){}
+  render();
+}
+function savedTheme(){ try{ return localStorage.getItem("obor_theme"); }catch(e){ return null; } }
+function toast(txt, ms){
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = txt;
+  t.setAttribute("role","status"); t.setAttribute("aria-live","polite");
+  t.onclick = ()=>t.remove(); // тап по тосту закрывает раньше таймера
+  $("phone").appendChild(t);
+  setTimeout(()=>t.remove(), ms||2600);
+}
+/* Escape закрывает шторку/модалку (обе живут в #overlay), Tab внутри неё не убегает наружу */
+document.addEventListener("keydown", e=>{
+  const ov = $("overlay");
+  if(!ov || !ov.firstElementChild) return;
+  if(e.key==="Escape"){ ov.innerHTML=""; render(); return; }
+  if(e.key==="Tab"){
+    const f = ov.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+    if(!f.length) return;
+    const first = f[0], last = f[f.length-1];
+    if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+  }
+});
+
+/* ================= РЕНДЕР ================= */
+const SCREENS = {};
+let _scrKey = "";
+function render(){
+  const s = cur();
+  const out = SCREENS[s.name](s.params);
+  const isNested = stack.length>1 || (s.name==="wizard" && wiz && wiz.step>1);
+  $("tgleft").textContent = isNested ? "‹ Назад" : "Закрыть";
+  if(IN_TG){ if(isNested) TG.BackButton.show(); else TG.BackButton.hide(); }
+  /* тот же экран/шаг — сохраняем позицию скролла (выбор даты/слотов/чекбоксы не прыгают) */
+  const scr = $("screen");
+  const key = s.name+"|"+stack.length+"|"+(s.name==="wizard"&&wiz?wiz.step:"");
+  const same = key===_scrKey;
+  const keep = same ? scr.scrollTop : 0;
+  /* введённый текст переживает перерисовку (чат, комментарии, поиск) */
+  const inputs = {};
+  if(same) scr.querySelectorAll("input[id],textarea[id]").forEach(el=>{
+    inputs[el.id] = {v:el.value, f:document.activeElement===el, s:el.selectionStart};
+  });
+  scr.innerHTML = '<div class="screen-inner'+(same?" nofade":"")+'">'+out.body+'</div>' + (out.mainbtn||"");
+  for(const id in inputs){
+    const el = $(id);
+    if(el && !el.value){ el.value = inputs[id].v;
+      if(inputs[id].f){ el.focus(); try{ el.setSelectionRange(inputs[id].s, inputs[id].s); }catch(e){} } }
+  }
+  scr.scrollTop = keep;
+  _scrKey = key;
+  if(out.after) out.after();
+}
+function mainBtn(label, fn, cls, disabled){
+  return '<div class="mainbtn-wrap"><button class="mainbtn '+(cls||"")+'" onclick="'+fn+'" '+(disabled?"disabled":"")+'>'+label+'</button></div>';
+}
+function statusPill(st, dict){
+  const s = (dict||ST)[st];
+  return '<span class="pill" style="background:color-mix(in srgb,'+s.c+' 14%,transparent);color:'+s.c+'"><span class="dot" style="background:'+s.c+'"></span>'+s.l+'</span>';
+}
+function itemsTitle(items){
+  return items[0][0] + (items.length>1 ? " +"+(items.length-1) : "");
+}
+
+/* ================= ОНБОРДИНГ (первый экран) ================= */
+SCREENS.rules = (p) => ({
+  body:`
+   <div class="card rules">
+    <h1 class="big">📘 Регламент</h1>
+    ${p.readonly?"":'<p class="sub" style="margin-bottom:12px">Шаг 1 из 2 — прочитайте и согласитесь. Перед регистрацией загляните в методичку ниже.</p>'}
+    <p style="margin-top:10px"><b>●</b> Заявки оформляются только через приложение; профиль должен быть корректным (ФИО полностью, организация/отдел).</p>
+    <p><b>●</b> Оборудование — заявка минимум за 2 дня до получения. Карты памяти и SSD — отдельной заявкой.</p>
+    <p><b>●</b> Получение в воскресенье невозможно, возврат в воскресенье — тоже. Возврат в субботу после 18:00 возможен, но команда может отказать в приёме.</p>
+    <p><b>●</b> При сдаче оборудования и студии 626 обязательны фотографии.</p>
+    <p><b>●</b> Возвращайте технику в том же виде: «сломал — починил, потерял — купил». Сломалось — сразу сообщайте.</p>
+    <p><b>●</b> Команда может отменить заявку при некорректном заполнении; за нарушения — временная блокировка. Студию 626 согласуют старшие админы.</p>
+   </div>
+   <div class="list-item" style="border-radius:14px" onclick="navTo('manual')"><div class="emoji-badge">${uic("book",19)}</div><div class="grow">Методичка пользователя<div class="sub">как всё устроено</div></div><span class="chev">›</span></div>`,
+  mainbtn: p.readonly ? "" : mainBtn("Согласен с регламентом","navTo('regProfile')")
+});
+SCREENS.manual = () => ({
+  body:`
+   <h1 class="big">📘 Методичка</h1>
+   <p class="sub" style="margin-bottom:8px">Коротко — как пользоваться Оборудышем.</p>
+   <div class="card rules">
+    <div class="sec-label" style="margin-top:0">⭐ Важное</div>
+    <p><b>Регистрация:</b> ФИО полностью (три слова), организация(и), для Media BMSTU — отдел, и твоя роль. Участников Media BMSTU и студсоветов бот сверяет со списками; кого нет — проверит старший вручную. Отклонили — увидишь причину и подашь заново.</p>
+    <p><b>Взять оборудование:</b> даты → время (09:00–21:30, шаг 30 мин) → каталог → корзина → мероприятие → отправить.</p>
+    <p><b>Правила:</b> заявка за 2 дня; карты/SSD отдельной заявкой; в воскресенье не берут и не возвращают; возврат сб после 18:00 — по согласию команды.</p>
+    <p><b>Сдача:</b> обязательно приложи фото комплекта (можно несколько, минимум одно).</p>
+   </div>
+   <div class="card rules">
+    <div class="sec-label" style="margin-top:0">📖 Подробно</div>
+    <p><b>Роли:</b> СО/ССФ, стажёр, активист, production. Часть техники — только активистам/production (или «ответственный за медиа»), отдельные позиции — только старшим.</p>
+    <p><b>Статусы:</b> Новая → Назначен куратор → Согласована → Выдана → Возврат на проверке → Закрыта. До согласования заявку можно редактировать и отменять.</p>
+    <p><b>Повтор и наборы:</b> завершённую заявку можно повторить одной кнопкой; частые комплекты — сохранить в «Мои наборы».</p>
+    <p><b>Переписка:</b> в карточке заявки есть чат с куратором, у сообщений видна подпись (кто пишет); сообщения старшего — красным. Непрочитанные подсвечиваются счётчиком.</p>
+    <p><b>Студия 626:</b> отдельная заявка, согласуют старшие, ведёт куратор; при сдаче — фото убранной аудитории.</p>
+    <p><b>Вопросы:</b> раздел «Задать вопрос» — свободный текст, можно анонимно.</p>
+    <p><b>Блокировки:</b> за нарушения возможна временная блокировка (снимается по сроку) или бессрочная.</p>
+   </div>`,
+  mainbtn: mainBtn("Понятно","goBack()","secondary")
+});
+/* СО = ССФ = ССО = ССК — одна роль «СО/ССФ», конкретная организация выбирается из списка */
+const SO_ORGS = ["Студсовет СМ","Студсовет ФН","Студсовет РК","Студсовет ИУ","Студсовет Э","Студсовет МТ","Студсовет НУК РЛМ","Студсовет ИБМ","Студсовет СГН","Студсовет МФ","ССК ЮР","ССФ АК","СС МТКП","ССО 10","ССО 11","BAS","BBC","BEST","ISCRA","Unial","БКП","БФЛ","КвизON","Кафедра юмора","Волонтерский центр","Киношки","Литературный квартирник","Art Factory BMSTU","Центр карьеры","Green BMSTU","Вектор","Координаторы","Старостат","Терновник","Другое"];
+let reg = null;
+function initReg(edit){
+  reg = edit
+    ? {name:profile.name, mb:profile.orgs.includes("Media BMSTU"), so:profile.orgs.some(o=>o!=="Media BMSTU"), sorgs:new Set(), other:"", deps:new Set(profile.deps), role:profile.status||""}
+    : {name:"", mb:false, so:false, sorgs:new Set(), other:"", deps:new Set(), role:""};
+  if(edit) for(const o of profile.orgs){
+    if(o==="Media BMSTU") continue;
+    if(SO_ORGS.includes(o)) reg.sorgs.add(o);
+    else { reg.sorgs.add("Другое"); reg.other = o; }
+  }
+}
+function toggleSorg(o){ reg.sorgs.has(o) ? reg.sorgs.delete(o) : reg.sorgs.add(o); render(); }
+/* регистрация валидна: ФИО обязательно; MB — минимум один отдел; СО/ССФ — минимум одна организация */
+function regValid(){
+  if(reg.name.trim().split(/\s+/).filter(Boolean).length < 3) return false; // ФИО — 3 слова
+  if(!(reg.mb || reg.so)) return false;
+  if(reg.mb && !reg.deps.size) return false;
+  if(reg.so && (!reg.sorgs.size || (reg.sorgs.has("Другое") && !reg.other.trim()))) return false;
+  return true;
+}
+function regNameInput(el){
+  reg.name = el.value;
+  const b = document.querySelector(".mainbtn");
+  if(b) b.disabled = !regValid();
+}
+SCREENS.regProfile = (p) => {
+  const edit = !!p.edit;
+  if(!reg || reg._edit!==edit){ initReg(edit); reg._edit = edit; }
+  return {
+  body:`
+   <h1 class="big">${edit?"Данные аккаунта":"Профиль"}</h1>
+   <p class="sub" style="margin-bottom:14px">${edit?"Измените данные и сохраните.":"Шаг 2 из 2. Telegram уже передал ваш ID, ник и аватарку — пароли не нужны."}</p>
+   <div class="sec-label">ФИО (обязательно)</div>
+   <input type="text" id="reg-name" maxlength="80" placeholder="Оборудов Запарыш Медийщикович" value="${escAttr(reg.name)}" oninput="regNameInput(this)">
+   <p class="sub" style="padding:4px 4px 0">Полностью: фамилия, имя и отчество (три слова).</p>
+   <div class="sec-label">Откуда вы</div>
+   <div>
+     <div class="check-row ${reg.mb?"on":""}" ${chkA(reg.mb)} onclick="reg.mb=!reg.mb;render()"><span class="checkbox">✓</span><span class="grow">Media BMSTU</span></div>
+     <div class="check-row ${reg.so?"on":""}" ${chkA(reg.so)} onclick="reg.so=!reg.so;render()"><span class="checkbox">✓</span><span class="grow">СО / ССФ / ССО / ССК<div class="sub">организации студсовета — выберите свою ниже</div></span></div>
+   </div>
+   ${reg.mb?`
+   <div class="sec-label">Отделы (Media BMSTU) — минимум один</div>
+   <div>
+     ${["Фото","Видео","Дизайн","СММ","Прод","VFX"].map(d=>
+      '<div class="check-row'+(reg.deps.has(d)?" on":"")+'" '+chkA(reg.deps.has(d))+' onclick="reg.deps.has(\''+d+'\')?reg.deps.delete(\''+d+'\'):reg.deps.add(\''+d+'\');render()"><span class="checkbox">✓</span><span class="grow">'+d+'</span></div>').join("")}
+   </div>`:""}
+   ${reg.so?`
+   <div class="sec-label">Организация (СО/ССФ) — можно несколько</div>
+   <div>
+     ${SO_ORGS.map(o=>'<div class="check-row '+(reg.sorgs.has(o)?"on":"")+'" '+chkA(reg.sorgs.has(o))+' onclick="toggleSorg(\''+o+'\')"><span class="checkbox">✓</span><span class="grow">'+o+'</span></div>').join("")}
+   </div>
+   ${reg.sorgs.has("Другое")?'<input type="text" maxlength="100" style="margin-top:8px" placeholder="Название организации" value="'+escAttr(reg.other)+'" oninput="reg.other=this.value;const b=document.querySelector(\'.mainbtn\');if(b)b.disabled=!regValid()">':""}
+   <p class="sub" style="padding:6px 4px 0">Отдел для СО/ССФ не выбирается.</p>`:""}
+   ${reg.mb?`
+   <div class="sec-label">Твоя роль</div>
+   <div class="row" style="gap:6px;flex-wrap:wrap">
+     ${["активист","стажёр","production"].map(rl=>{const def=reg.role||"активист";return '<button class="chip-btn '+(def===rl?"on":"")+'" onclick="reg.role=\''+rl+'\';render()">'+rl+'</button>';}).join("")}
+   </div>
+   <p class="sub" style="padding:6px 4px 0">Старший админ подтвердит роль при верификации.</p>`:""}`,
+  mainbtn: mainBtn(edit?"Сохранить":"Завершить регистрацию", edit?"saveProfile()":"finishReg()", "", !regValid())
+}};
+function regPayload(){
+  const name = reg.name.trim();
+  const orgs = [];
+  if(reg.mb) orgs.push("Media BMSTU");
+  if(reg.so) for(const o of reg.sorgs) orgs.push(o==="Другое" ? reg.other.trim() : o);
+  return {name, orgs, deps: reg.mb ? [...reg.deps] : [], role: reg.mb ? (reg.role||"активист") : ""};
+}
+function finishReg(){
+  if(SRV){
+    const p = regPayload();
+    if(!p.name){ toast("Укажите ФИО"); return; }
+    srvDo("register", p, ()=>{
+      reg = null;
+      if(SRV.verified==="pending"){ resetTo("regWait"); }
+      else { resetTo("home"); toast("✅ Верификация пройдена — добро пожаловать!"); }
+    });
+    return;
+  }
+  try{ localStorage.setItem("obor_agreed","1"); }catch(e){}
+  if(reg.so){ navTo("regWait"); reg=null; return; }
+  reg = null;
+  resetTo("home");
+  toast("✅ Нашли вас в таблице участников Media BMSTU — верификация пройдена автоматически");
+}
+function saveProfile(){
+  if(SRV){
+    const p = regPayload();
+    if(!p.name){ toast("Укажите ФИО"); return; }
+    srvDo("register", p, ()=>{ reg = null; goBack(); toast("Данные аккаунта обновлены"); });
+    return;
+  }
+  const p = regPayload();
+  if(p.name) profile.name = p.name;
+  profile.deps = p.deps;
+  profile.orgs = p.orgs;
+  reg = null;
+  goBack(); toast("Данные аккаунта обновлены");
+}
+SCREENS.regWait = () => ({
+  body:`
+   <div class="card empty-state">
+     <div class="ico">⏳</div>
+     <h1 class="big">Ожидает проверки</h1>
+     <p class="sub" style="margin-top:8px">Вашу заявку рассмотрят старшие админы (не нашли вас в списке участников или указана организация СО/ССФ). Как только решат, бот пришлёт сообщение.</p>
+   </div>
+   ${SRV?"":'<p class="sub" style="text-align:center">Для демо: переключите роль на «Старший админ» — заявка в очереди верификации.</p>'}`,
+  mainbtn: SRV ? mainBtn("Проверить статус","bootApp()","secondary") : mainBtn("На главный (демо)","resetTo('home')","secondary")
+});
+SCREENS.boot = () => ({ body:'<div class="card empty-state"><div class="ico pulse">📦</div><h1 class="big">Оборудыш</h1><p class="sub" style="margin-top:6px">Загрузка…</p></div>' });
+SCREENS.blocked = () => ({
+  body:`<div class="card empty-state">
+    <div class="ico">🚫</div>
+    <h1 class="big">Доступ закрыт</h1>
+    <p class="sub" style="margin-top:8px">Вы в чёрном списке оборудыша. Для уточнения деталей — @Kyuller</p>
+    ${SRV&&SRV.blockReason?'<p class="sub" style="margin-top:6px">Причина: '+SRV.blockReason+'</p>':""}
+  </div>`
+});
+SCREENS.rejected = () => ({
+  body:`<div class="card empty-state">
+    <div class="ico">✋</div>
+    <h1 class="big">Верификация отклонена</h1>
+    ${SRV&&SRV.blockReason?'<p class="sub" style="margin-top:8px">Причина: '+SRV.blockReason+'</p>':""}
+    <p class="sub" style="margin-top:8px">Исправьте данные и подайте заявку заново.</p>
+  </div>`,
+  mainbtn: mainBtn("Зарегистрироваться заново","reg=null;resetTo('regProfile')")
+});
+
+/* ================= ГЛАВНЫЙ ================= */
+SCREENS.home = () => {
+  const active = requests.filter(r=>r.me && !["closed","rejected","canceled"].includes(r.status));
+  const past = requests.filter(r=>r.me && ["closed","rejected","canceled"].includes(r.status));
+  const my626 = bookings626.filter(b=>b.me && !["closed","rejected","canceled"].includes(b.status));
+  const roleChips =
+    profile.orgs.map(o=>'<span class="role-chip">'+o+'</span>').join("")+
+    profile.deps.map(d=>'<span class="role-chip">'+d+'</span>').join("")+
+    '<span class="role-chip hl">'+profile.status+'</span>'+
+    (role!=="user"?'<span class="role-chip hl">'+(role==="senior"?"старший админ":"админ")+'</span>':"");
+  return {
+    body:`
+      <div class="row" style="margin-bottom:10px">
+        ${profile.photo
+          ? '<div class="avatar" style="background:url('+profile.photo+') center/cover"></div>'
+          : '<div class="avatar">'+profile.short.split(" ").map(w=>w[0]).slice(0,2).join("")+'</div>'}
+        <div class="grow">
+          <div style="font-weight:700;font-size:16px;line-height:1.25">${(SRV&&profile.name)?profile.name:profile.short} ${(!SRV||SRV.verified==="ok")?'<span style="color:var(--ok);font-size:14px">✓</span>':""}</div>
+          <div class="sub">${profile.tg}</div>
+        </div>
+        <button class="theme-tgl" title="Тема" aria-label="Переключить тему" aria-pressed="${$("phone").classList.contains("dark")}" onclick="userToggleTheme()"><i>${$("phone").classList.contains("dark")?"🌙":"☀️"}</i></button>
+        <button class="btn-sm" title="Изменить данные" onclick="navTo('regProfile',{edit:true})">⚙️</button>
+      </div>
+      <div style="margin-bottom:12px">${roleChips}</div>
+
+      <div class="action-big" onclick="startWizard()">
+        <span class="ic">${uic("box",24)}</span>
+        <div class="grow"><b>Забронировать оборудование</b><span>каталог · календарь · корзина</span></div>
+        <span style="font-size:18px">›</span>
+      </div>
+      <div class="row" style="gap:8px;align-items:stretch">
+        <div class="action-half" onclick="navTo('studio')"><span class="ic">${uic("studio",21)}</span><b>Студия 626</b></div>
+        <div class="action-half" onclick="navTo('rules',{readonly:true})"><span class="ic">${uic("book",21)}</span><b>Регламент</b></div>
+      </div>
+
+      <div class="sec-label">Мои активные брони</div>
+      ${active.length? '<div>'+active.map(r=>`
+        <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
+          <div class="emoji-badge">${uic("box",19)}</div>
+          <div class="grow">
+            <div style="font-weight:600;font-size:14.5px">${itemsTitle(r.items)}${unreadBadge(r)}</div>
+            <div class="hud" style="margin-top:4px">${r.event} · ${r.from} → ${r.to}${r.dueSoon?'<br><b style="color:var(--warn)">сдать сегодня к 19:00</b>':''}</div>
+          </div>
+          ${statusPill(r.status)}
+        </div>`).join("")+'</div>'
+      : '<div class="card sub" style="text-align:center">Активных броней нет — самое время что-нибудь снять 🎬</div>'}
+      ${my626.map(b=>`
+        <div class="list-item" style="margin-top:8px;border-radius:14px" onclick="navTo('studioDetail',{id:${b.id}})">
+          <div class="emoji-badge">${uic("studio",19)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14.5px">Аудитория 626${unreadBadge(b)}</div>
+          <div class="hud" style="margin-top:4px">${fmtIso(b.when)} · ${b.slot}</div></div>
+          ${statusPill(b.status,ST626)}
+        </div>`).join("")}
+
+      <div class="sec-label">История броней</div>
+      <div>${past.map(r=>`
+        <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
+          <div class="emoji-badge" style="opacity:.6">${uic("done",19)}</div>
+          <div class="grow"><div style="font-size:14px">${itemsTitle(r.items)}</div>
+          <div class="hud">${r.takenAt?'взял '+r.takenAt+' · вернул '+(r.returnedAt||"—"):r.from+" → "+r.to}</div></div>
+          <span class="chev">›</span>
+        </div>`).join("") || '<div class="card sub">Пока пусто</div>'}</div>
+
+      <div class="sec-label">Ещё</div>
+      <div>
+        <div class="list-item" onclick="startAppeal()"><div class="emoji-badge">${uic("q",19)}</div><div class="grow">Задать вопрос<div class="sub">команде оборудыша, можно анонимно</div></div><span class="chev">›</span></div>
+      </div>
+
+      ${(!SRV || SRV.isAdmin) ? (()=>{
+        const noCur = requests.filter(r=>!r.curator && ["new","issued","ret"].includes(r.status)).length;
+        const unread = requests.reduce((a,r)=>a+(r.unread||0),0) + bookings626.reduce((a,b)=>a+(b.unread||0),0);
+        const adminAttn = noCur + unread;
+        const seniorAttn = (verifQueue?verifQueue.length:0) + requests.filter(r=>r.escalated&&r.status==="ret").length + bookings626.filter(b=>b.status==="new").length;
+        const bdg = n => n ? '<span class="unread-b">'+n+'</span>' : "";
+        return `
+      <div class="sec-label">Служебное</div>
+      <div>
+        <div class="list-item" onclick="setRole('admin')"><div class="emoji-badge">${uic("wrench",19)}</div><div class="grow">Панель админа${SRV?"":'<div class="sub">в проде — только у админов</div>'}</div>${bdg(adminAttn)}<span class="chev">›</span></div>
+        ${(!SRV || SRV.isSenior) ? '<div class="list-item" onclick="setRole(\'senior\')"><div class="emoji-badge">'+uic("star",19)+'</div><div class="grow">Панель старшего'+(SRV?"":'<div class="sub">в проде — только у старших</div>')+'</div>'+bdg(seniorAttn)+'<span class="chev">›</span></div>' : ""}
+      </div>`;
+      })() : ""}`
+  };
+};
+let appealText = "", appealAnon = false;
+function startAppeal(){ appealText=""; appealAnon=false; appealPhotos.length=0; openQuestion(); }
+function openQuestion(){
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>❓ Задать вопрос</h3>
+      <textarea rows="3" id="q-text" maxlength="500" placeholder="Напишите обращение свободным текстом…" oninput="appealText=this.value">${appealText}</textarea>
+      <div class="check-row ${appealAnon?"on":""}" id="q-anon" ${chkA(appealAnon)} style="margin-top:10px;border-radius:14px" onclick="appealAnon=!appealAnon; if(appealAnon) appealPhotos.length=0; openQuestion()">
+        <span class="checkbox">✓</span><span class="grow">Отправить анонимно</span>
+      </div>
+      ${appealAnon?'<p class="sub" style="padding:8px 4px 0">Анонимно — фото прикрепить нельзя.</p>':'<div class="sec-label">Фото (необязательно)</div>'+photosGrid("appeal")}
+      <button class="mainbtn" style="margin-top:14px" onclick="sendAppeal()">Отправить</button>
+    </div>`;
+}
+function sendAppeal(){
+  const t = appealText.trim();
+  if(!t){ toast("Напишите обращение"); return; }
+  const anon = appealAnon;
+  const photos = anon ? [] : appealPhotos.filter(Boolean);
+  if(SRV){ if(_busy) return; _busy=true; api("appeal",{text:t, anon, photos}).then(()=>{ _busy=false; appealText=""; appealAnon=false; appealPhotos.length=0; closeSheet(); toast("✅ Обращение отправлено команде оборудыша"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  appealText=""; appealAnon=false; appealPhotos.length=0; closeSheet(); toast("✅ Обращение отправлено команде оборудыша");
+}
+function closeSheet(){ $("overlay").innerHTML=""; render(); }
+
+/* ================= КАЛЕНДАРЬ (общий компонент) ================= */
+function calHtml(cfg){
+  // cfg: {month:{y,m}, sel1, sel2, single, pickFn, navFn, busyDots, monthsList, minIso}
+  const y = cfg.month.y, m = cfg.month.m;
+  const first = new Date(y,m,1);
+  let wd = first.getDay(); wd = wd===0?6:wd-1; // пн=0
+  const dim = new Date(y,m+1,0).getDate();
+  const minIso = cfg.minIso!==undefined ? cfg.minIso : (SRV ? isoPlus(2) : "2026-07-04"); // сегодня + 2 дня (по умолч.)
+  const monthsList = cfg.monthsList || MONTHS;
+  let cells = [];
+  for(let i=0;i<wd;i++) cells.push("<span></span>");
+  for(let d=1;d<=dim;d++){
+    const iso = y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+    const off = iso < minIso;
+    const sel = cfg.sel1===iso || cfg.sel2===iso;
+    const inR = cfg.sel1 && cfg.sel2 && iso>cfg.sel1 && iso<cfg.sel2;
+    const n = loadOf(iso);
+    const dotColor = cfg.busyDots===false ? null : (n>=7?"var(--destructive)":n>=5?"var(--accent)":n>=2?"var(--warn)":"var(--ok)");
+    const loadLbl = (!dotColor||off) ? "" : (n>=7?"высокая загруженность":n>=5?"повышенная загруженность":n>=2?"средняя загруженность":"низкая загруженность");
+    cells.push('<button class="day '+(sel?"sel":"")+(inR?" inrange":"")+'" '+(off?"disabled":"")+(loadLbl?' title="'+loadLbl+'"':"")+
+      ' onclick="'+cfg.pickFn+'(\''+iso+'\')">'+d+
+      (dotColor&&!off?'<span class="load" style="background:'+dotColor+'"></span>':"")+'</button>');
+  }
+  const mi = monthsList.findIndex(x=>x.y===y && x.m===m);
+  return `<div class="cal">
+    <div class="cal-head">
+      <button class="cal-nav" aria-label="Предыдущий месяц" ${mi<=0?"disabled":""} onclick="${cfg.navFn}(-1)">‹</button>
+      <b>${MONTH_NAMES[m]} ${y}</b>
+      <button class="cal-nav" aria-label="Следующий месяц" ${mi>=monthsList.length-1?"disabled":""} onclick="${cfg.navFn}(1)">›</button>
+    </div>
+    <div class="cal-grid">
+      ${["пн","вт","ср","чт","пт","сб","вс"].map(w=>'<span class="wd">'+w+'</span>').join("")}
+      ${cells.join("")}
+    </div>
+    ${cfg.busyDots===false?"":`<div class="legend">
+      <span><span class="dot" style="background:var(--ok)"></span>0–1</span>
+      <span><span class="dot" style="background:var(--warn)"></span>2–4</span>
+      <span><span class="dot" style="background:var(--accent)"></span>5–6</span>
+      <span><span class="dot" style="background:var(--destructive)"></span>7+</span>
+    </div>`}
+  </div>`;
+}
+
+/* ================= МАСТЕР ЗАЯВКИ ================= */
+function startWizard(){
+  wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart:{}, event:"", comment:"", media:false, search:"", catFilter:"Все", busy:{}, editId:0};
+  navTo("wizard");
+}
+function itemOf(short){ for(const c of CATALOG){ const it=c.items.find(i=>i.short===short); if(it) return it; } return null; }
+/* Уровни доступа: «акт» — только активисты (или ответственный за медиа); «глава» — только старшие админы. */
+function canAct(){ return profile.status==="активист" || profile.status==="production" || (wiz&&wiz.media); }
+function isSeniorNow(){ return SRV ? !!SRV.isSenior : role==="senior"; }
+function itemLocked(it){
+  if(!it.level) return false;
+  if(it.level==="глава") return !isSeniorNow();
+  return !canAct();
+}
+function wizSteps(){ return '<div class="steps">'+[1,2,3,4].map(i=>'<i class="'+(i<=wiz.step?"done":"")+'"></i>').join("")+'</div>'; }
+SCREENS.wizard = () => wiz.step===1?wizDates():wiz.step===2?wizCatalog():wiz.step===3?wizDetails():wizConfirm();
+
+function wizNavMonth(d){ const i=MONTHS.findIndex(x=>x.y===wiz.month.y&&x.m===wiz.month.m); if(MONTHS[i+d]){ wiz.month=MONTHS[i+d]; render(); } }
+function wizPick(iso){
+  if(!wiz.d1 || (wiz.d1&&wiz.d2)){ wiz.d1=iso; wiz.d2=null; }
+  else if(iso>=wiz.d1){ wiz.d2=iso; } else { wiz.d1=iso; }
+  render();
+}
+/* жёсткий запрет: получение и возврат в воскресенье */
+function dateBlock(){
+  if(wiz.d1 && new Date(wiz.d1).getDay()===0) return "Получение в воскресенье невозможно — выберите другой день.";
+  if(wiz.d2 && new Date(wiz.d2).getDay()===0) return "Возврат в воскресенье невозможен — выберите будний день или субботу.";
+  return null;
+}
+/* мягкое предупреждение: сб после 18:00 (можно, но команда может отказать) */
+function dateSoftWarn(){
+  if(wiz.d2 && wiz.t2 && new Date(wiz.d2).getDay()===6 && wiz.t2>="18:00")
+    return "Возврат в субботу после 18:00 — команда Оборудыша может отказать в приёме в это время.";
+  if(wiz.d1 && wiz.t1 && new Date(wiz.d1).getDay()===6 && wiz.t1>="18:00")
+    return "Выдача в субботу после 18:00 — команда Оборудыша может отказать в выдаче в это время.";
+  return null;
+}
+function wizDates(){
+  const block = dateBlock();
+  const soft = dateSoftWarn();
+  const crossMonth = wiz.d1&&wiz.d2&&wiz.d1.slice(5,7)!==wiz.d2.slice(5,7);
+  const ready = wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!block;
+  return {
+    body: wizSteps()+`
+      <h1 class="big">Когда берёте?</h1>
+      <p class="sub" style="margin-bottom:12px">Первый тап — дата взятия, второй — возврата. Можно через месяц: листайте стрелками. Точка — загруженность дня.</p>
+      ${calHtml({month:wiz.month, sel1:wiz.d1, sel2:wiz.d2, pickFn:"wizPick", navFn:"wizNavMonth"})}
+      ${crossMonth?'<div class="card" style="margin-top:10px"><p class="sub">📅 Бронь через месяц: '+fmtIso(wiz.d1)+' → '+fmtIso(wiz.d2)+'. Занятость проверяется на весь период.</p></div>':""}
+      <div class="sec-label">Время</div>
+      <div class="time-fields">
+        <div class="time-field" onclick="openTimeSheet('t1')">
+          <div class="lbl">Взять в</div>
+          <div class="val ${wiz.t1?"":"empty"}">${wiz.t1||"выбрать"}</div>
+        </div>
+        <div class="time-field" onclick="openTimeSheet('t2')">
+          <div class="lbl">Вернуть до</div>
+          <div class="val ${wiz.t2?"":"empty"}">${wiz.t2||"выбрать"}</div>
+        </div>
+      </div>
+      ${block?'<div class="kit-warn"><b>⚠️ '+block+'</b></div>':""}
+      ${soft?'<div class="kit-warn"><b>⚠️ '+soft+'</b></div>':""}
+      <div class="sec-label">Опции</div>
+      <div class="check-row ${wiz.media?"on":""}" ${chkA(wiz.media)} style="border-radius:14px" onclick="wiz.media=!wiz.media;render()">
+        <span class="checkbox">✓</span>
+        <div class="grow">Ответственный за медиа<div class="sub">открывает в каталоге оборудование уровня «активист»</div></div>
+      </div>`,
+    mainbtn: mainBtn("Далее — выбор оборудования","wizToCatalog()","",!ready)
+  };
+}
+function openTimeSheet(key){
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>${key==="t1"?"Взять в":"Вернуть до"} · слоты по 30 мин</h3>
+      <div class="slots">${SLOTS.map(t=>'<button class="slot '+(wiz[key]===t?"sel":"")+'" onclick="wiz.'+key+'=\''+t+'\';closeSheet()">'+t+'</button>').join("")}</div>
+    </div>`;
+}
+/* --- каталог --- */
+function freeOf(it){
+  const total = it.total||1;
+  if(SRV){ const busy=(wiz&&wiz.busy)||{}; return Math.max(0, total - (busy[it.short]||0)); }
+  const busyMap = {"R6m2":1,"Ronin RS 3":1,"Радиопетли RODE":1,"Амаран 300":1};
+  return Math.max(0, total - (busyMap[it.short]||0));
+}
+/* переход шаг1→шаг2: при SRV тянем занятость позиций на выбранный диапазон */
+function wizToCatalog(){
+  if(SRV){
+    const btn = document.querySelector(".mainbtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Проверяем занятость…"; }
+    api("availability",{d1:wiz.d1, d2:wiz.d2, exclude:wiz.editId||0})
+      .then(d=>{ wiz.busy = d.busy||{}; wiz.step=2; render(); })
+      .catch(e=>{ render(); toast("⚠️ "+e.message); });
+    return;
+  }
+  wiz.step=2; render();
+}
+function cartCount(){ return Object.values(wiz.cart).reduce((a,b)=>a+b,0); }
+function kitWarnings(){
+  const cats = new Set(Object.keys(wiz.cart).map(catOf));
+  const w = [];
+  const hasGopro = Object.keys(wiz.cart).some(s => s === "ГоПро 12");
+  if(cats.has("Камеры") && !cats.has("Объективы") && !hasGopro) w.push("К камере рекомендуем добавить объектив");
+  return w;
+}
+/* --- избранные наборы --- */
+function saveFavSet(){
+  if(!cartCount()){ toast("Корзина пуста"); return; }
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal"><h3>Сохранить набор</h3>
+        <input type="text" id="fav-name" maxlength="60" placeholder="Название набора">
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm primary" onclick="doSaveFav()">Сохранить</button>
+        </div></div></div>`;
+}
+function doSaveFav(){
+  const name = $("fav-name") ? $("fav-name").value.trim() : "";
+  if(!name){ toast("Впишите название"); return; }
+  const items = Object.entries(wiz.cart);
+  if(SRV){ srvDo("favset/add",{name, items}, ()=>{ $("overlay").innerHTML=""; render(); toast("Набор сохранён"); }); return; }
+  favSets.push({id:Date.now(), name, items}); $("overlay").innerHTML=""; render(); toast("Набор сохранён (демо)");
+}
+function openFavSets(){
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>⭐ Мои наборы</h3>
+      ${favSets.length? favSets.map(f=>`
+        <div class="row" style="padding:8px 0;border-bottom:1px solid var(--sep)">
+          <div class="grow" onclick="applyFavSet(${f.id})" style="cursor:pointer"><b style="font-size:14px">${f.name}</b>
+          <div class="hud">${f.items.map(i=>i[0]).join(", ")}</div></div>
+          <button class="btn-sm danger" onclick="delFavSet(${f.id})">✕</button>
+        </div>`).join("") : '<p class="sub">Наборов пока нет. Соберите корзину и нажмите «Сохранить набор».</p>'}
+    </div>`;
+}
+function applyFavSet(id){
+  const f = favSets.find(x=>x.id===id); if(!f) return;
+  f.items.forEach(([s,q])=>{ const it=itemOf(s); if(it && !itemLocked(it)){ const free=freeOf(it); const n=Math.min(q, free||q); if(n>0) wiz.cart[s]=n; } });
+  closeSheet(); toast("Набор добавлен в корзину");
+}
+function delFavSet(id){
+  if(SRV){ srvDo("favset/del",{id}, ()=>{ openFavSets(); toast("Набор удалён"); }); return; }
+  favSets = favSets.filter(x=>x.id!==id); openFavSets();
+}
+function wizCatalog(){
+  const q = wiz.search.trim().toLowerCase();
+  const chips = ["Все", ...CATALOG.map(c=>c.cat)];
+  const renderItem = it => {
+    const free = freeOf(it);
+    const inCart = wiz.cart[it.short]||0;
+    const es = escJs(it.short);
+    return `<div class="eq-item">
+      <div class="row">
+        ${thumb(it.short)}
+        <div class="grow" onclick="this.closest('.eq-item').classList.toggle('open')">
+          <div class="eq-name">${it.short}</div>
+          <div class="eq-full">${it.full}<br><span style="opacity:.7">фото позиции — из базы оборудования</span></div>
+          <div class="eq-meta">
+            <span style="color:${free? "var(--ok)":"var(--destructive)"}">${free? "свободно "+free+" из "+it.total : "всё занято"}</span>
+            ${it.level==="акт" ? (canAct()
+              ? '<span style="color:var(--violet)">· только активисты</span>'
+              : '<span style="color:var(--hint)">· недоступна</span>')
+            : it.level==="глава"
+              ? (isSeniorNow() ? '<span style="color:var(--violet)">· только старшие</span>' : '<span style="color:var(--hint)">· только старшие</span>')
+              : ""}
+          </div>
+        </div>
+        <div class="stepper">
+          <button aria-label="Убавить" onclick="chQty('${es}',-1)" ${inCart?"":"disabled"}>−</button>
+          <b>${inCart||0}</b>
+          <button aria-label="Добавить" onclick="chQty('${es}',1)" ${(free>inCart)?"":"disabled"} ${itemLocked(it)?'style="opacity:.35"':""}>+</button>
+        </div>
+      </div>
+    </div>`;
+  };
+  let listHtml = "";
+  if(q){
+    // поиск: по названиям позиций И по категориям; выбранный чипс сужает область
+    const scope = wiz.catFilter==="Все" ? CATALOG : CATALOG.filter(c=>c.cat===wiz.catFilter);
+    const groups = [];
+    scope.forEach(c=>{
+      if(c.blocked) return;
+      const catHit = c.cat.toLowerCase().includes(q);
+      const items = c.items.filter(it=>catHit || it.short.toLowerCase().includes(q) || it.full.toLowerCase().includes(q));
+      if(items.length) groups.push({cat:c.cat, items});
+    });
+    const total = groups.reduce((a,g)=>a+g.items.length,0);
+    listHtml = '<div class="sec-label">Найдено: '+total+(wiz.catFilter!=="Все"?' в «'+wiz.catFilter+'»':"")+'</div>'
+      + (groups.map(g=>'<div class="sec-label">'+icon(g.cat,13)+' '+g.cat+'</div><div>'+g.items.map(renderItem).join("")+'</div>').join("")
+         || '<div class="card sub">Ничего не нашлось. Попробуйте название категории («свет», «звук») или снимите фильтр. Если позиции реально нет — впишите её в комментарий на следующем шаге.</div>');
+  } else {
+    const cats = wiz.catFilter==="Все" ? CATALOG : CATALOG.filter(c=>c.cat===wiz.catFilter);
+    listHtml = cats.map(c=>{
+      if(c.blocked) return `<div class="sec-label">${icon(c.cat,13)} ${c.cat}</div>
+        <div class="card" style="opacity:.85;cursor:default"><div class="row"><span style="font-size:18px">🚫</span>
+        <div class="grow"><b style="font-size:14px">Категория временно недоступна</b>
+        <div class="hud">${c.blocked.until?"до "+c.blocked.until:""}${c.blocked.term?" · "+c.blocked.term:""}</div></div></div></div>`;
+      return '<div class="sec-label">'+icon(c.cat,13)+" "+c.cat+'</div><div>'+c.items.map(renderItem).join("")+'</div>';
+    }).join("");
+  }
+  const cnt = cartCount();
+  return {
+    body: wizSteps()+`
+      <h1 class="big">Каталог</h1>
+      <p class="sub" style="margin-bottom:10px">${fmtIso(wiz.d1)} ${wiz.t1} → ${fmtIso(wiz.d2)} ${wiz.t2} · тап по названию — полное имя и фото</p>
+      <div class="search"><input type="text" maxlength="60" placeholder="Поиск по всем позициям" value="${wiz.search}" oninput="wiz.search=this.value;renderKeepFocus()"></div>
+      <div class="chips">${chips.map(c=>{
+        const blocked = CATALOG.find(x=>x.cat===c && x.blocked);
+        return '<button class="chip-btn '+(wiz.catFilter===c?"on":"")+(blocked?" locked":"")+'" onclick="wiz.catFilter=\''+c+'\';render()">'+(c==="Все"?"Все":icon(c,14)+c)+(blocked?" 🚫":"")+'</button>';
+      }).join("")}</div>
+      ${(cartCount()||favSets.length)?`<div class="row" style="gap:8px;margin-bottom:8px">
+        ${cartCount()?'<button class="btn-sm" onclick="saveFavSet()">⭐ Сохранить набор</button>':""}
+        ${favSets.length?'<button class="btn-sm" onclick="openFavSets()">Мои наборы</button>':""}
+      </div>`:""}
+      ${listHtml}`,
+    mainbtn: (cnt?'<button class="cartbar" onclick="openCart()"><span style="font-size:18px">🛒</span><b>Корзина</b><span class="cnt">'+cnt+'</span></button>':"")
+      + mainBtn("Далее — детали заявки","wiz.step=3;render()","",!cnt)
+  };
+}
+function chQty(short, d){
+  const it = itemOf(short);
+  if(d>0 && it && itemLocked(it)){
+    toast(it.level==="глава" ? "Эту позицию берут только старшие админы" : "Позиция доступна только активистам");
+    return;
+  }
+  if(d>0 && it){
+    const free = freeOf(it);
+    if((wiz.cart[short]||0) >= free){ toast(free? "Свободно только "+free+" шт" : "Всё занято"); return; }
+  }
+  const next = (wiz.cart[short]||0)+d;
+  if(next<=0) delete wiz.cart[short]; else wiz.cart[short]=next;
+  render();
+}
+function renderKeepFocus(){
+  render();
+  const inp = document.querySelector(".search input");
+  if(inp){ inp.focus(); inp.setSelectionRange(inp.value.length,inp.value.length); }
+}
+function openCart(){
+  const rows = Object.entries(wiz.cart).map(([s,q])=>{ const es=escJs(s); return `
+    <div class="row" style="padding:9px 0;border-bottom:1px solid var(--sep)">
+      ${thumb(s,36)}
+      <div class="grow" style="font-size:14.5px">${s}</div>
+      <div class="stepper">
+        <button aria-label="Убавить" onclick="chQty('${es}',-1);openCart()">−</button><b>${q}</b><button aria-label="Добавить" onclick="chQty('${es}',1);openCart()">+</button>
+      </div>
+    </div>`; }).join("");
+  const warns = kitWarnings().map(w=>'<div class="kit-warn"><b>⚠️</b> '+w+'</div>').join("");
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>🛒 Корзина · ${cartCount()} поз.</h3>
+    ${rows||'<p class="sub">Пусто</p>'}${warns}
+    <button class="mainbtn" style="margin-top:14px" onclick="$('overlay').innerHTML='';wiz.step=3;render()">К деталям заявки</button></div>`;
+}
+/* --- детали --- */
+function wizDetails(){
+  const warns = kitWarnings().map(w=>'<div class="kit-warn"><b>⚠️</b> '+w+'</div>').join("");
+  return {
+    body: wizSteps()+`
+      <h1 class="big">Детали заявки</h1>
+      <div class="sec-label">Корзина · ${cartCount()} поз.</div>
+      <div class="card">
+        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+s+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
+        <button class="btn-sm" style="margin-top:8px;width:100%" onclick="wiz.step=2;render()">✏️ Изменить набор</button>
+      </div>
+      ${warns}
+      <div class="sec-label">Мероприятие</div>
+      <input type="text" id="w-event" maxlength="100" placeholder="Например: Промо СтудФеста" value="${escAttr(wiz.event)}" oninput="wiz.event=this.value; document.querySelector('.mainbtn').disabled=!this.value.trim()">
+      <div class="sec-label">Комментарий (необязательно)</div>
+      <textarea id="w-comm" rows="2" maxlength="500" placeholder="Локация, особые условия, чего не нашли в каталоге…" oninput="wiz.comment=this.value">${wiz.comment}</textarea>
+      ${wiz.media?'<div class="check-row on" style="border-radius:14px;margin-top:10px"><span class="checkbox">✓</span><div class="grow">Ответственный за медиа</div></div>':""}`,
+    mainbtn: mainBtn("К подтверждению","wiz.step=4;render()","",!wiz.event.trim())
+  };
+}
+function wizConfirm(){
+  return {
+    body: wizSteps()+`
+      <h1 class="big">Всё верно?</h1>
+      <div class="card" style="margin-top:10px">
+        <div class="row" style="margin-bottom:10px">
+          <div class="emoji-badge">🎬</div>
+          <div class="grow"><b>${escHtml(wiz.event)}</b><div class="hud">${profile.short} · ${profile.deps[0]||""}</div></div>
+        </div>
+        <div class="hud" style="margin-bottom:2px">ВЗЯТЬ</div>
+        <div style="font:600 14px var(--mono)">${fmtIso(wiz.d1)}.${wiz.d1.slice(0,4)}, ${wiz.t1}</div>
+        <div class="hud" style="margin:8px 0 2px">ВЕРНУТЬ ДО</div>
+        <div style="font:600 14px var(--mono)">${fmtIso(wiz.d2)}.${wiz.d2.slice(0,4)}, ${wiz.t2}</div>
+        <div class="hud" style="margin:10px 0 6px">ОБОРУДОВАНИЕ · ${cartCount()} ПОЗ.</div>
+        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0;border-top:1px solid var(--sep)"><span class="grow" style="font-size:14px">'+s+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
+        ${wiz.media?'<div class="check-row on" style="border-radius:14px;margin-top:8px"><span class="checkbox">✓</span><div class="grow">Ответственный за медиа</div></div>':""}
+        ${wiz.comment?'<p class="sub" style="margin-top:8px">💬 '+wiz.comment+'</p>':""}
+      </div>
+      <p class="sub" style="padding:0 4px">После отправки позиции резервируются в календаре. До согласования заявку можно менять и удалять.</p>`,
+    mainbtn: mainBtn(wiz.editId?"Сохранить изменения":"Отправить заявку","submitWizard()")
+  };
+}
+function submitWizard(){
+  if(SRV){
+    if(_busy) return; _busy=true;
+    const btn = document.querySelector(".mainbtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
+    const body = {items:Object.entries(wiz.cart),
+      d1:wiz.d1, d2:wiz.d2, t1:wiz.t1, t2:wiz.t2,
+      from:fmtIso(wiz.d1)+", "+wiz.t1, to:fmtIso(wiz.d2)+", "+wiz.t2,
+      event:wiz.event.trim(), comment:wiz.comment.trim(), media:wiz.media};
+    if(wiz.editId) body.id = wiz.editId;
+    api(wiz.editId?"request/update":"request/create", body)
+      .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast(wiz.editId?"✅ Изменения сохранены":"✅ Заявка отправлена — карточка ушла админам."); })
+      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+    return;
+  }
+  if(wiz.editId){
+    const r = requests.find(x=>x.id===wiz.editId);
+    if(r){ r.items=Object.entries(wiz.cart); r.event=wiz.event;
+      r.from=fmtIso(wiz.d1)+", "+wiz.t1; r.to=fmtIso(wiz.d2)+", "+wiz.t2;
+      r.d1Iso=wiz.d1; r.d2Iso=wiz.d2; r.t1=wiz.t1; r.t2=wiz.t2; r.comment=wiz.comment; }
+    resetTo("home"); toast("✅ Изменения сохранены (демо)");
+    return;
+  }
+  const id = 273 + Math.floor(Math.random()*20);
+  requests.unshift({
+    id, me:true, author:profile.name, dep:profile.deps[0]||"",
+    items:Object.entries(wiz.cart), event:wiz.event,
+    from:fmtIso(wiz.d1)+", "+wiz.t1, to:fmtIso(wiz.d2)+", "+wiz.t2,
+    d1Iso:wiz.d1, d2Iso:wiz.d2, t1:wiz.t1, t2:wiz.t2,
+    status:"new", curator:null, history:[["new","02.07, "+new Date().toTimeString().slice(0,5)]], chat:[]
+  });
+  resetTo("home");
+  toast("✅ Заявка ID "+id+" отправлена — вы в главном меню. Карточка ушла в админ-чат.");
+}
+function startEditReq(id){
+  const r = requests.find(x=>x.id===id);
+  if(!r) return;
+  const cart = {}; (r.items||[]).forEach(it=>{ cart[it[0]] = it[1]; });
+  const d1 = r.d1Iso||null;
+  wiz = {step:1, month: d1?{y:+d1.slice(0,4), m:+d1.slice(5,7)-1}:MONTHS[0],
+    d1, d2:r.d2Iso||null, t1:r.t1||null, t2:r.t2||null,
+    cart, event:r.event||"", comment:r.comment||"", media:!!r.media,
+    search:"", catFilter:"Все", busy:{}, editId:id};
+  navTo("wizard");
+}
+/* повтор заявки: тот же набор, новые даты (новая заявка, не редактирование) */
+function repeatReq(id){
+  const r = requests.find(x=>x.id===id);
+  if(!r) return;
+  const cart = {}; (r.items||[]).forEach(it=>{ cart[it[0]] = it[1]; });
+  wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart,
+    event:r.event||"", comment:r.comment||"", media:!!r.media,
+    search:"", catFilter:"Все", busy:{}, editId:0};
+  navTo("wizard");
+  toast("Набор перенесён — выберите новые даты");
+}
+
+/* ================= ДЕТАЛИ ЗАЯВКИ (пользователь) ================= */
+SCREENS.reqDetail = ({id}) => {
+  const r = requests.find(x=>x.id===id);
+  const term = ["rejected","canceled"].includes(r.status);
+  const idx = FLOW.indexOf(r.status);
+  const tl = term
+    ? r.history.map((h,i)=>`<div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===r.history.length-1?"color:var(--destructive)":""}">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")
+    : FLOW.map((st,i)=>{
+        const h = r.history.find(x=>x[0]===st);
+        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST[st].l}</div>${h?'<div class="d">'+h[1]+"</div>":""}</div>`;
+      }).join("");
+  const editable = ["new","curator"].includes(r.status);
+  const fact = (r.takenAt||r.returnedAt) ? `<div class="hud" style="margin-top:8px">факт: взял ${r.takenAt||"—"}${r.returnedAt?" · вернул "+r.returnedAt:""}</div>` : "";
+  const chat = r.curator ? `
+    <div class="sec-label">Переписка с куратором · ${r.curator}</div>
+    <div class="card">
+      <div class="chat">
+        ${r.chat.map(m=>chatMsg(m,false)).join("")||'<p class="sub">Куратор на связи — напишите, если что-то поменялось.</p>'}
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="chat-inp" maxlength="1000" placeholder="Сообщение куратору…">
+        <button class="btn-sm primary" onclick="sendChat(${r.id})">➤</button>
+      </div>
+    </div>` : '<div class="card sub">Куратор ещё не назначен — как только админ возьмёт заявку, здесь откроется переписка.</div>';
+  return {
+    body:`
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <div class="grow"><div class="hud">ID <b>${r.id}</b> · ${r.dep}</div><h1 class="big">${r.event}</h1></div>
+          ${statusPill(r.status)}
+        </div>
+        <div class="hud">${r.from} → <b>${r.to}</b></div>${fact}
+        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+i[0]+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
+      </div>
+      <div class="sec-label">Статус</div>
+      <div class="card"><div class="tl">${tl}</div></div>
+      ${chat}
+      ${editable?`<div class="btnrow" style="margin-top:14px">
+        <button class="btn-sm grow" style="padding:12px" onclick="startEditReq(${r.id})">✏️ Редактировать</button>
+        <button class="btn-sm danger grow" style="padding:12px" onclick="cancelReq(${r.id})">Отменить заявку</button>
+      </div><p class="sub" style="margin-top:8px;padding:0 4px">Редактирование и отмена доступны до согласования.</p>`:""}
+      ${r.status==="issued"?mainBtn("🔁 Сдать оборудование","startReturn("+r.id+")"):""}
+      ${["closed","rejected","canceled"].includes(r.status)?mainBtn("🔁 Повторить заявку","repeatReq("+r.id+")","secondary"):""}`,
+    after: ()=>markRead("req", id)
+  };
+};
+function sendChat(id){
+  const r = requests.find(x=>x.id===id);
+  const inp = $("chat-inp");
+  const txt = inp.value.trim();
+  if(!txt) return;
+  inp.value = "";
+  if(SRV){ srvDo("chat",{kind:"req", id, text:txt, asRole:"user"}, ()=>{ render(); toast("🔔 Куратору ушло уведомление от бота"); }); return; }
+  r.chat.push({who:"me",text:txt,tm:new Date().toTimeString().slice(0,5),label:"Пользователь"});
+  render();
+  toast("🔔 Куратору "+(r.curator||"")+" ушло уведомление от бота");
+}
+function cancelReq(id){
+  confirmModal("Отменить заявку?","Оборудование освободится в календаре, карточка в админ-чате обновится.",()=>{
+    if(SRV){ srvDo("request/action",{id, action:"cancel"}, ()=>{ resetTo("home"); toast("Заявка ID "+id+" отменена"); }); return; }
+    const r = requests.find(x=>x.id===id);
+    r.status="canceled"; r.history.push(["canceled","02.07, "+new Date().toTimeString().slice(0,5)]);
+    resetTo("home"); toast("Заявка ID "+id+" отменена");
+  });
+}
+/* ---- реальные фото сдачи: файл с телефона -> сжатие до 1280px -> base64 на сервер ---- */
+let retPhotos = [], hoPhotos = [], appealPhotos = [], bcPhotos = [];
+function photoArr(kind){ return kind==="ret" ? retPhotos : kind==="ho" ? hoPhotos : kind==="appeal" ? appealPhotos : bcPhotos; }
+const PHOTO_MAX = 5;
+/* Галерея фото: миниатюры собранных снимков (с ✕) + плитка «добавить» (multiple — можно выбрать сразу несколько). */
+function photosGrid(kind){
+  const arr = photoArr(kind);
+  const tiles = arr.map((p,i)=>`<div class="ph done" style="position:relative;background:url(${p}) center/cover;border-style:solid">
+    <button onclick="rmPhoto('${kind}',${i})" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:12px;line-height:1;cursor:pointer">✕</button>
+  </div>`).join("");
+  const addTile = arr.length<PHOTO_MAX ? `<div class="ph" onclick="$('ph-add-${kind}').click()"><i>📷</i>добавить
+    <input type="file" id="ph-add-${kind}" accept="image/*" multiple style="display:none" onchange="addPhotos(this,'${kind}')"></div>` : "";
+  return '<div class="photos">'+tiles+addTile+'</div>';
+}
+function shrinkPhoto(file){
+  return new Promise(res=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const k = Math.min(1, 1024/Math.max(img.width,img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.max(1,Math.round(img.width*k)); cv.height = Math.max(1,Math.round(img.height*k));
+      cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
+      URL.revokeObjectURL(img.src);
+      res(cv.toDataURL("image/jpeg",.65));
+    };
+    img.onerror = ()=>res(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function addPhotos(inp, kind){
+  const files = Array.from(inp.files||[]);
+  inp.value = "";
+  if(!files.length) return;
+  const arr = photoArr(kind);
+  let bad = 0;
+  for(const f of files){
+    if(arr.length>=PHOTO_MAX){ toast("Максимум "+PHOTO_MAX+" фото"); break; }
+    const url = await shrinkPhoto(f);
+    if(url) arr.push(url); else bad++;
+  }
+  if(bad) toast("Часть фото не прочиталась ("+bad+")");
+  const bytes = arr.reduce((a,p)=>a+p.length,0);
+  if(bytes > 20*1024*1024){ arr.pop(); toast("Фото слишком тяжёлые — уберите одно и попробуйте снова"); }
+  redrawPhotoHost(kind);
+}
+function rmPhoto(kind, i){ photoArr(kind).splice(i,1); redrawPhotoHost(kind); }
+/* галерея ret/ho живёт на экране (render), appeal/bc — в шите (перерисовать шит) */
+function redrawPhotoHost(kind){
+  if(kind==="appeal") openQuestion();
+  else if(kind==="bc") openBroadcast();
+  else render();
+}
+function startReturn(id){ retPhotos = []; navTo("returnFlow",{id}); }
+SCREENS.returnFlow = ({id}) => ({
+  body:`
+    <h1 class="big">Фото при сдаче</h1>
+    <p class="sub" style="margin-bottom:14px">Обязательны по регламенту — снимите комплект с нескольких ракурсов, чтобы было видно состояние. Можно выбрать сразу несколько. Тап по рамке — камера/галерея.</p>
+    ${photosGrid("ret")}
+    <div class="sec-label">Комментарий (необязательно)</div>
+    <textarea rows="2" id="ret-comm" maxlength="500" placeholder="Например: потёрся кофр…"></textarea>`,
+  mainbtn: mainBtn("Отправить на проверку","doReturn("+id+")","", retPhotos.length<1)
+});
+function doReturn(id){
+  const c = $("ret-comm") ? $("ret-comm").value.trim() : "";
+  if(SRV){
+    if(_busy) return; _busy=true;
+    const btn = document.querySelector(".mainbtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
+    api("request/action",{id, action:"userret", comment:c, photos:retPhotos.filter(Boolean)})
+      .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast("📷 Возврат по ID "+id+" отправлен на проверку"); })
+      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+    return;
+  }
+  const r = requests.find(x=>x.id===id);
+  r.status="ret"; r.dueSoon=false; r.returnedAt="02.07, "+new Date().toTimeString().slice(0,5);
+  r.history.push(["ret",r.returnedAt]);
+  resetTo("home"); toast("📷 Возврат по ID "+id+" отправлен на проверку — вы в главном меню");
+}
+
+/* ================= СТУДИЯ 626 ================= */
+SCREENS.studio = () => {
+  const mine = bookings626.filter(b=>b.me);
+  return {
+    body:`
+      <div class="card" style="background:linear-gradient(135deg,var(--card),color-mix(in srgb,var(--violet) 12%,var(--card)))">
+        <h1 class="big">🏛 Аудитория 626</h1>
+        <p class="sub" style="margin-top:4px">Съёмочный павильон: хромакей, циклорама, студийный свет. Слоты 09:00–21:30. Согласуют старшие админы, ведёт куратор.</p>
+      </div>
+      <div class="sec-label">Мои брони</div>
+      ${(()=>{
+        const act = mine.filter(b=>!["closed","rejected","canceled"].includes(b.status)).sort((a,b)=>a.when<b.when?-1:a.when>b.when?1:(a.slot<b.slot?-1:1));
+        if(!act.length) return '<div class="card sub">Броней нет</div>';
+        const days = [...new Set(act.map(b=>b.when))];
+        return days.map(d=>{
+          const list = act.filter(b=>b.when===d);
+          return `
+          <div class="hud" style="margin:10px 4px 6px"><b>${fmtIso(d)}</b>${list.length>1?" · броней: "+list.length:""}</div>
+          <div>${list.map(b=>`
+            <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
+              <div class="emoji-badge">${uic("studio",19)}</div>
+              <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+              <div class="hud" style="margin-top:4px">${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>
+              ${statusPill(b.status,ST626)}
+            </div>`).join("")}</div>`;
+        }).join("");
+      })()}
+      <div class="sec-label">График занятости</div>
+      <div class="card">
+        ${(SRV?[0,1,2,3,4,5,6].map(n=>isoPlus(n)):["2026-07-03","2026-07-04","2026-07-05","2026-07-08"]).map(d=>{
+          const busy = BUSY626[d]||[];
+          return '<div class="row" style="padding:7px 0;border-bottom:1px solid var(--sep)"><b style="font:600 13px var(--mono);width:52px">'+fmtIso(d)+'</b><div class="grow sub">'+(busy.length? "занято "+busy[0]+"–"+busy[busy.length-1] : "весь день свободно")+'</div><span class="dot" style="background:'+(busy.length?"var(--warn)":"var(--ok)")+'"></span></div>';
+        }).join("")}
+      </div>`,
+    mainbtn: mainBtn("Забронировать 626","start626()")
+  };
+};
+function start626(){
+  wiz626 = {month:MONTHS[0], day:null, from:null, to:null, needs:{}, other:"", goal:""};
+  navTo("studioForm");
+}
+function s626NavMonth(d){ const i=MONTHS.findIndex(x=>x.y===wiz626.month.y&&x.m===wiz626.month.m); if(MONTHS[i+d]){ wiz626.month=MONTHS[i+d]; render(); } }
+function s626Pick(iso){ wiz626.day=iso; wiz626.from=null; wiz626.to=null; render(); }
+function s626Slot(t){
+  if(!wiz626.from||(wiz626.from&&wiz626.to)){ wiz626.from=t; wiz626.to=null; }
+  else if(t>wiz626.from){ wiz626.to=t; } else { wiz626.from=t; }
+  render();
+}
+SCREENS.studioForm = () => {
+  const busy = wiz626.day ? (BUSY626[wiz626.day]||[]) : [];
+  const ready = wiz626.day&&wiz626.from&&wiz626.to&&wiz626.goal.trim();
+  return {
+    body:`
+      <h1 class="big">Заявка на 626</h1>
+      <div class="sec-label">Дата</div>
+      ${calHtml({month:wiz626.month, sel1:wiz626.day, sel2:null, pickFn:"s626Pick", navFn:"s626NavMonth", busyDots:false})}
+      ${wiz626.day?`
+      <div class="sec-label">Время · ${fmtIso(wiz626.day)} · 🟢 свободно${busy.length?" · 🔴 занято":""}</div>
+      <div class="slots">
+        ${SLOTS.map(t=>{
+          const b = busy.includes(t);
+          const sel = wiz626.from===t||wiz626.to===t;
+          const inR = wiz626.from&&wiz626.to&&t>wiz626.from&&t<wiz626.to;
+          return '<button class="slot '+(b?"busy":"")+(sel||inR?" sel":"")+'" '+(b?"disabled":"")+' onclick="s626Slot(\''+t+'\')">'+t+'</button>';
+        }).join("")}
+      </div>`:""}
+      <div class="sec-label">Цель съёмки / записи</div>
+      <input type="text" maxlength="100" placeholder="Например: запись подкаста" value="${escAttr(wiz626.goal)}" oninput="wiz626.goal=this.value;document.querySelector('.mainbtn').disabled=!(this.value.trim()&&wiz626.day&&wiz626.from&&wiz626.to)">
+      <div class="sec-label">Что понадобится</div>
+      <div>
+        ${["хромакей","циклорама","чёрная ткань","помощь Media Tech"].map(n=>
+          '<div class="check-row '+(wiz626.needs[n]?"on":"")+'" '+chkA(wiz626.needs[n])+' onclick="wiz626.needs[\''+n+'\']=!wiz626.needs[\''+n+'\'];render()"><span class="checkbox">✓</span><span class="grow" style="text-transform:capitalize">'+n+'</span></div>').join("")}
+        <div class="check-row ${wiz626.needs["другое"]?"on":""}" ${chkA(wiz626.needs["другое"])} onclick="wiz626.needs['другое']=!wiz626.needs['другое'];render()"><span class="checkbox">✓</span><span class="grow">Другое — попросить что-то своё</span></div>
+      </div>
+      ${wiz626.needs["другое"]?'<input type="text" maxlength="200" style="margin-top:8px" placeholder="Что нужно? Например: проектор, стулья…" value="'+escAttr(wiz626.other)+'" oninput="wiz626.other=this.value">':""}`,
+    mainbtn: mainBtn("Отправить на согласование","submit626()","",!ready)
+  };
+};
+function submit626(){
+  const needs = Object.keys(wiz626.needs).filter(k=>wiz626.needs[k]&&k!=="другое");
+  if(wiz626.needs["другое"]&&wiz626.other.trim()) needs.push(wiz626.other.trim());
+  if(SRV){
+    if(_busy) return; _busy=true;
+    const btn = document.querySelector(".mainbtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
+    api("626/create",{day:wiz626.day, slot:wiz626.from+"–"+wiz626.to, goal:wiz626.goal.trim(), needs})
+      .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast("✅ Заявка на 626 отправлена. Согласуют старшие админы."); })
+      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+    return;
+  }
+  bookings626.unshift({id:32+bookings626.length, me:true, author:profile.name, when:wiz626.day,
+    slot:wiz626.from+"–"+wiz626.to, goal:wiz626.goal, needs, status:"new", curator:null,
+    history:[["new","02.07, "+new Date().toTimeString().slice(0,5)]], chat:[]});
+  resetTo("home");
+  toast("✅ Заявка на 626 отправлена — вы в главном меню. Согласуют старшие админы.");
+}
+SCREENS.studioDetail = ({id}) => {
+  const b = bookings626.find(x=>x.id===id);
+  const term = ["rejected","canceled"].includes(b.status);
+  const idx = FLOW626.indexOf(b.status);
+  const tl = term
+    ? b.history.map((h,i)=>`<div class="tl-step ${i<b.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===b.history.length-1?"color:var(--destructive)":""}">${ST626[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")
+    : FLOW626.map((st,i)=>{
+        const h = b.history.find(x=>x[0]===st);
+        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST626[st].l}</div>${h?'<div class="d">'+h[1]+"</div>":""}</div>`;
+      }).join("");
+  /* смотрю как куратор/админ (не владелец) — переписка идёт с заявителем, реплики зеркалим */
+  const iCur = !b.me && (myCur(b) || (SRV?SRV.isAdmin:role!=="user"));
+  const chat = b.curator ? `
+    <div class="sec-label">${iCur?"Переписка с заявителем":"Переписка с куратором · "+b.curator}</div>
+    <div class="card">
+      <div class="chat">${b.chat.map(m=>chatMsg(m,iCur)).join("")||'<p class="sub">'+(iCur?"Сообщений пока нет.":"Куратор на связи.")+'</p>'}</div>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="chat626-inp" maxlength="1000" placeholder="${iCur?"Сообщение заявителю…":"Сообщение куратору…"}">
+        <button class="btn-sm primary" onclick="send626Chat(${b.id},${iCur})">➤</button>
+      </div>
+    </div>` : '<div class="card sub">Куратор появится после согласования — админ возьмёт вашу бронь и здесь откроется переписка.</div>';
+  return {
+    body:`
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <div class="grow"><div class="hud">626 · БРОНЬ <b>${b.id}</b></div><h1 class="big">${b.goal}</h1></div>
+          ${statusPill(b.status,ST626)}
+        </div>
+        <div class="hud">${fmtIso(b.when)}.${b.when.slice(0,4)} · <b>${b.slot}</b></div>
+        <div style="margin-top:10px">${b.needs.map(n=>'<span class="chip">'+n+'</span>').join("")||'<span class="sub">без допов</span>'}</div>
+        ${b.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+b.curator+'</b></div>':""}
+      </div>
+      <div class="sec-label">Статус</div>
+      <div class="card"><div class="tl">${tl}</div></div>
+      ${chat}
+      ${(b.me && ["new","approved"].includes(b.status))?`<div class="btnrow" style="margin-top:14px">
+        ${b.status==="approved"?'<button class="btn-sm ok grow" style="padding:12px" onclick="handover626('+b.id+')">Сдать аудиторию</button>':""}
+        <button class="btn-sm danger grow" style="padding:12px" onclick="cancel626(${b.id})">Отменить бронь</button>
+      </div>`:""}
+      ${(b.status==="ret" && (myCur(b) || (SRV?SRV.isSenior:role!=="user")))?mainBtn("Завершить бронь","close626("+b.id+")"):""}`,
+    after: ()=>markRead("626", b.id)
+  };
+};
+function close626(id){
+  confirmModal("Завершить бронь 626?","Аудитория принята, бронь уйдёт в архив.",()=>{
+    if(SRV){ srvDo("626/action",{id, action:"closed"}, ()=>{ render(); toast("Бронь 626 завершена"); }); return; }
+    const b = bookings626.find(x=>x.id===id);
+    b.status="closed"; b.history.push(["closed","02.07, "+new Date().toTimeString().slice(0,5)]);
+    render(); toast("Бронь 626 завершена");
+  });
+}
+function send626Chat(id, asAdmin){
+  const b = bookings626.find(x=>x.id===id);
+  const inp = $("chat626-inp");
+  const txt = inp.value.trim();
+  if(!txt) return;
+  inp.value = "";
+  const okToast = asAdmin ? "Заявителю ушло уведомление от бота" : "🔔 Куратору ушло уведомление от бота";
+  if(SRV){ srvDo("chat",{kind:"626", id, text:txt, asRole: asAdmin?role:"user"}, ()=>{ render(); toast(okToast); }); return; }
+  b.chat.push({who: asAdmin?"them":"me", text:txt, tm:new Date().toTimeString().slice(0,5),
+    label: asAdmin?(isSeniorNow()?"Старший":"Куратор"):"Пользователь", senior: asAdmin&&isSeniorNow()});
+  render();
+  toast(okToast);
+}
+function handover626(id){ hoPhotos = []; navTo("handover626",{id}); }
+SCREENS.handover626 = ({id}) => ({
+  body:`
+    <h1 class="big">Сдача аудитории 626</h1>
+    <p class="sub" style="margin-bottom:14px">Фото аудитории после съёмки — куратор проверит состояние. Можно выбрать сразу несколько. Тап по рамке — камера/галерея.</p>
+    ${photosGrid("ho")}
+    <div class="sec-label">Комментарий (необязательно)</div>
+    <textarea rows="2" id="ho-comm" maxlength="500" placeholder="Например: убрали, свет выключили…"></textarea>`,
+  mainbtn: mainBtn("Сдать аудиторию","doHandover626("+id+")","", hoPhotos.length<1)
+});
+function doHandover626(id){
+  if(SRV){
+    if(_busy) return; _busy=true;
+    const btn = document.querySelector(".mainbtn");
+    if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
+    api("626/action",{id, action:"handover", comment:($("ho-comm")?$("ho-comm").value.trim():""), photos:hoPhotos.filter(Boolean)})
+      .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast("📷 Сдача 626 на проверке. После проверки: «Спасибо, приходите ещё!»"); })
+      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+    return;
+  }
+  const b = bookings626.find(x=>x.id===id);
+  b.status="ret"; b.history.push(["ret","02.07, "+new Date().toTimeString().slice(0,5)]);
+  resetTo("home"); toast("📷 Сдача 626 на проверке. После проверки: «Спасибо, приходите ещё!»");
+}
+function cancel626(id){
+  confirmModal("Отменить бронь 626?","Слот освободится в графике.",()=>{
+    if(SRV){ srvDo("626/action",{id, action:"cancel"}, ()=>{ resetTo("home"); toast("Бронь 626 отменена"); }); return; }
+    const b = bookings626.find(x=>x.id===id);
+    b.status="canceled"; b.history.push(["canceled","02.07, "+new Date().toTimeString().slice(0,5)]);
+    resetTo("home"); toast("Бронь 626 отменена");
+  });
+}
+
+/* ================= АДМИН ================= */
+SCREENS.adminHub = () => {
+  const noCur = requests.filter(r=>!r.curator && ["new","issued","ret"].includes(r.status)); // заявки без куратора: новые или переданные после снятия куратора
+  const mine = requests.filter(r=>myCur(r) && !["closed","rejected","canceled"].includes(r.status));
+  const hist = requests.filter(r=>myCur(r) && ["closed","rejected","canceled"].includes(r.status)); // что обработал
+  const hist626 = bookings626.filter(b=>myCur(b) && ["closed","rejected","canceled"].includes(b.status));
+  const dds = SRV ? [fmtIso(isoPlus(0)), fmtIso(isoPlus(1))] : ["02.07","03.07"];
+  const today = requests.filter(r=>dds.some(d=>r.from.startsWith(d)) && !["closed","rejected","canceled"].includes(r.status));
+  const list = adminTab==="queue"? noCur : adminTab==="mine"? mine : adminTab==="history"? hist : today;
+  const s626new = bookings626.filter(b=>b.status==="new");
+  const s626free = bookings626.filter(b=>b.status==="approved"&&!b.curator);
+  return {
+    body:`
+      <div class="row" style="margin-bottom:12px">
+        <div class="avatar" style="border-radius:14px;background:var(--bg2);color:var(--link)">${uic("wrench",22)}</div>
+        <div class="grow"><b style="font-size:16px">Панель админа</b>
+        <div class="hud">без куратора: <b>${noCur.length}</b> · мои: <b>${mine.length}</b></div></div>
+      </div>
+      <div class="seg" role="tablist">
+        <button class="${adminTab==="queue"?"on":""}" role="tab" aria-selected="${adminTab==="queue"}" onclick="adminTab='queue';render()">Без куратора</button>
+        <button class="${adminTab==="mine"?"on":""}" role="tab" aria-selected="${adminTab==="mine"}" onclick="adminTab='mine';render()">Мои</button>
+        <button class="${adminTab==="today"?"on":""}" role="tab" aria-selected="${adminTab==="today"}" onclick="adminTab='today';render()">Сегодня</button>
+        <button class="${adminTab==="history"?"on":""}" role="tab" aria-selected="${adminTab==="history"}" onclick="adminTab='history';render()">История</button>
+      </div>
+      <div>${list.map(r=>`
+        <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
+          <div class="emoji-badge">${uic("box",19)}</div>
+          <div class="grow">
+            <div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
+            <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · ${r.dep} · ${r.from}</div>
+          </div>
+          ${statusPill(r.status)}
+        </div>`).join("")||'<div class="card sub">В этой очереди пусто ✨</div>'}</div>
+      ${adminTab==="history" && hist626.length ? '<div class="sec-label">626 · обработанные</div>'+hist626.map(b=>`
+        <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
+          <div class="emoji-badge">${uic("studio",19)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>
+          ${statusPill(b.status,ST626)}
+        </div>`).join("") : ""}
+
+      <div class="sec-label">626 · согласовано, нужен куратор</div>
+      ${s626free.map(b=>`
+        <div class="card">
+          <div class="row"><div class="grow"><b style="font-size:14px">${b.goal}</b>
+          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>${statusPill(b.status,ST626)}</div>
+          <button class="btn-sm primary" style="width:100%;margin-top:10px;padding:11px" onclick="take626(${b.id})">Стать куратором</button>
+        </div>`).join("")||'<div class="card sub">Свободных броней 626 нет</div>'}
+      ${(()=>{
+        const mine626 = bookings626.filter(b=>myCur(b) && !["closed","rejected","canceled"].includes(b.status));
+        return mine626.length ? '<div class="sec-label">626 · мои кураторства</div>'+mine626.map(b=>`
+        <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
+          <div class="emoji-badge">${uic("studio",19)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+          <div class="hud" style="margin-top:4px">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>
+          ${statusPill(b.status,ST626)}
+        </div>`).join("") : "";
+      })()}
+      ${s626new.length?'<p class="sub" style="padding:0 4px">Ещё '+s626new.length+' бронь(и) 626 ждут согласования старшими.</p>':""}
+      <div style="margin-top:14px"><button class="mainbtn secondary" style="pointer-events:auto" onclick="setRole('user')">‹ Режим пользователя</button></div>`,
+  };
+};
+function take626(id){
+  if(SRV){ srvDo("626/action",{id, action:"curator"}, ()=>{ render(); toast("Вы куратор брони 626 №"+id+". Пользователю ушло уведомление."); }); return; }
+  const b = bookings626.find(x=>x.id===id);
+  b.curator="@you";
+  render();
+  toast("Вы куратор брони 626 №"+id+". Пользователю ушло уведомление, переписка открыта.");
+}
+SCREENS.adminReq = ({id}) => {
+  const r = requests.find(x=>x.id===id);
+  let actions = "";
+  if(r.status==="new" || (!r.curator && (r.status==="issued" || r.status==="ret"))){
+    actions = mainBtn("Стать куратором","adminAct("+id+",'curator')");
+  } else if(r.status==="curator" && myCur(r)){
+    actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="row" style="gap:8px"><button class="mainbtn" style="background:var(--ok);color:#fff" onclick="adminAct('+id+',\'approved\')">🟡 Согласовано</button><button class="mainbtn destructive" style="flex:0 0 38%" onclick="rejReqModal('+id+')">Отклонить</button></div><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
+  } else if(r.status==="curator"){
+    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div></div>';
+  } else if(r.status==="approved" && myCur(r)){
+    actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><button class="mainbtn" onclick="openIssue('+id+')">🟢 Выдать оборудование</button><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
+  } else if(r.status==="approved"){
+    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div></div>';
+  } else if(r.status==="issued"){
+    actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="card" style="text-align:center"><span class="sub">Ждём сдачу оборудования пользователем</span></div>' + (myCur(r)?'<button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button>':'') + '</div></div>';
+  } else if(r.status==="ret"){
+    const canAccept = myCur(r) || isSeniorNow();
+    const accept = !canAccept ? '<div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div>'
+      : (r.escalated && !isSeniorNow()) ? '<div class="card" style="pointer-events:auto;text-align:center"><span class="sub">⛔ Проблемный возврат передан старшим</span></div>'
+      : '<button class="mainbtn" onclick="openIssue('+id+',true)">Принять возврат</button>';
+    actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto">'+accept + ((myCur(r) && !r.escalated)?'<button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button>':'')+'</div></div>';
+  }
+  const chat = `
+    <div class="sec-label">Переписка с заявителем</div>
+    <div class="card">
+      <div class="chat">${r.chat.map(m=>chatMsg(m,true)).join("")||'<p class="sub">Сообщений пока нет. Когда пользователь напишет — вам придёт уведомление от бота.</p>'}</div>
+      ${(myCur(r) || (r.escalated && isSeniorNow()))?`<div class="row" style="margin-top:10px">
+        <input type="text" id="achat-inp" maxlength="1000" placeholder="Сообщение заявителю…">
+        <button class="btn-sm primary" onclick="sendAdminChat(${r.id})">➤</button>
+      </div>`:""}
+    </div>`;
+  return {
+    body:`
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <div class="grow"><div class="hud">ID <b>${r.id}</b> · создана ${r.history[0][1]}</div>
+          <h1 class="big">${r.event}</h1></div>
+          ${statusPill(r.status)}
+        </div>
+        <div class="row" style="margin:6px 0 10px">
+          <div class="avatar" style="width:32px;height:32px;font-size:12px">${r.author.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
+          <div class="grow"><b style="font-size:13.5px">${r.author}</b><div class="hud">${r.dep}</div></div>
+        </div>
+        <div class="hud">${r.from} → <b>${r.to}</b></div>
+        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+i[0]+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
+        ${r.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+r.curator+'</b></div>':""}
+      </div>
+      ${r.lateNote?'<div class="kit-warn"><b>⚠️ '+r.lateNote+'</b> — команда может отказать в выдаче/приёме.</div>':""}
+      <div class="sec-label">История</div>
+      <div class="card"><div class="tl">${r.history.map((h,i)=>`
+        <div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span>
+        <div class="t">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")}</div></div>
+      ${chat}
+      <p class="sub" style="padding:0 4px">Каждое действие отправляет пользователю уведомление и обновляет карточку в админ-канале.</p>`,
+    mainbtn: actions,
+    after: ()=>markRead("req", id)
+  };
+};
+function sendAdminChat(id){
+  const r = requests.find(x=>x.id===id);
+  const inp = $("achat-inp");
+  const txt = inp.value.trim();
+  if(!txt) return;
+  inp.value = "";
+  if(SRV){ srvDo("chat",{kind:"req", id, text:txt, asRole:role}, ()=>{ render(); toast("Пользователю ушло уведомление от бота"); }); return; }
+  r.chat.push({who:"them",text:txt,tm:new Date().toTimeString().slice(0,5),senior:isSeniorNow(),label:isSeniorNow()?"Старший":"Куратор"});
+  render();
+  toast("Пользователю ушло уведомление от бота");
+}
+function adminAct(id, st, reason){
+  const toastFor = st==="curator" ? "Вы куратор заявки ID "+id+". Пользователю ушло уведомление."
+    : st==="approved" ? "🟡 Согласовано — пользователю ушло уведомление."
+    : st==="uncurator" ? "Кураторство снято — заявка снова без куратора."
+    : "⛔ Отклонено. Уведомление ушло.";
+  if(SRV){
+    const body = {id, action:st}; if(reason) body.comment = reason;
+    if(st==="uncurator"){ srvDo("request/action",body,()=>{ resetTo("adminHub"); toast(toastFor); }); return; }
+    srvDo("request/action",body,()=>{ render(); toast(toastFor); });
+    return;
+  }
+  const r = requests.find(x=>x.id===id);
+  const tm = "02.07, "+new Date().toTimeString().slice(0,5);
+  if(st==="curator"){ r.curator="@you"; }
+  if(st==="uncurator"){ r.curator=null; if(["curator","approved"].includes(r.status)){ r.status="new"; } r.history.push(["new",tm+" · куратор снял себя"]); resetTo("adminHub"); toast(toastFor); return; }
+  if(st==="rejected"){ r.status="rejected"; r.history.push(["rejected",tm+(reason?" · "+reason:"")]); render(); toast(toastFor); return; }
+  r.status=st; r.history.push([st,tm]); render();
+  toast(st==="curator" ? "Вы куратор заявки ID "+id+". Переписка открыта." : "🟡 Согласовано.");
+}
+function rejReqModal(id){
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal"><h3>Отклонить заявку</h3>
+        <p>Пользователь получит уведомление с причиной, оборудование освободится.</p>
+        <div class="sec-label" style="margin-top:0">Причина отказа</div>
+        <input type="text" id="rejreq-reason" maxlength="200" placeholder="Например: неполный комплект">
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm danger" onclick="const rr=$('rejreq-reason')?$('rejreq-reason').value.trim():'';$('overlay').innerHTML='';adminAct(${id},'rejected',rr)">Отклонить</button>
+        </div></div></div>`;
+}
+/* Теоретические номера экземпляров: система предлагает минимальный свободный,
+   админ может тапом сменить на другой свободный. Пользователь номера не видит. */
+function freeNumsOf(short){
+  const it = itemOf(short);
+  const total = it ? it.total : 1;
+  if(total<=1) return null;
+  const busyCount = lockOf(short)%total; // мок: первые N заняты
+  const free = []; for(let n=busyCount+1;n<=total;n++) free.push(n);
+  return free.length?free:[1];
+}
+function openIssue(id, isReturn){
+  const r = requests.find(x=>x.id===id);
+  issueCheck = {id, isReturn:!!isReturn, done:{}, nums:{}, items:r.items.map(i=>[i[0],i[1]]), changed:false};
+  /* по умолчанию всё отмечено — админ снимает галочку только с проблемных позиций */
+  issueCheck.items.forEach(i=>{ issueCheck.done[i[0]]=true; const f=freeNumsOf(i[0]); if(f) issueCheck.nums[i[0]]=f[0]; });
+  drawIssue(r);
+}
+function cycleNum(short, rid){
+  const f = freeNumsOf(short);
+  issueCheck.nums[short] = f[(f.indexOf(issueCheck.nums[short])+1)%f.length];
+  drawIssue(requests.find(x=>x.id===rid));
+}
+/* нет позиции в наличии — админ убирает её из выдачи или добавляет замену */
+function issueDrop(short, rid){
+  issueCheck.items = issueCheck.items.filter(i=>i[0]!==short);
+  delete issueCheck.done[short]; delete issueCheck.nums[short];
+  issueCheck.changed = true;
+  drawIssue(requests.find(x=>x.id===rid));
+}
+function issueAdd(short, rid){
+  const ex = issueCheck.items.find(i=>i[0]===short);
+  if(ex) ex[1]++; else {
+    issueCheck.items.push([short,1]);
+    const f = freeNumsOf(short); if(f) issueCheck.nums[short]=f[0];
+  }
+  issueCheck.changed = true;
+  drawIssue(requests.find(x=>x.id===rid));
+}
+function issueAddSheet(rid){
+  const q = (issueCheck.addQ||"").toLowerCase();
+  const list = [];
+  CATALOG.forEach(c=>c.items.forEach(it=>{
+    if(!q || it.short.toLowerCase().includes(q) || c.cat.toLowerCase().includes(q)) list.push(it.short);
+  }));
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>➕ Добавить позицию</h3>
+      <div class="search" style="margin-bottom:8px"><input type="text" placeholder="Поиск по каталогу" value="${issueCheck.addQ||""}"
+        oninput="issueCheck.addQ=this.value;issueAddSheet(${rid});const i=document.querySelector('.sheet .search input');i.focus();i.setSelectionRange(i.value.length,i.value.length)"></div>
+      <div style="max-height:40vh;overflow-y:auto">
+        ${list.slice(0,120).map(s=>'<div class="list-item" onclick="issueAdd(\''+escJs(s)+'\','+rid+')">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+s+'</span><span class="chev">＋</span></div>').join("")||'<p class="sub">Ничего не нашлось</p>'}
+        ${list.length>120?'<p class="sub" style="padding:8px">Показаны первые 120 — уточните поиск.</p>':""}
+      </div>
+      <button class="mainbtn secondary" style="margin-top:12px" onclick="drawIssue(requests.find(x=>x.id===${rid}))">‹ К чек-листу</button>
+    </div>`;
+}
+function drawIssue(r){
+  /* сохраняем скролл шита и введённый комментарий — чтобы тап по чекбоксу не прыгал наверх и не стирал текст */
+  const _sh = document.querySelector(".sheet"); const _top = _sh ? _sh.scrollTop : 0;
+  const _ci = $("issue-comm"); const _comm = _ci ? _ci.value : "";
+  const all = issueCheck.items.length>0 && issueCheck.items.every(i=>issueCheck.done[i[0]]);
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div>
+      <h3>${issueCheck.isReturn?"🔁 Приём возврата":"🟢 Выдача"} · ID ${r.id}</h3>
+      <p class="sub" style="margin-bottom:10px">Отметьте каждую позицию. № экземпляра предложен автоматически — тап по номеру, чтобы сменить.${issueCheck.isReturn?"":" Нет в наличии — уберите позицию крестиком."}</p>
+      ${issueCheck.items.map(i=>{ const es=escJs(i[0]); return `
+        <div class="check-row ${issueCheck.done[i[0]]?"on":""}" ${chkA(issueCheck.done[i[0]])} onclick="issueCheck.done['${es}']=!issueCheck.done['${es}'];drawIssue(requests.find(x=>x.id===${r.id}))">
+          <span class="checkbox">✓</span><span class="grow">${i[0]}${i[1]>1?" × "+i[1]:""}</span>
+          ${issueCheck.nums[i[0]]?'<button class="btn-sm" style="font-family:var(--mono)" onclick="event.stopPropagation();cycleNum(\''+es+'\','+r.id+')">№ '+issueCheck.nums[i[0]]+'</button>':""}
+          ${issueCheck.isReturn?'<span class="hud">'+(issueCheck.done[i[0]]?"OK":"—")+'</span>'
+            :'<button class="btn-sm danger" onclick="event.stopPropagation();issueDrop(\''+es+'\','+r.id+')">✕</button>'}
+        </div>`; }).join("")||'<p class="sub" style="padding:8px 0">Все позиции убраны — добавьте хотя бы одну или отклоните заявку.</p>'}
+      ${issueCheck.isReturn?"":'<button class="btn-sm" style="width:100%;margin-top:8px" onclick="issueAddSheet('+r.id+')">➕ Добавить позицию</button>'}
+      ${issueCheck.changed?'<p class="sub" style="margin-top:8px">Состав изменён — пользователь получит обновлённый список при выдаче.</p>':""}
+      <div class="sec-label">Комментарий ${issueCheck.isReturn?"(заполнен → заявка уйдёт старшим)":"(увидит пользователь)"}</div>
+      <input type="text" id="issue-comm" maxlength="300" placeholder="Необязательно">
+      <button class="mainbtn" style="margin-top:14px" ${all?"":"disabled"} onclick="doIssue()">${issueCheck.isReturn?"Принять возврат":"Выдать"}</button>
+    </div>`;
+  const sh2 = document.querySelector(".sheet"); if(sh2) sh2.scrollTop = _top;
+  const ci2 = $("issue-comm"); if(ci2 && _comm) ci2.value = _comm;
+}
+function doIssue(){
+  const r = requests.find(x=>x.id===issueCheck.id);
+  const comm = $("issue-comm").value.trim();
+  if(SRV){
+    const isRet = issueCheck.isReturn;
+    srvDo("request/action",{id:issueCheck.id, action:isRet?"return":"issue", comment:comm,
+      items:(!isRet && issueCheck.changed) ? issueCheck.items : undefined},
+      ()=>{ $("overlay").innerHTML=""; render();
+        toast(isRet ? (comm ? "📷 Есть комментарий — возврат ушёл старшим" : "✅ Возврат принят, заявка закрыта")
+                    : "🟢 Выдано. Пользователю ушёл список."); });
+    return;
+  }
+  const tm = "02.07, "+new Date().toTimeString().slice(0,5);
+  if(issueCheck.isReturn){
+    if(comm){ r.status="ret"; r.history.push(["ret",tm+" · к старшим: "+comm]); toast("📷 Есть комментарий — возврат ушёл на проверку старшим"); }
+    else { r.status="closed"; r.returnedAt=r.returnedAt||tm; r.history.push(["closed",tm]); toast("✅ Возврат принят, заявка в архиве. Пользователю: «Заявка закрыта»"); }
+  } else {
+    if(issueCheck.changed) r.items = issueCheck.items.map(i=>[i[0],i[1]]);
+    r.status="issued"; r.takenAt=tm; r.history.push(["issued",tm]);
+    toast("🟢 Выдано. Пользователю ушёл список выданного оборудования.");
+  }
+  $("overlay").innerHTML=""; render();
+}
+
+/* ================= СТАРШИЙ АДМИН ================= */
+SCREENS.seniorHub = () => {
+  const s626new = bookings626.filter(b=>b.status==="new");
+  return {
+    body:`
+      <div class="row" style="margin-bottom:12px">
+        <div class="avatar" style="border-radius:14px;background:var(--bg2);color:var(--link)">${uic("star",22)}</div>
+        <div class="grow"><b style="font-size:16px">Старший админ</b>
+        <div class="hud">верификация: <b>${verifQueue.length}</b> · 626 на согласовании: <b>${s626new.length}</b></div></div>
+      </div>
+
+      <div class="sec-label">⏳ 626 · ждут согласования</div>
+      ${s626new.map(b=>`
+        <div class="card">
+          <div class="row"><div class="grow"><b style="font-size:14px">${b.goal}</b>
+          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>${statusPill(b.status,ST626)}</div>
+          <div class="btnrow" style="margin-top:10px">
+            <button class="btn-sm ok grow" onclick="dec626(${b.id},'approved')">Согласовать</button>
+            <button class="btn-sm danger grow" onclick="rej626Modal(${b.id})">Отклонить</button>
+          </div>
+        </div>`).join("")||'<div class="card sub">Новых заявок на 626 нет</div>'}
+
+      <div class="sec-label">Люди</div>
+      <div>
+        <div class="list-item" onclick="navTo('adminUsers')"><div class="emoji-badge">${uic("users",19)}</div><div class="grow">Пользователи и верификация</div>${verifQueue.length?'<span class="badge-cnt">'+verifQueue.length+'</span>':""}<span class="chev">›</span></div>
+        <div class="list-item" onclick="navTo('blacklist')"><div class="emoji-badge">${uic("ban",19)}</div><div class="grow">Чёрный список</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="navTo('reqChats')"><div class="emoji-badge">${uic("book",19)}</div><div class="grow">Переписки заявок</div><span class="chev">›</span></div>
+        ${(()=>{const pr=requests.filter(r=>r.escalated&&r.status==="ret").length;return '<div class="list-item" onclick="navTo(\'problemReturns\')"><div class="emoji-badge">'+uic("wrench",19)+'</div><div class="grow">Проблемные возвраты</div>'+(pr?'<span class="badge-cnt">'+pr+'</span>':"")+'<span class="chev">›</span></div>';})()}
+      </div>
+      <div class="sec-label">Оборудование</div>
+      <div>
+        <div class="list-item" onclick="startAddEquip()"><div class="emoji-badge">${uic("plus",19)}</div><div class="grow">Добавить оборудование в рентал</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="startRemoveEquip()"><div class="emoji-badge">${uic("box",19)}</div><div class="grow">Убрать оборудование</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="navTo('catBlocks')"><div class="emoji-badge">${uic("lock",19)}</div><div class="grow">Блокировка категорий</div><span class="chev">›</span></div>
+      </div>
+      <div class="sec-label">Коммуникация и данные</div>
+      <div>
+        <div class="list-item" onclick="doResync()"><div class="emoji-badge">${uic("refresh",19)}</div><div class="grow">Обновить БД</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="startBroadcast()"><div class="emoji-badge">${uic("mega",19)}</div><div class="grow">Массовая рассылка</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="openStats(true)"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Статистика (MD)</div><span class="chev">›</span></div>
+      </div>
+      <p class="sub" style="padding:4px">Заявки на оборудование обрабатывают админы в своей панели — переключите роль, чтобы посмотреть.</p>
+      <div style="margin-top:10px"><button class="mainbtn secondary" onclick="setRole('user')">‹ Режим пользователя</button></div>`,
+  };
+};
+function dec626(id, st, reason){
+  if(SRV){ const body={id, action:st}; if(reason) body.comment=reason;
+    srvDo("626/action",body, ()=>{ render();
+    toast(st==="approved" ? "🟢 Согласовано. Теперь любой админ может стать куратором." : "⛔ Отклонено — пользователю ушло уведомление"); }); return; }
+  const b = bookings626.find(x=>x.id===id);
+  b.status = st; b.history.push([st,"02.07, "+new Date().toTimeString().slice(0,5)+(reason?" · "+reason:"")]);
+  render();
+  toast(st==="approved" ? "🟢 Согласовано. Теперь любой админ может стать куратором этой брони." : "⛔ Отклонено — пользователю ушло уведомление");
+}
+function rej626Modal(id){
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal"><h3>Отклонить бронь 626</h3>
+        <div class="sec-label" style="margin-top:0">Причина отказа</div>
+        <input type="text" id="rej626-reason" maxlength="200" placeholder="Например: студия занята мероприятием">
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm danger" onclick="const rr=$('rej626-reason')?$('rej626-reason').value.trim():'';$('overlay').innerHTML='';dec626(${id},'rejected',rr)">Отклонить</button>
+        </div></div></div>`;
+}
+/* ---- массовая рассылка (старший) ---- */
+let bcText = "";
+function startBroadcast(){ bcText=""; bcPhotos.length=0; openBroadcast(); }
+function openBroadcast(){
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>${uic("mega",18)} Массовая рассылка</h3>
+      <p class="sub" style="margin-bottom:10px">Уйдёт всем верифицированным пользователям от имени бота.</p>
+      <textarea rows="4" id="bc-text" placeholder="Текст рассылки…" oninput="bcText=this.value">${bcText}</textarea>
+      <div class="sec-label">Фото (необязательно)</div>${photosGrid("bc")}
+      <button class="mainbtn" style="margin-top:12px" onclick="sendBroadcast()">Отправить всем</button>
+    </div>`;
+}
+function doResync(){
+  if(!confirm("⚠️ Пересверка базы: все верифицированные пользователи будут проверены заново. Продолжить?")){
+    return;
+  }
+  if(SRV){ if(_busy) return; _busy=true; api("resync").then(d=>{ _busy=false; applyBoot(d); toast("БД обновлена: " + (d.reloaded||0) + " человек, " + (d.pending||0) + " в очередь верификации"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  toast("Демо: бот бы пересверил людей");
+}
+function sendBroadcast(){
+  const t = bcText.trim();
+  if(!t){ toast("Пустой текст"); return; }
+  const photos = bcPhotos.filter(Boolean);
+  if(SRV){ if(_busy) return; _busy=true; api("broadcast",{text:t, photos}).then(d=>{ _busy=false; applyBoot(d); bcText=""; bcPhotos.length=0; closeSheet(); toast("📣 Отправляется "+(d.broadcast||0)+" пользователям"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  bcText=""; bcPhotos.length=0; closeSheet(); toast("📣 Демо: рассылка ушла бы всем пользователям");
+}
+/* ---- статистика (красивый UI) ---- */
+let statsData = null;
+function openStats(){
+  if(SRV){ if(_busy) return; _busy=true; api("stats").then(d=>{ _busy=false; statsData=d.stats||null; navTo("stats"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  statsData = {top:[["item1",5],["item2",3]], months:[["07.2026",35]], months626:[["07.2026",9]], adminStats:[{name:"@admin",curated:10,issued:8,returned:8,rejected:0}], users:[["user",5]], totals:{requests:35,b626:9}, topRejecters:[]};
+  navTo("stats");
+}
+function statusColor(val, max){
+  if(val>=max*.8) return "var(--ok)";
+  if(val>=max*.4) return "var(--warn)";
+  return "var(--destructive)";
+}
+SCREENS.stats = () => {
+  const s = statsData||{};
+  const topList = (s.top||[]).slice(0,5).map(([item,cnt])=>`<div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)"><span>${item}</span><b>${cnt} шт</b></div>`).join("");
+  const adminList = (s.adminStats||[]).slice(0,5).map(a=>{
+    const max = Math.max(a.curated||0, a.issued||0, a.returned||0, a.rejected||0, 1);
+    return `<div class="card" style="margin-bottom:8px">
+      <div style="font-weight:600;margin-bottom:6px">${a.name}</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <span class="pill" style="background:var(--ok)">Курировал: ${a.curated||0}</span>
+        <span class="pill" style="background:var(--info)">Выдал: ${a.issued||0}</span>
+        <span class="pill" style="background:var(--teal)">Принял: ${a.returned||0}</span>
+<span class="pill" style="background:${a.rejected > 0 ? 'var(--destructive)' : 'var(--ok)'}">Откл.: ${a.rejected || 0}</span>      </div>
+    </div>`;
+  }).join("");
+  const topRejList = (s.topRejecters||[]).map((a,i)=>`<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--sep)"><span>${i+1}. ${a.name}</span><b>${a.rejected}</b></div>`).join("");
+  const best = s.best||{};
+  return {
+    body:`
+    <h1 class="big">${uic("chart",22)} Статистика</h1>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <div style="text-align:center;flex:1"><div style="font-size:24px;font-weight:700">${s.totals?.requests||0}</div><div class="hud">Заявок</div></div>
+        <div style="text-align:center;flex:1"><div style="font-size:24px;font-weight:700">${s.totals?.b626||0}</div><div class="hud">Броней 626</div></div>
+      </div>
+    </div>
+    <div class="sec-label">Топ оборудования</div>
+    <div class="card" style="padding:0 12px">${topList||'<div class="sub">Нет данных</div>'}</div>
+    <div class="sec-label">Активность админов</div>
+    ${adminList||'<div class="card sub">Нет данных</div>'}
+    ${best.curator?`<div class="sub" style="margin-top:4px">🏆 Лучший по курированию: ${best.curator}</div>`:''}
+    ${best.issuer?`<div class="sub">🏆 Лучший по выдачам: ${best.issuer}</div>`:''}
+    ${best.returner?`<div class="sub">🏆 Лучший по возвратам: ${best.returner}</div>`:''}
+    ${topRejList?`<div class="sec-label">Топ по отказам</div><div class="card" style="padding:0 12px">${topRejList}</div>`:''}
+    <div class="sec-label">Экспорт в файл</div>
+    <div class="btnrow">
+      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('requests')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>Заявки</button>
+      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('626')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>626</button>
+      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('admins')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>Админы</button>
+    </div>
+    <button class="mainbtn secondary" style="margin-top:10px" onclick="navTo('seniorHub')">‹ Назад</button>`
+  };
+};
+function exportMd(kind){
+  if(SRV){ if(_busy) return; _busy=true; api("export",{kind}).then(()=>{ _busy=false; toast("📄 Файл отправлен в чат с ботом"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  toast("Демо: бот прислал бы MD в личку");
+}
+/* ---- переписки заявок (старший, только просмотр) ---- */
+SCREENS.reqChats = () => ({
+  body:`
+    <h1 class="big">Переписки заявок</h1>
+    <p class="sub" style="margin:6px 0 12px">Все заявки и переписка заявитель↔куратор. Писать можно только по своим кураторствам.</p>
+    ${requests.length? requests.map(r=>`
+      <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
+        <div class="emoji-badge">${uic("box",19)}</div>
+        <div class="grow"><div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
+        <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · ${(r.chat&&r.chat.length)?r.chat.length+" сообщ.":"без переписки"}</div></div>
+        ${statusPill(r.status)}
+      </div>`).join("") : '<div class="card sub">Заявок нет</div>'}`
+});
+/* ---- проблемные возвраты (старший) — куратор передал возврат наверх ---- */
+SCREENS.problemReturns = () => {
+  const list = requests.filter(r=>r.escalated && r.status==="ret");
+  return {
+    body:`
+      <h1 class="big">⚠️ Проблемные возвраты</h1>
+      <p class="sub" style="margin:6px 0 12px">Куратор передал возврат старшим. Разберитесь: примите возврат или напишите в чат (ваши сообщения видны красным).</p>
+      ${list.length? list.map(r=>`
+        <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
+          <div class="emoji-badge">${uic("box",19)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
+          <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · куратор ${r.curator||"—"}</div></div>
+          ${statusPill(r.status)}
+        </div>`).join("") : '<div class="card sub">Проблемных возвратов нет ✨</div>'}`
+  };
+};
+/* ---- чёрный список (старший) ---- */
+SCREENS.blacklist = () => {
+  const blocked = usersDb.filter(u=>u.verified==='blocked');
+  return {
+    body:`
+      <h1 class="big">${uic("ban",22)} Чёрный список</h1>
+      <p class="sub" style="margin:6px 0 12px">Заблокированные пользователи. Старших в ЧС добавить нельзя.</p>
+      ${blocked.length? blocked.map(u=>`
+        <div class="card">
+          <div class="row"><div class="avatar" style="width:36px;height:36px;font-size:13px">${(u.name||"?").split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
+          <div class="grow"><b style="font-size:14px">${u.name||u.tg||"?"}</b><div class="hud">${u.org||""} ${u.tg||""}</div>
+          ${u.reason?'<div class="sub" style="margin-top:4px">Причина: '+u.reason+'</div>':""}</div></div>
+          <button class="btn-sm ok" style="width:100%;margin-top:10px;padding:11px" onclick="unblockUser(${SRV?u.id:("'"+escJs(u.tg||"")+"'")})">Разблокировать</button>
+        </div>`).join("") : '<div class="card sub">Чёрный список пуст</div>'}`
+  };
+};
+function unblockUser(key){
+  if(SRV){ srvDo("verify",{userId:key, action:"unblock"}, ()=>{ render(); toast("Пользователь разблокирован"); }); return; }
+  const u = usersDb.find(x=>x.tg===key); if(u){ u.verified='ok'; u.ok=true; }
+  render(); toast("Пользователь разблокирован (демо)");
+}
+/* ---- блокировка категорий (старший) ---- */
+SCREENS.catBlocks = () => {
+  const extraCats = (SRV&&SRV.extraItems)?SRV.extraItems.map(i=>i.cat):[];
+  const cats = CATALOG_BASE.map(c=>c.cat).concat(extraCats).filter((v,i,a)=>a.indexOf(v)===i);
+  const blocks = (SRV&&SRV.catBlocks)||{};
+  return {
+    body:`
+      <h1 class="big">${uic("lock",22)} Блокировка категорий</h1>
+      <p class="sub" style="margin:6px 0 12px">Заблокированная категория недоступна пользователям в каталоге.</p>
+      ${cats.map(cat=>{
+        const b = blocks[cat];
+        return `<div class="card"><div class="row">
+          <span class="grow"><b style="font-size:14px">${cat}</b>${b?'<div class="hud" style="color:var(--warn)">заблокирована'+(b.until?" до "+b.until:"")+(b.term?" · "+b.term:"")+'</div>':'<div class="hud">доступна</div>'}</span>
+          ${b?'<button class="btn-sm ok" onclick="catBlock(\''+escJs(cat)+'\',true)">Снять</button>'
+             :'<button class="btn-sm danger" onclick="catBlockSheet(\''+escJs(cat)+'\')">Заблокировать</button>'}
+        </div></div>`;
+      }).join("")}`
+  };
+};
+let catBlk = null;
+function catBlockSheet(cat){
+  const now = new Date(); const y0=now.getFullYear(), m0=now.getMonth();
+  const monthsList = []; for(let k=0;k<6;k++){ monthsList.push({y:y0+Math.floor((m0+k)/12), m:(m0+k)%12}); } // на полгода вперёд
+  catBlk = {cat, term:"", month:monthsList[0], day:null, monthsList};
+  drawCatBlock();
+}
+function catBlkTermPick(term){
+  catBlk.term = term;
+  if(term!=="period") catBlk.day = null;
+  drawCatBlock();
+}
+function catBlkPick(iso){ catBlk.day = iso; drawCatBlock(); }
+function catBlkNav(d){ const i=catBlk.monthsList.findIndex(x=>x.y===catBlk.month.y&&x.m===catBlk.month.m); if(catBlk.monthsList[i+d]){ catBlk.month=catBlk.monthsList[i+d]; drawCatBlock(); } }
+function drawCatBlock(){
+  const isPeriod = catBlk.term==="period";
+  const ready = catBlk.term && (!isPeriod || !!catBlk.day);
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div><h3>Заблокировать «${catBlk.cat}»</h3>
+      <p class="sub" style="margin-bottom:10px">На какой срок заблокировать категорию?</p>
+      <div class="slots" style="grid-template-columns:repeat(3,1fr)">
+        <button class="slot ${catBlk.term==='1h'?'sel':''}" onclick="catBlkTermPick('1h')">1 час</button>
+        <button class="slot ${catBlk.term==='6h'?'sel':''}" onclick="catBlkTermPick('6h')">6 часов</button>
+        <button class="slot ${catBlk.term==='12h'?'sel':''}" onclick="catBlkTermPick('12h')">12 часов</button>
+        <button class="slot ${catBlk.term==='forever'?'sel':''}" onclick="catBlkTermPick('forever')">навсегда</button>
+        <button class="slot ${isPeriod?'sel':''}" onclick="catBlkTermPick('period')">до периода</button>
+      </div>
+      ${isPeriod ? calHtml({month:catBlk.month, sel1:catBlk.day, sel2:null, pickFn:"catBlkPick", navFn:"catBlkNav", busyDots:false, monthsList:catBlk.monthsList, minIso:isoPlus(0)}) : ""}
+      <button class="mainbtn destructive" style="margin-top:12px" ${ready?"":"disabled"} onclick="catBlock('${escJs(catBlk.cat)}',false,'${catBlk.day||""}','${catBlk.term}')">${isPeriod&&catBlk.day?"Заблокировать до "+fmtIso(catBlk.day):"Заблокировать"}</button>
+    </div>`;
+}
+function catBlock(cat, unblock, until, term){
+  if(SRV){ srvDo("category/block",{cat, unblock:!!unblock, until:until||"", term:term||""}, ()=>{ $("overlay").innerHTML=""; render(); toast(unblock?"Категория разблокирована":"Категория заблокирована"); }); return; }
+  $("overlay").innerHTML=""; toast("Демо: сохранилось бы на сервере");
+}
+/* ---- добавить оборудование в рентал (старший) ---- */
+let equipForm = null;
+function startAddEquip(){ equipForm = {cat:"", newCat:"", short:"", full:"", total:"1", level:""}; navTo("addEquip"); }
+SCREENS.addEquip = () => {
+  if(!equipForm) equipForm = {cat:"", newCat:"", short:"", full:"", total:"1", level:""};
+  const cats = CATALOG_BASE.map(c=>c.cat);
+  const extra = (SRV&&SRV.extraItems)||[];
+  const catOk = equipForm.cat==='__new' ? equipForm.newCat.trim() : equipForm.cat;
+  const ready = !!(catOk && equipForm.short.trim());
+  return {
+    body:`
+      <h1 class="big">${uic("plus",22)} Добавить оборудование</h1>
+      <div class="sec-label">Категория</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        ${cats.map(c=>'<button class="chip-btn '+(equipForm.cat===c?"on":"")+'" onclick="equipForm.cat=\''+escJs(c)+'\';equipForm.newCat=\'\';render()">'+c+'</button>').join("")}
+        <button class="chip-btn ${equipForm.cat==='__new'?"on":""}" onclick="equipForm.cat='__new';render()">+ новая</button>
+      </div>
+      ${equipForm.cat==='__new'?'<input type="text" maxlength="80" style="margin-top:8px" placeholder="Название новой категории" value="'+equipForm.newCat+'" oninput="equipForm.newCat=this.value">':""}
+      <div class="sec-label">Короткое название (как в каталоге)</div>
+      <input type="text" id="eq-short" maxlength="80" placeholder="напр. R8 №2" value="${equipForm.short}" oninput="equipForm.short=this.value;const b=document.querySelector('.mainbtn');if(b)b.disabled=!this.value.trim()">
+      <div class="sec-label">Полное название</div>
+      <input type="text" id="eq-full" maxlength="160" placeholder="напр. Фотоаппарат Canon EOS R8 body" value="${equipForm.full}" oninput="equipForm.full=this.value">
+      <div class="sec-label">Количество</div>
+      <input type="text" id="eq-total" maxlength="4" inputmode="numeric" placeholder="1" value="${equipForm.total}" oninput="equipForm.total=this.value.replace(/[^0-9]/g,'')">
+      <div class="sec-label">Уровень доступа</div>
+      <div class="row" style="gap:6px">
+        ${[["","всем"],["акт","активисты"],["глава","старшие"]].map(o=>'<button class="chip-btn '+(equipForm.level===o[0]?"on":"")+'" onclick="equipForm.level=\''+o[0]+'\';render()">'+o[1]+'</button>').join("")}
+      </div>
+      ${extra.length?'<div class="sec-label">Добавленные позиции</div><div>'+extra.map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+it.short+'</div><div class="hud">'+it.cat+' · '+it.total+' шт</div></div><button class="btn-sm danger" onclick="delEquip(\''+escJs(it.short)+'\')">Удалить</button></div>').join("")+'</div>':""}
+      <div class="sec-label">Убрать позицию из каталога</div>
+      <input type="text" id="eq-rm" maxlength="60" placeholder="Поиск позиции для скрытия" value="${equipForm.rmQ||""}" oninput="equipForm.rmQ=this.value;render()">
+      ${(()=>{
+        const q=(equipForm.rmQ||"").toLowerCase(); if(!q) return "";
+        const list=[]; CATALOG.forEach(c=>c.items.forEach(it=>{ if(it.short.toLowerCase().includes(q)) list.push(it.short); }));
+        return '<div>'+(list.slice(0,20).map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm danger" onclick="equipRemove(\''+escJs(s)+'\')">Скрыть</button></div>').join("")||'<p class="sub">Ничего не нашлось</p>')+'</div>';
+      })()}
+      ${(SRV&&SRV.removedItems&&SRV.removedItems.length)?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+SRV.removedItems.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`,
+    mainbtn: mainBtn("Добавить позицию","saveEquip()","", !ready)
+  };
+};
+function saveEquip(){
+  const cat = equipForm.cat==='__new' ? equipForm.newCat.trim() : equipForm.cat;
+  const short = equipForm.short.trim();
+  if(!cat || !short){ toast("Категория и название обязательны"); return; }
+  const total = Math.max(1, parseInt(equipForm.total)||1);
+  if(SRV){
+    if(_busy) return; _busy=true;
+    api("equip/add",{cat, short, full:equipForm.full.trim(), total, level:equipForm.level})
+      .then(d=>{ _busy=false; applyBoot(d); equipForm=null; goBack(); toast("Позиция добавлена"); })
+      .catch(e=>{ _busy=false; toast("⚠️ "+e.message); });
+    return;
+  }
+  let c = CATALOG.find(x=>x.cat===cat); if(!c){ c={cat, items:[]}; CATALOG.push(c); }
+  c.items.push({short, full:equipForm.full.trim()||short, total, level:equipForm.level||null});
+  equipForm=null; goBack(); toast("Позиция добавлена (демо)");
+}
+function delEquip(short){
+  if(SRV){ srvDo("equip/del",{short}, ()=>{ render(); toast("Позиция удалена"); }); return; }
+  toast("Демо: удалилось бы на сервере");
+}
+function equipRemove(short){
+  if(SRV){ srvDo("equip/remove",{short}, ()=>{ render(); toast("Позиция скрыта из каталога"); }); return; }
+  toast("Демо: скрылось бы на сервере");
+}
+function equipRestore(short){
+  if(SRV){ srvDo("equip/restore",{short}, ()=>{ render(); toast("Позиция возвращена"); }); return; }
+  toast("Демо: вернулось бы на сервере");
+}
+let removeQ = "", removeCat = "Все";
+function startRemoveEquip(){ removeQ=""; removeCat="Все"; navTo("removeEquip"); }
+SCREENS.removeEquip = () => {
+  const q = removeQ.trim().toLowerCase();
+  const cats = ["Все", ...CATALOG.map(c=>c.cat)];
+  const list = [];
+  CATALOG.forEach(c=>{
+    if(removeCat!=="Все" && c.cat!==removeCat) return;
+    c.items.forEach(it=>{ if(!q || it.short.toLowerCase().includes(q)) list.push({short:it.short, cat:c.cat}); });
+  });
+  const removed = (SRV&&SRV.removedItems)||[];
+  return {
+    body:`
+      <h1 class="big">Убрать оборудование</h1>
+      <p class="sub" style="margin:6px 0 10px">Скрытая позиция пропадает из каталога у всех. Можно вернуть.</p>
+      <div class="chips">${cats.map(c=>'<button class="chip-btn '+(removeCat===c?"on":"")+'" onclick="removeCat=\''+escJs(c)+'\';render()">'+(c==="Все"?"Все":icon(c,14)+c)+'</button>').join("")}</div>
+      <div class="search"><input type="text" maxlength="60" placeholder="Поиск позиции" value="${removeQ}" oninput="removeQ=this.value;renderKeepFocus()"></div>
+      <div>${list.slice(0,80).map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+it.short+'</div><div class="hud">'+it.cat+'</div></div><button class="btn-sm danger" onclick="equipRemove(\''+escJs(it.short)+'\')">Скрыть</button></div>').join("")||'<div class="card sub">Ничего не нашлось</div>'}
+        ${list.length>80?'<p class="sub" style="padding:8px">Показаны первые 80 — уточните поиск.</p>':""}</div>
+      ${removed.length?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+removed.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`
+  };
+};
+SCREENS.adminUsers = () => ({
+  body:`
+    ${verifQueue.length?`
+    <div class="sec-label">⏳ Очередь верификации</div>
+    ${verifQueue.map(v=>`
+      <div class="card" style="border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)">
+        <div class="row"><div class="avatar" style="width:38px;height:38px;font-size:14px">${v.name[0]}</div>
+        <div class="grow"><b style="font-size:14px">${v.name}</b><div class="hud">${v.org} · ${v.tg}${v.role?" · просит: "+v.role:""}</div></div></div>
+        <div class="hud" style="margin:10px 0 5px">РОЛЬ ПРИ ВЕРИФИКАЦИИ (СТАВИТ АДМИН)</div>
+        <div class="row" style="gap:6px">
+          ${["активист","стажёр","СО/ССФ","production"].map(rl=>'<button class="chip-btn '+((v.assignRole||v.role||"активист")===rl?"on":"")+'" onclick="verifQueue.find(x=>x.id==='+v.id+').assignRole=\''+rl+'\';render()">'+rl+'</button>').join("")}
+        </div>
+        <div class="btnrow" style="margin-top:11px">
+          <button class="btn-sm ok grow" onclick="verify(${v.id},'ok')">Верифицировать</button>
+          <button class="btn-sm grow" onclick="rejectModal(${v.id})">Отклонить</button>
+          <button class="btn-sm danger" onclick="banModal(${v.id})">Блок</button>
+        </div>
+      </div>`).join("")}`:""}
+    <div class="sec-label">Все пользователи</div>
+    <div class="search"><input type="text" maxlength="60" placeholder="Поиск по ФИО или организации" value="${userQ}" oninput="userQ=this.value;renderKeepFocus()"></div>
+    <div>${usersDb.filter(u=>!userQ||u.name.toLowerCase().includes(userQ.toLowerCase())||u.org.toLowerCase().includes(userQ.toLowerCase())).map(u=>`
+      <div class="list-item" onclick="openUserCard(${usersDb.indexOf(u)})">
+        <div class="avatar" style="width:34px;height:34px;font-size:12px">${u.name.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
+        <div class="grow"><div style="font-size:14px;font-weight:500">${u.name}</div>
+        <div class="hud">${u.org} · ${u.dep} · ${u.role}</div></div>
+        <span class="hud">${u.ok?"✓":"⏳"}</span>
+      </div>`).join("")}</div>`
+});
+function openUserCard(i){
+  const u = usersDb[i];
+  if(!u) return;
+  const roles = ["активист","стажёр","СО/ССФ","production"];
+  $("overlay").innerHTML = `
+    <div class="sheet-veil" onclick="closeSheet()"></div>
+    <div class="sheet"><div class="grab"></div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="avatar" style="width:40px;height:40px;font-size:14px">${(u.name||"?").split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
+        <div class="grow"><b style="font-size:15px">${u.name||u.tg||"?"}</b><div class="hud">${u.org||""} · ${u.dep||"—"} · ${u.tg||""}</div></div>
+        <span class="hud">${u.ok?"✓":"⏳"}</span>
+      </div>
+      <div class="sec-label">Роль</div>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        ${roles.map(rl=>'<button class="chip-btn '+(u.role===rl?"on":"")+'" onclick="setUserRole('+i+',\''+rl+'\')">'+rl+'</button>').join("")}
+      </div>
+      <div class="btnrow" style="margin-top:16px">
+        ${u.verified==="blocked"
+          ? '<button class="btn-sm ok grow" style="padding:12px" onclick="unblockUser('+(SRV?u.id:("\'"+escJs(u.tg||"")+"\'"))+')">Разблокировать</button>'
+          : '<button class="btn-sm danger grow" style="padding:12px" onclick="banModal('+(SRV?u.id:0)+')">Заблокировать</button>'}
+        <button class="btn-sm danger grow" style="padding:12px" onclick="delUser(${i})">Удалить</button>
+      </div>
+      <p class="sub" style="margin-top:8px">Роль, блокировка и удаление — действия старшего админа.</p>
+    </div>`;
+}
+function setUserRole(i, rl){
+  const u = usersDb[i]; if(!u) return;
+  if(SRV){ srvDo("user/role",{userId:u.id, role:rl}, ()=>{ closeSheet(); toast("Роль обновлена: "+rl); }); return; }
+  u.role = rl; closeSheet(); toast("Роль обновлена: "+rl);
+}
+function delUser(i){
+  const u = usersDb[i]; if(!u) return;
+  confirmModal("Удалить пользователя?","«"+(u.name||u.tg)+"» будет удалён. Заявки останутся в истории.",()=>{
+    if(SRV){ srvDo("user/delete",{userId:u.id}, ()=>{ $("overlay").innerHTML=""; render(); toast("Пользователь удалён"); }); return; }
+    usersDb.splice(i,1); $("overlay").innerHTML=""; render(); toast("Пользователь удалён");
+  });
+}
+function verify(id, act, reason){
+  const v = verifQueue.find(x=>x.id===id);
+  const rl = (v&&(v.assignRole||v.role))||"активист";
+  if(SRV){ srvDo("verify",{userId:id, action:act, role:rl, reason:reason||""}, ()=>{ render();
+    toast(act==="ok" ? "✅ Верифицирован с ролью «"+rl+"» — пользователю ушло уведомление"
+                     : "Отклонено — пользователь может подать заново."); }); return; }
+  verifQueue = verifQueue.filter(x=>x.id!==id);
+  if(act==="ok"){
+    const u = usersDb.find(x=>x.tg==="@dkovalev");
+    if(u){ u.ok = true; u.role = rl; }
+    toast("✅ Верифицирован с ролью «"+rl+"» — доступ открыт, пользователю ушло уведомление");
+  }
+  else toast("Отклонено — пользователь может исправить данные и подать заново.");
+  render();
+}
+function rejectModal(id){
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal">
+        <h3>Отклонить верификацию</h3>
+        <p>Пользователь увидит причину и сможет подать заявку заново.</p>
+        <div class="sec-label" style="margin-top:0">Причина отказа</div>
+        <input type="text" id="rej-reason" maxlength="200" placeholder="Например: нет в списке участников">
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm danger" onclick="const rr=$('rej-reason')?$('rej-reason').value.trim():'';$('overlay').innerHTML='';verify(${id},'no',rr)">Отклонить</button>
+        </div>
+      </div>
+    </div>`;
+}
+let banBlk = null;
+function banModal(id){
+  banBlk = {id, reason:"", term:"", day:null, month:MONTHS[0]};
+  drawBanModal();
+}
+function banReasonInput(el){ banBlk.reason = el.value; }
+function banTermPick(term){
+  banBlk.term = term;
+  if(term==="навсегда"){ banBlk.day = null; }
+  else {
+    const iso = isoPlus({"день":1,"неделя":7,"месяц":30}[term] || 1);
+    banBlk.day = iso;
+    banBlk.month = {y:+iso.slice(0,4), m:+iso.slice(5,7)-1};
+  }
+  drawBanModal();
+}
+function banBlkPick(iso){ banBlk.day = iso; drawBanModal(); }
+function banBlkNav(d){ const i=MONTHS.findIndex(x=>x.y===banBlk.month.y&&x.m===banBlk.month.m); if(MONTHS[i+d]){ banBlk.month=MONTHS[i+d]; drawBanModal(); } }
+function drawBanModal(){
+  const forever = banBlk.term==="навсегда";
+  const ready = forever || !!banBlk.day;
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal" style="max-height:85vh;overflow-y:auto">
+        <h3>🚫 Заблокировать</h3>
+        <p>Пользователь попадёт в чёрный список и увидит контакт для связи.</p>
+        <div class="sec-label" style="margin-top:0">Причина</div>
+        <input type="text" id="ban-reason" maxlength="200" placeholder="Например: фейковый аккаунт" value="${banBlk.reason}" oninput="banReasonInput(this)">
+        <div class="sec-label">Срок</div>
+        <div class="slots" style="grid-template-columns:repeat(4,1fr)">
+          <button class="slot ${banBlk.term==='день'?'sel':''}" onclick="banTermPick('день')">1 день</button>
+          <button class="slot ${banBlk.term==='неделя'?'sel':''}" onclick="banTermPick('неделя')">неделя</button>
+          <button class="slot ${banBlk.term==='месяц'?'sel':''}" onclick="banTermPick('месяц')">месяц</button>
+          <button class="slot ${banBlk.term==='навсегда'?'sel':''}" onclick="banTermPick('навсегда')">навсегда</button>
+        </div>
+        ${(banBlk.term && !forever) ? calHtml({month:banBlk.month, sel1:banBlk.day, sel2:null, pickFn:"banBlkPick", navFn:"banBlkNav", busyDots:false, minIso:isoPlus(1)}) : ""}
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm danger" ${ready?"":"disabled"} onclick="doBan(${banBlk.id})">Заблокировать</button>
+        </div>
+      </div>
+    </div>`;
+}
+function doBan(id){
+  const reason = banBlk.reason.trim();
+  const term = banBlk.term;
+  let days = 0;
+  if(term && term!=="навсегда" && banBlk.day){
+    days = Math.max(1, Math.round((new Date(banBlk.day) - new Date(isoPlus(0))) / 86400000));
+  }
+  if(SRV){ srvDo("verify",{userId:id, action:"block", reason, term, days},
+    ()=>{ $("overlay").innerHTML=""; render(); toast("🚫 Пользователь заблокирован"); }); return; }
+  verifQueue = verifQueue.filter(v=>v.id!==id);
+  $("overlay").innerHTML=""; render(); toast("🚫 Пользователь заблокирован");
+}
+let _confirmFn = null;
+function confirmModal(title, text, fn){
+  _confirmFn = fn;
+  $("overlay").innerHTML = `
+    <div class="modal-veil" onclick="if(event.target===this)this.remove()">
+      <div class="modal"><h3>${title}</h3><p>${text}</p>
+        <div class="acts">
+          <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
+          <button class="btn-sm danger" onclick="$('overlay').innerHTML='';_confirmFn()">Да</button>
+        </div></div></div>`;
+}
+
+/* ================= TELEGRAM INIT ================= */
+function applyTgTheme(){
+  const sv = savedTheme();
+  const dark = sv ? sv==="dark" : TG.colorScheme === "dark";
+  $("phone").classList.toggle("dark", dark);
+  const tb = $("themebtn"); if(tb) tb.textContent = dark ? "☀️ Тема" : "🌙 Тема";
+  try{
+    TG.setHeaderColor(dark ? "#000000" : "#ffffff");
+    TG.setBackgroundColor(dark ? "#000000" : "#ffffff");
+  }catch(e){}
+}
+async function bootApp(){
+  try{
+    const d = await api("me");
+    applyBoot(d);
+    initCalSRV();
+    if(d.verified==="blocked") resetTo("blocked");
+    else if(d.registered && d.verified==="ok") resetTo("home");
+    else if(d.registered && d.verified==="pending") resetTo("regWait");
+    else if(d.registered && d.verified==="rejected") resetTo("rejected");
+    else resetTo("rules");
+    startPolling();
+  }catch(e){
+    SRV = null;
+    let agreed = false; try{ agreed = !!localStorage.getItem("obor_agreed"); }catch(_e){}
+    resetTo(agreed ? "home" : "rules");
+    toast("Демо-режим: бэкенд недоступен");
+  }
+}
+/* живое обновление: раз в 12 с тянем свежие данные и перерисовываем текущий экран.
+   Не дёргаем, пока открыт шит/модалка или пользователь печатает. */
+let _pollT = null, _lastSig = "";
+function startPolling(){
+  if(_pollT) return;
+  _pollT = setInterval(async ()=>{
+    if(!SRV) return;
+    if($("overlay").innerHTML) return;
+    const ae = document.activeElement;
+    if(ae && (ae.tagName==="INPUT" || ae.tagName==="TEXTAREA")) return;
+    try{
+      const d = await api("me");
+      /* перерисовываем только если данные реально изменились — иначе экран не дёргаем */
+      const sig = JSON.stringify([d.requests, d.bookings626, d.verifQueue, d.users, d.profile]);
+      if(sig===_lastSig){ SRV = d; return; }
+      _lastSig = sig; applyBoot(d); render();
+    }catch(e){}
+  }, 12000);
+}
+if(IN_TG){
+  document.body.classList.add("in-tg");
+  TG.ready(); TG.expand();
+  applyTgTheme();
+  TG.onEvent("themeChanged", applyTgTheme);
+  TG.BackButton.onClick(tgLeft);
+  /* высота строго по вьюпорту Telegram — контент не залезает под шапку/клавиатуру */
+  const setVH = ()=>{ $("phone").style.height = (TG.viewportStableHeight || window.innerHeight) + "px"; };
+  TG.onEvent("viewportChanged", setVH);
+  setVH();
+  /* в Telegram моки не показываем: имя — только то, что ввели при регистрации */
+  profile = {name:"", short:"", tg:"", orgs:[], deps:[], status:"—"};
+  const u = TG.initDataUnsafe && TG.initDataUnsafe.user;
+  if(u){
+    if(u.username) profile.tg = "@"+u.username;
+    profile.short = [u.first_name,u.last_name].filter(Boolean).join(" ");
+    if(u.photo_url) profile.photo = u.photo_url;
+  }
+  resetTo("boot", {});
+  bootApp();
+} else {
+  /* браузер: кликабельный прототип на моках, регламент — первый экран */
+  try {
+    const sv = savedTheme();
+    if(sv) $("phone").classList.toggle("dark", sv==="dark");
+    resetTo("rules", {});
+  } catch(e) {
+    console.error("Init error:", e);
+    toast("Ошибка инициализации: " + e.message);
+  }
+}
+</script>
+</body>
+</html>

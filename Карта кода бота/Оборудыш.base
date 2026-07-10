@@ -1,0 +1,54 @@
+filters:
+  and:
+    - file.inFolder("Карта кода бота")
+    - 'file.ext == "md"'
+
+properties:
+  часть:
+    displayName: "Часть"
+  file.name:
+    displayName: "Заметка"
+  file.mtime:
+    displayName: "Изменено"
+  note.aliases:
+    displayName: "Ещё зовётся"
+
+views:
+  - type: table
+    name: "Все заметки"
+    groupBy:
+      property: часть
+      direction: ASC
+    order:
+      - file.name
+      - часть
+      - tags
+      - file.mtime
+
+  - type: cards
+    name: "Бэкенд"
+    filters:
+      and:
+        - 'часть == "Бэкенд"'
+    order:
+      - file.name
+      - tags
+
+  - type: cards
+    name: "Фронтенд"
+    filters:
+      and:
+        - 'часть == "Фронтенд"'
+    order:
+      - file.name
+      - tags
+
+  - type: list
+    name: "Индекс и гайд"
+    filters:
+      or:
+        - 'часть == "Индекс"'
+        - 'часть == "Гайд"'
+    order:
+      - file.name
+      - часть
