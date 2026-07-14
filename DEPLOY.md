@@ -88,7 +88,7 @@ cd "D:\Media BMSTU\Оборудыш\bot"
 - [ ] сообщения в переписке заявки доходят второй стороне уведомлением
 - [ ] после добавления `prototype/catalog.js` и `prototype/img/` — реальный каталог и фото (файлы просто положить в папку, перезапуск не нужен)
 
-**Обновление уже задеплоенной версии:** заменить `prototype/index.html`, `prototype/style.css`, `prototype/catalog.js` и `bot/main.py`; при изменении `main.py` перезапустить сервис. Новые переменные сверять с `bot/.env.example`. Новых зависимостей нет. База создаётся сама (`bot/oborudka.db`); удалить её = сбросить всех пользователей и заявки.
+**Обновление уже задеплоенной версии:** заменить `prototype/index.html`, `prototype/style.css`, `prototype/texts.js`, `prototype/catalog.js`, `bot/main.py` и `bot/texts.py`; при изменении Python-файлов перезапустить сервис. Новые переменные сверять с `bot/.env.example`. Новых зависимостей нет. База создаётся сама (`bot/oborudka.db`); удалить её = сбросить всех пользователей и заявки.
 
 ---
 
@@ -158,7 +158,7 @@ sudo systemctl reload caddy
 
 ### Обновление прототипа на сервере
 
-Заменить файлы в `/opt/oborudka/prototype/` (index.html, catalog.js, img/) — рестарт не нужен, статика читается с диска на каждый запрос.
+Заменить файлы в `/opt/oborudka/prototype/` (index.html, texts.js, catalog.js, style.css, img/) — рестарт не нужен, статика читается с диска на каждый запрос.
 
 ---
 

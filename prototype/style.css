@@ -240,6 +240,29 @@ input::placeholder,textarea::placeholder{color:var(--hint)}
 .theme-tgl{position:relative;width:46px;height:26px;border-radius:var(--r-pill);border:1px solid var(--sep);background:var(--bg2);cursor:pointer;flex:0 0 auto;padding:0}
 .theme-tgl i{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-style:normal;transition:left .18s}
 .dark .theme-tgl i{left:22px}
+/* Паспорта экземпляров и недельный календарь админа */
+.admin-tools{margin-bottom:12px}
+.week-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;text-align:center}
+.week-head .big{margin:0}
+.week-list{display:flex;flex-direction:column;gap:8px}
+.week-day{display:grid;grid-template-columns:54px 1fr;gap:10px;background:var(--card);border:1px solid var(--sep);border-radius:var(--r-md);padding:10px}
+.week-day.today{border-color:var(--link)}
+.week-date{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:var(--fs-xs)}
+.week-date span{color:var(--hint)}
+.week-tasks{display:flex;flex-direction:column;gap:7px}
+.week-task{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;border:1px solid var(--sep);border-radius:var(--r-sm);background:var(--bg2);color:var(--text);padding:9px 10px;text-align:left;font:inherit;cursor:pointer}
+.week-task.mine{border-color:var(--link);box-shadow:inset 3px 0 0 var(--link)}
+.week-task .task-action{font-size:var(--fs-xs);font-weight:700;color:var(--link);text-transform:uppercase;letter-spacing:.02em}
+.week-task small{color:var(--hint);font-size:var(--fs-2xs)}
+.week-empty{padding:8px 2px}
+.unit-state{flex:0 0 auto;border-radius:var(--r-pill);padding:5px 8px;font-size:var(--fs-2xs);font-weight:700}
+.unit-state.ready{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.unit-state.repair{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.unit-state.retired{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+.unit-history{line-height:1.45}
+select{width:100%;background:var(--card);border:1px solid var(--sep);border-radius:var(--r-sm);padding:12px 13px;font-family:inherit;font-size:var(--fs-md);color:var(--text);outline:none}
+select:focus-visible{border-color:var(--link);box-shadow:0 0 0 2px color-mix(in srgb,var(--link) 25%,transparent)}
+
 /* ============ РЕЖИМ TELEGRAM (body.in-tg) ============ */
 body.in-tg{padding:0;gap:0;background:var(--bg2)}
 body.in-tg .proto-bar{display:none}

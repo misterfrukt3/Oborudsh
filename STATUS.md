@@ -37,6 +37,6 @@
 7. v1.1: рассылки, избранные наборы, повтор заявки. v2: QR-сканер, порядочность, Google Sheets-синк, статистика.
 
 ## Обновление на сервере
-1. Заменить `prototype/index.html`, `prototype/catalog.js`, `bot/main.py`.
+1. Заменить `prototype/index.html`, `prototype/texts.js`, `prototype/catalog.js`, `bot/main.py`, `bot/texts.py`.
 2. В `bot/.env` дописать новые переменные по `bot/.env.example` (ADMIN_CHAT_ID — теперь канал).
-3. Перезапустить. Зависимости не менялись. Папку с фото оборудования — в `prototype/img/`.
+3. Перезапустить бота. Зависимости не менялись. Папку с фото оборудования — в `prototype/img/`.
