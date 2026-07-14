@@ -40,6 +40,11 @@ import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
 
+try:  # импорт как bot.main из корня проекта или тестов
+    from . import texts as tx
+except ImportError:  # прямой запуск python main.py из папки bot
+    import texts as tx
+
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / ".env")
 
@@ -767,8 +772,6 @@ def short_name(full: str) -> str:
 async def notify(uid: int, text: str) -> None:
     if bot is None or not uid:
         return
-    if "?" in text:
-        text = "Статус заявки обновлён. Откройте Оборудыш, чтобы посмотреть детали."
     try:
         await bot.send_message(uid, text)
     except Exception as e:
@@ -782,69 +785,52 @@ async def notify_seniors(text: str) -> None:
 
 def app_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📦 Открыть Оборудыш", web_app=WebAppInfo(url=WEBAPP_URL)),
+        InlineKeyboardButton(text=tx.APP_BUTTON_TEXT, web_app=WebAppInfo(url=WEBAPP_URL)),
     ]])
 
 
 def deeplink_kb() -> InlineKeyboardMarkup:
     """Для групп/каналов web_app-кнопки запрещены - даём t.me-ссылку."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть в приложении", url=f"https://t.me/{BOT_USERNAME}?startapp"),
+        InlineKeyboardButton(text=tx.DEEPLINK_BUTTON_TEXT, url=f"https://t.me/{BOT_USERNAME}?startapp"),
     ]])
 
 
-ST_LABEL = {
-    "new": "Новая", "curator": "Назначен куратор", "approved": "Согласована",
-    "issued": "Выдана", "ret": "Возврат на проверке", "closed": "Закрыта",
-    "rejected": "Отклонена", "canceled": "Отменена пользователем",
-}
 
 
-def late_note(r) -> str:
-    """Пометка для команды: поздняя выдача/возврат (сб после 18:00) - команда может отказать."""
+def late_note(r) -> list:
+    """Машинные коды поздней выдачи/возврата для текста карточки."""
     notes = []
     try:
         if r["dto_iso"] and datetime.strptime(r["dto_iso"], "%Y-%m-%d").weekday() == 5 and (r["tto"] or "") >= "18:00":
-            notes.append("поздний возврат (сб после 18:00)")
+            notes.append("return")
     except (ValueError, KeyError):
         pass
     try:
         if r["dfrom_iso"] and datetime.strptime(r["dfrom_iso"], "%Y-%m-%d").weekday() == 5 and (r["tfrom"] or "") >= "18:00":
-            notes.append("поздняя выдача (сб после 18:00)")
+            notes.append("issue")
     except (ValueError, KeyError):
         pass
-    return "; ".join(notes)
+    return notes
 
 
 def req_card_text(r) -> str:
-    items = "\n".join(f"  · {s} × {q}" for s, q in json.loads(r["items"]))
     author = get_user(r["user_id"])
-    lines = [
-        f"📦 Заявка ID {r['id']} - {ST_LABEL.get(r['status'], r['status'])}",
-        f"От: {(author['name'] if author else '?')} ({_disp_user(r['user_id'])})",
-        f"Когда: {r['dfrom']} -> {r['dto']}",
-        f"Мероприятие: {r['event']}",
-        f"Состав:\n{items}",
-    ]
-    if r["comment"]:
-        lines.append(f"Комментарий: {r['comment']}")
-    ln = late_note(r)
-    if ln:
-        lines.append("⚠️ " + ln + " - команда может отказать")
-    if r["curator"]:
-        lines.append(f"Куратор: {_disp_user(r['curator'])}")
-    return "\n".join(lines)
+    return tx.request_card_message(
+        r["id"], r["status"], author["name"] if author else "",
+        _disp_user(r["user_id"]), r["dfrom"], r["dto"], r["event"],
+        json.loads(r["items"]), r["comment"], late_note(r),
+        _disp_user(r["curator"]) if r["curator"] else "",
+    )
 
 
 def b626_card_text(b) -> str:
     author = get_user(b["user_id"])
-    needs = ", ".join(json.loads(b["needs"])) or "без допов"
-    txt = (f"🏛 Бронь 626 №{b['id']} - {ST_LABEL.get(b['status'], b['status'])}\n"
-           f"От: {(author['name'] if author else '?')} ({_disp_user(b['user_id'])})\n"
-           f"Когда: {b['day']} · {b['slot']}\nЦель: {b['goal']}\nДопы: {needs}")
-    if b["curator"]:
-        txt += f"\nКуратор: {_disp_user(b['curator'])}"
-    return txt
+    return tx.studio_card_message(
+        b["id"], b["status"], author["name"] if author else "",
+        _disp_user(b["user_id"]), b["day"], b["slot"], b["goal"],
+        json.loads(b["needs"]), _disp_user(b["curator"]) if b["curator"] else "",
+    )
 
 
 async def send_or_update_card(table: str, row) -> None:
@@ -943,9 +929,9 @@ async def _send_blobs(chat_id: int, blobs, caption: str) -> None:
         return
     try:
         if len(blobs) == 1:
-            await bot.send_photo(chat_id, BufferedInputFile(blobs[0], "photo.jpg"), caption=caption or None)
+            await bot.send_photo(chat_id, BufferedInputFile(blobs[0], tx.PHOTO_FILENAME), caption=caption or None)
         else:
-            media = [InputMediaPhoto(media=BufferedInputFile(b, f"photo{i + 1}.jpg"),
+            media = [InputMediaPhoto(media=BufferedInputFile(b, tx.photo_filename(i + 1)),
                                      caption=(caption if (i == 0 and caption) else None))
                      for i, b in enumerate(blobs)]
             await bot.send_media_group(chat_id, media=media)
@@ -1005,9 +991,7 @@ async def api_register(request, body, uid):
                   (name, json.dumps(orgs, ensure_ascii=False),
                    json.dumps(deps if mb else [], ensure_ascii=False), verified, role, uid))
     if verified == "pending":
-        why = " · не найден в таблице Media BMSTU" if mb else ""
-        text = (f"⏳ Заявка на верификацию: {name} ({_disp_user(uid)}), "
-                f"орг.: {', '.join(orgs)}{why}. Решение - в приложении.")
+        text = tx.verification_request_message(name, _disp_user(uid), orgs, mb)
         if ADMIN_CHAT_ID and bot is not None:
             try:
                 await bot.send_message(ADMIN_CHAT_ID, text)
@@ -1079,7 +1063,7 @@ async def api_req_update(request, body, uid):
                        clean_text(body.get("comment"), 500), int(bool(body.get("media"))), int(bool(body.get("pw")) or r["pw"]), d1, d2, t1, t2, rid))
     _push_hist("requests", rid, r["status"], "???????? ?????????????")
     if r["curator"]:
-        await notify(r["curator"], f"?? ?????? ID {rid} ???????? ?????????? - ?????????? ? ??????????.")
+        await notify(r["curator"], tx.request_updated_for_curator_message(rid))
     with db() as c:
         row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     await send_or_update_card("requests", row)
@@ -1168,7 +1152,7 @@ async def api_req_action(request, body, uid):
             return jerr("???????? ????? ?????? ???? ?????? ?? ????????????.")
         with db() as c: c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
         _push_hist("requests", rid, "canceled")
-        if r["curator"]: await notify(r["curator"], f"?????? ID {rid} ???????? ?????????????.")
+        if r["curator"]: await notify(r["curator"], tx.request_canceled_for_curator_message(rid))
     elif action == "userret":
         if uid != owner or r["status"] != "issued":
             return jerr("????? ????? ?????? ???????? ??????.")
@@ -1177,9 +1161,9 @@ async def api_req_action(request, body, uid):
             return jerr("??? ????? ????????? ???? ?? ???? ???? ?????????.")
         with db() as c: c.execute("UPDATE requests SET status='ret' WHERE id=?", (rid,))
         _push_hist("requests", rid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = "Return photos ? request ID %s" % rid + ("\n" + comment if comment else "")
+        cap = tx.request_return_caption(rid, comment)
         if r["curator"]:
-            await notify(r["curator"], f"?? ??????? ?? ?????? ID {rid} - ????????? ???????? ? ??????????.")
+            await notify(r["curator"], tx.request_return_submitted_message(rid))
             await _send_blobs(r["curator"], photos, cap)
         await _send_blobs(ADMIN_CHAT_ID, photos, cap)
     elif not is_admin(uid):
@@ -1194,22 +1178,22 @@ async def api_req_action(request, body, uid):
             c.execute("UPDATE requests SET status=?, curator=? WHERE id=?", (new_status, uid, rid))
         _push_hist("requests", rid, new_status, "новый куратор")
         _log_action(uid, "requests", rid, "curator")
-        await notify(owner, f"По заявке ID {rid} назначен куратор {_disp_user(uid)}. Откройте Оборудыш, чтобы посмотреть детали.")
+        await notify(owner, tx.request_curator_assigned_message(rid, _disp_user(uid)))
     elif action == "uncurator":
         if r["curator"] != uid or r["status"] not in ("curator", "approved", "issued", "ret"):
             return jerr("????? ??????????? ????? ?????? ?? ????? ?????? ?? ????????.")
         new_status = "new" if r["status"] in ("curator", "approved") else r["status"]
         with db() as c: c.execute("UPDATE requests SET status=?, curator=NULL WHERE id=?", (new_status, rid))
         _push_hist("requests", rid, new_status, "??????? ???? ????")
-        await notify(owner, f"?? ?? ?????? ID {rid} ???????? ???????.")
-        if ADMIN_CHAT_ID and bot is not None: await notify(ADMIN_CHAT_ID, f"?? ?????? ID {rid} ????? ??? ???????? - ????? ????? ? ??????.")
+        await notify(owner, tx.request_curator_left_message(rid))
+        if ADMIN_CHAT_ID and bot is not None: await notify(ADMIN_CHAT_ID, tx.request_curator_left_channel_message(rid))
     elif action in ("approved", "rejected"):
         if r["status"] != "curator" or not curator_or_senior:
             return jerr("??????????? ??? ????????? ????? ??????? ?????? ???? ??????? ?????.", 403)
         with db() as c: c.execute("UPDATE requests SET status=? WHERE id=?", ("approved" if action == "approved" else "rejected", rid))
         _push_hist("requests", rid, action, comment if action == "rejected" else "")
         _log_action(uid, "requests", rid, action)
-        await notify(owner, f"?? ?????? ID {rid} ???????????! ?????????: {r['dfrom']}." if action == "approved" else f"? ?????? ID {rid} ?????????." + (f" ???????: {comment}" if comment else ""))
+        await notify(owner, tx.request_approved_message(rid, r["dfrom"]) if action == "approved" else tx.request_rejected_message(rid, comment))
     elif action == "issue":
         if r["status"] != "approved" or not curator_or_senior:
             return jerr("?????? ???????????? ????? ??????? ?????? ???? ??????? ?????.", 403)
@@ -1226,8 +1210,7 @@ async def api_req_action(request, body, uid):
         note = "?????? ???????" if items != json.loads(r["items"]) else ""
         _push_hist("requests", rid, "issued", (note + (" ? " + comment if comment else "")).strip(" ?"))
         _log_action(uid, "requests", rid, "issue")
-        lines = "\n".join("  - %s x %s" % (short, qty) for short, qty in items)
-        await notify(owner, "Equipment issued for request ID %s:\n%s\nReturn by: %s." % (rid, lines, r["dto"]) + ("\nComment: " + comment if comment else ""))
+        await notify(owner, tx.equipment_issued_message(rid, items, r["dto"], comment, CATALOG_META))
     elif action == "return":
         if r["status"] != "ret":
             return jerr("??????? ???????????? ?????? ????? ???????????? ? ????.")
@@ -1238,12 +1221,12 @@ async def api_req_action(request, body, uid):
                 c.execute("UPDATE requests SET escalated=1 WHERE id=?", (rid,))
                 c.execute("INSERT INTO messages(kind, ref, sender, text, tm, role) VALUES('req',?,?,?,?,'admin')", (rid, uid, "?? ???????? ? ?????????: " + comment, datetime.now(MSK).strftime("%H:%M")))
             _push_hist("requests", rid, "ret", "?????????? ??????? -> ???????: " + comment); _log_action(uid, "requests", rid, "return_escalated")
-            await notify_seniors(f"? ?????????? ??????? ?? ?????? ID {rid}: '{comment}'. ????????? ? ??????????.")
+            await notify_seniors(tx.problem_return_message(rid, comment))
         else:
             if r["escalated"] and not is_senior(uid): return jerr("???? ??????? ??????? ??????? ???????.")
             with db() as c: c.execute("UPDATE requests SET status='closed', escalated=0, returned_at=COALESCE(returned_at, ?), returned_by=? WHERE id=?", (now_str(), uid, rid))
             _push_hist("requests", rid, "closed"); _log_action(uid, "requests", rid, "return_closed")
-            await notify(owner, f"? ??????? ?? ?????? ID {rid} ??????, ?????? ???????. ???????!")
+            await notify(owner, tx.request_closed_message(rid))
     else:
         return jerr("Действие недоступно.")
     with db() as c: row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
@@ -1271,7 +1254,7 @@ async def api_626_create(request, body, uid):
             cur = c.execute("INSERT INTO b626(user_id, day, slot, goal, needs, history, created_ts) VALUES(?,?,?,?,?,?,?)", (uid, day, slot, goal, json.dumps([clean_text(item, 200) for item in needs], ensure_ascii=False), json.dumps(hist, ensure_ascii=False), time.time()))
             bid = cur.lastrowid; row = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
     await send_or_update_card("b626", row)
-    await notify_seniors(f"?? ????? ????? 626 ?{bid}: {day} {slot} - ???????????? ? ??????????.")
+    await notify_seniors(tx.new_studio_booking_message(bid, day, slot))
     return web.json_response(boot_payload(uid))
 
 @auth
@@ -1291,9 +1274,9 @@ async def api_626_action(request, body, uid):
         if not photos: return jerr("??? ????? ????????? ????????? ???? ?? ???? ????.")
         with db() as c: c.execute("UPDATE b626 SET status='ret' WHERE id=?", (bid,))
         _push_hist("b626", bid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = "Return photos ? studio 626 ID %s" % bid + ("\n" + comment if comment else "")
+        cap = tx.studio_return_caption(bid, comment)
         if b["curator"]:
-            await notify(b["curator"], f"?? ????? 626 ?{bid}: ???????????? ???? ?????????, ????????? ????.")
+            await notify(b["curator"], tx.studio_return_submitted_message(bid))
             await _send_blobs(b["curator"], photos, cap)
         await _send_blobs(ADMIN_CHAT_ID, photos, cap)
     elif action in ("approved", "rejected"):
@@ -1301,18 +1284,18 @@ async def api_626_action(request, body, uid):
         if b["status"] != "new": return jerr("??????? ????? ??????? ?????? ?? ????? ?????.")
         with db() as c: c.execute("UPDATE b626 SET status=? WHERE id=?", (action, bid))
         _push_hist("b626", bid, action, comment if action == "rejected" else ""); _log_action(uid, "b626", bid, action)
-        await notify(owner, f"?? ????? 626 ?{bid} ({b['day']} {b['slot']}): " + ("?? ???????????! ??????? ???????? ? ????????." if action == "approved" else "? ?????????." + (f" ???????: {comment}" if comment else "")))
+        await notify(owner, tx.studio_approved_message(bid, b["day"], b["slot"]) if action == "approved" else tx.studio_rejected_message(bid, b["day"], b["slot"], comment))
     elif action == "curator":
         if not is_admin(uid): return jerr("?????? ??? ???????.", 403)
         if b["status"] != "approved" or b["curator"]: return jerr("??????????? ???????? ????? ???????????? ? ???? ????????.")
         with db() as c: c.execute("UPDATE b626 SET curator=? WHERE id=?", (uid, bid))
-        _log_action(uid, "b626", bid, "curator"); await notify(owner, f"?? ?? ????? 626 ?{bid} ???????? ??????? {_disp_user(uid)}.")
+        _log_action(uid, "b626", bid, "curator"); await notify(owner, tx.studio_curator_assigned_message(bid, _disp_user(uid)))
     elif action == "closed":
         if b["status"] != "ret": return jerr("????????? ????? ?????? ??????? ????? (?? ????????).")
         if not curator_or_senior: return jerr("????????? ????? ????? ?? ??????? ??? ??????? ?????.", 403)
         with db() as c: c.execute("UPDATE b626 SET status='closed' WHERE id=?", (bid,))
         _push_hist("b626", bid, "closed", comment); _log_action(uid, "b626", bid, "closed")
-        await notify(owner, f"?? ????? 626 ?{bid} ?????????. ???????, ????????? ???!")
+        await notify(owner, tx.studio_closed_message(bid))
     else: return jerr("Действие недоступно.")
     with db() as c: row = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
     await send_or_update_card("b626", row)
@@ -1343,16 +1326,16 @@ async def api_chat(request, body, uid):
     with db() as c:
         c.execute("INSERT INTO messages(kind, ref, sender, text, tm, role) VALUES(?,?,?,?,?,?)",
                   (kind, ref, uid, text, datetime.now(MSK).strftime("%H:%M"), role))
-    label = f"заявке ID {ref}" if kind == "req" else f"брони 626 №{ref}"
+    label = tx.conversation_label(kind, ref)
     if uid == row["user_id"]:
         if row["curator"]:
-            await notify(row["curator"], f"💬 Сообщение по {label} от {_disp_user(uid)}:\n'{text}'")
+            await notify(row["curator"], tx.chat_from_user_message(label, _disp_user(uid), text))
     else:
-        who = "Старший" if role == "senior" else "Куратор"
-        await notify(row["user_id"], f"💬 {who} по {label}:\n'{text}'\nОтветить можно в приложении.")
+        who = role
+        await notify(row["user_id"], tx.chat_to_user_message(who, label, text))
         # пишут из панели старшего - уведомить и куратора
         if role == "senior" and row["curator"] and row["curator"] != uid:
-            await notify(row["curator"], f"💬 Старший подключился к {label}:\n'{text}'")
+            await notify(row["curator"], tx.chat_senior_joined_message(label, text))
     return web.json_response(boot_payload(uid))
 
 
@@ -1382,14 +1365,14 @@ async def api_verify(request, body, uid):
         role = body.get("role") or "активист"
         with db() as c:
             c.execute("UPDATE users SET verified='ok', role=? WHERE id=?", (role, target))
-        await notify(target, f"✅ Верификация пройдена! Роль: {role}. Приложение открыто - можно бронировать.")
+        await notify(target, tx.verification_approved_message(role))
     elif action == "no":
         reason = (body.get("reason") or "").strip()[:200]
         with db() as c:
             c.execute("UPDATE users SET verified='rejected', block_reason=? WHERE id=?", (reason, target))
-        await notify(target, "Заявка на верификацию отклонена."
-                     + (f" Причина: {reason}." if reason else "")
-                     + " Можно исправить данные и подать заново.")
+        await notify(target, tx.verification_rejected_message(reason))
+
+
     elif action == "block":
         reason = (body.get("reason") or "").strip()[:200]
         # срок: days (число) приоритетнее term (день/неделя/месяц/навсегда)
@@ -1405,12 +1388,12 @@ async def api_verify(request, body, uid):
         with db() as c:
             c.execute("UPDATE users SET verified='blocked', block_reason=?, block_until=? WHERE id=?",
                       (note.strip(" ·"), until, target))
-        await notify(target, "Вы заблокированы в Оборудыше" + (f" до {until}" if until else "")
-                     + (f". Причина: {reason}" if reason else "") + ". По вопросам - @Kyuller")
+        await notify(target, tx.user_blocked_message(until, reason))
+
     elif action == "unblock":
         with db() as c:
             c.execute("UPDATE users SET verified='ok', block_reason='', block_until='' WHERE id=?", (target,))
-        await notify(target, "✅ Вас разблокировали в Оборудыше - доступ снова открыт.")
+        await notify(target, tx.user_unblocked_message())
     else:
         return jerr("Неизвестное действие.")
     return web.json_response(boot_payload(uid))
@@ -1425,8 +1408,8 @@ async def api_appeal(request, body, uid):
     anon = bool(body.get("anon"))
     photos = [] if anon else _decode_photos(body.get("photos"))  # аноним - без фото
     u = get_user(uid)
-    who = "аноним" if anon else f"{(u['name'] if u and u['name'] else _disp_user(uid))} ({_disp_user(uid)})"
-    card = f"💬 Обращение в команду Оборудыша\nОт: {who}\n\n{text}"
+    who = tx.appeal_sender(anon, u["name"] if u and u["name"] else _disp_user(uid), _disp_user(uid))
+    card = tx.appeal_card_message(who, text)
     delivered = False
     if ADMIN_CHAT_ID and bot is not None:
         try:
@@ -1457,7 +1440,7 @@ async def api_user_role(request, body, uid):
         return jerr("Пользователь не найден.", 404)
     with db() as c:
         c.execute("UPDATE users SET role=? WHERE id=?", (role, target))
-    await notify(target, f"Ваша роль обновлена: {role}.")
+    await notify(target, tx.user_role_updated_message(role))
     return web.json_response(boot_payload(uid))
 
 
@@ -1492,7 +1475,7 @@ async def api_category_block(request, body, uid):
         hours = {"1h": 1, "6h": 6, "12h": 12}.get(term)
         if hours:
             until = (datetime.now(MSK) + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
-            term_label = f"на {hours} " + ("час" if hours == 1 else "часов")
+            term_label = tx.category_block_term_label(hours=hours)
         elif term == "period":
             raw_until = (body.get("until") or "").strip()[:20]
             try:
@@ -1500,9 +1483,9 @@ async def api_category_block(request, body, uid):
             except ValueError:
                 return jerr("Некорректная дата.")
             until = raw_until + " 23:59"
-            term_label = "до " + until_dt.strftime("%d.%m.%Y")
+            term_label = tx.category_block_term_label(date_text=until_dt.strftime("%d.%m.%Y"))
         elif term == "forever":
-            term_label = "навсегда"
+            term_label = tx.category_block_term_label(forever=True)
         else:
             return jerr("Не указан срок блокировки.")
     with db() as c:
@@ -1512,7 +1495,7 @@ async def api_category_block(request, body, uid):
             c.execute("INSERT OR REPLACE INTO cat_blocks(cat, until, term) VALUES(?,?,?)",
                       (cat, until, term_label))
     if not unblock and ADMIN_CHAT_ID and bot is not None:
-        text = f"🔒 Категория «{cat}» заблокирована " + term_label
+        text = tx.category_blocked_message(cat, term_label)
         try:
             await bot.send_message(ADMIN_CHAT_ID, text)
         except Exception as e:
@@ -1629,45 +1612,38 @@ def admin_activity(limit=None):
 
 
 def build_export_text(kind):
-    """Собирает текст выгрузки блоками записей (читаемо в открытом .md на телефоне,
-    без markdown-таблиц). Три типа: requests, 626, admins. Возвращает (fname, text)."""
+    """Собирает имя и содержимое Telegram-файла через bot/texts.py."""
     with db() as c:
         if kind == "admins":
-            admin_stats = admin_activity()
-            top_rejecters = [a for a in sorted(admin_stats, key=lambda a: -a["rejected"]) if a["rejected"] > 0]
-
-            lines = ["АДМИНИСТРАТОРЫ ОБОРУДЫША", ""]
-            for a in admin_stats:
-                lines.append(f"{a['name']}\nКурировал: {a['curated']}\nВыдал: {a['issued']}\n"
-                             f"Принял: {a['returned']}\nОтказал: {a['rejected']}\n---")
-            if top_rejecters:
-                lines.append("")
-                lines.append("ТОП ПО ОТКАЗАМ")
-                for i, a in enumerate(top_rejecters, 1):
-                    lines.append(f"{i}. {a['name']} — {a['rejected']}")
-            fname = "admins.md"
-        elif kind == "626":
-            lines = ["БРОНИ 626", ""]
-            for b in c.execute("SELECT * FROM b626 ORDER BY id").fetchall():
-                au = get_user(b["user_id"])
-                author = au["name"] if au else "?"
-                curator = _disp_user(b["curator"]) if b["curator"] else "—"
-                lines.append(f"Бронь #{b['id']}\nАвтор: {author}\nДень: {b['day']}\nСлот: {b['slot']}\n"
-                             f"Цель: {b['goal']}\nСтатус: {ST_LABEL.get(b['status'], b['status'])}\n"
-                             f"Куратор: {curator}\n---")
-            fname = "studio626.md"
-        else:
-            lines = ["ЗАЯВКИ ОБОРУДЫША", ""]
-            for r in c.execute("SELECT * FROM requests ORDER BY id").fetchall():
-                au = get_user(r["user_id"])
-                items = "; ".join(f"{s}×{q}" for s, q in json.loads(r["items"]))
-                curator = _disp_user(r["curator"]) if r["curator"] else "—"
-                lines.append(f"Заявка #{r['id']}\nАвтор: {(au['name'] if au else '?')}\n"
-                             f"Мероприятие: {r['event']}\nДаты: {r['dfrom']} → {r['dto']}\n"
-                             f"Статус: {ST_LABEL.get(r['status'], r['status'])}\nКуратор: {curator}\n"
-                             f"Состав: {items}\n---")
-            fname = "requests.md"
-    return fname, "\n".join(lines)
+            return tx.export_admins_file(admin_activity())
+        if kind == "626":
+            bookings = []
+            for row in c.execute("SELECT * FROM b626 ORDER BY id").fetchall():
+                author = get_user(row["user_id"])
+                bookings.append({
+                    "id": row["id"],
+                    "author": author["name"] if author else tx.UNKNOWN_VALUE,
+                    "day": row["day"],
+                    "slot": row["slot"],
+                    "goal": row["goal"],
+                    "status": tx.STATUS_LABELS.get(row["status"], row["status"]),
+                    "curator": _disp_user(row["curator"]) if row["curator"] else tx.EMPTY_VALUE,
+                })
+            return tx.export_studio_file(bookings)
+        requests = []
+        for row in c.execute("SELECT * FROM requests ORDER BY id").fetchall():
+            author = get_user(row["user_id"])
+            requests.append({
+                "id": row["id"],
+                "author": author["name"] if author else tx.UNKNOWN_VALUE,
+                "event": row["event"],
+                "date_from": row["dfrom"],
+                "date_to": row["dto"],
+                "status": tx.STATUS_LABELS.get(row["status"], row["status"]),
+                "curator": _disp_user(row["curator"]) if row["curator"] else tx.EMPTY_VALUE,
+                "items": tx.export_items_text(json.loads(row["items"])),
+            })
+        return tx.export_requests_file(requests)
 
 
 @auth
@@ -1680,7 +1656,7 @@ async def api_export(request, body, uid):
     if bot is not None:
         try:
             await bot.send_document(uid, BufferedInputFile(text.encode("utf-8"), fname),
-                                   caption=f"📊 {kind} из Оборудыша")
+                                   caption=tx.export_caption(kind))
         except Exception as e:
             log.warning("export send failed: %s", e)
             return jerr("Не удалось отправить файл. Напишите боту /start и повторите.")
@@ -1689,13 +1665,13 @@ async def api_export(request, body, uid):
 
 async def _broadcast_run(ids, text, blobs):
     sent = 0
-    cap = ("📣 " + text)[:1024]
+    cap = tx.broadcast_message(text)[:1024]
     for i in ids:
         try:
             if blobs:
                 await _send_blobs(i, blobs, cap)
             else:
-                await notify(i, "📣 " + text)
+                await notify(i, tx.broadcast_message(text))
         except Exception as e:
             log.warning("broadcast to %s failed: %s", i, e)
         else:
@@ -1841,10 +1817,9 @@ async def api_resync(request, body, uid):
             pending += 1
             if ADMIN_CHAT_ID and bot is not None:
                 try:
-                    await bot.send_message(ADMIN_CHAT_ID,
-                        f"⚠️ {_disp_user(u['id'])} пропал из списка верификации - статус 'pending'")
-                except Exception:
-                    pass
+                    await bot.send_message(ADMIN_CHAT_ID, tx.verification_missing_after_resync_message(_disp_user(u["id"])))
+                except Exception as e:
+                    log.warning("resync verification notification failed: %s", e)
         elif DIRECTORY_FILE:
             # если есть справочник - проверяем/обновляем роль и отделы
             info = directory().get(u["username"] or "") if u["username"] else None
@@ -1894,7 +1869,6 @@ async def daily_digest() -> None:
     today = now.strftime("%Y-%m-%d")
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     with db() as c:
-        new_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='new'").fetchone()["n"]
         issued_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='issued'").fetchone()["n"]
         approved_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='approved'").fetchone()["n"]
         curator_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='curator'").fetchone()["n"]
@@ -1907,61 +1881,48 @@ async def daily_digest() -> None:
         act_rows = c.execute(
             "SELECT admin_id, kind, action, COUNT(*) n FROM actions WHERE ts LIKE ?||'%' GROUP BY admin_id, kind, action",
             (today,)).fetchall()
-    # админ дня - разбивка К(курировал)/В(выдал)/П(принял возврат)/О(отказал)/А(действия с 626) за сегодня
+
     per_admin = {}
     for row in act_rows:
-        st = per_admin.setdefault(row["admin_id"], {"k": 0, "v": 0, "p": 0, "o": 0, "a": 0})
+        stats = per_admin.setdefault(row["admin_id"], {"k": 0, "v": 0, "p": 0, "o": 0, "a": 0})
         if row["kind"] == "requests":
-            if row["action"] == "curator":
-                st["k"] += row["n"]
-            elif row["action"] == "issue":
-                st["v"] += row["n"]
-            elif row["action"] == "return_closed":
-                st["p"] += row["n"]
-            elif row["action"] == "rejected":
-                st["o"] += row["n"]
+            key = {"curator": "k", "issue": "v", "return_closed": "p", "rejected": "o"}.get(row["action"])
+            if key:
+                stats[key] += row["n"]
         elif row["kind"] == "b626":
-            st["a"] += row["n"]
-    admin_day = ""
+            stats["a"] += row["n"]
+    admin_day = None
     if per_admin:
-        best_id, best = max(per_admin.items(), key=lambda kv: sum(kv[1].values()))
-        admin_day = (f"\n— Админ дня: {_disp_user(best_id)} "
-                     f"(К/В/П/О/А: {best['k']}/{best['v']}/{best['p']}/{best['o']}/{best['a']})")
-    # бронирования оборудования на завтра (и выдача, и возврат - одним списком)
-    tmr_blocks = []
-    for r in tmr_rows:
-        nums = json.loads(r["nums"] or "{}")
-        lines = [f"— ID {r['id']}: {_disp_user(r['user_id'])}"]
-        for short, qty in json.loads(r["items"]):
-            num = nums.get(short)
-            lines.append(f"— {short} №{num}" if qty == 1 and num else f"— {short} × {qty}")
-        lines.append(f"Мероприятие: {r['event']}")
+        best_id, best = max(per_admin.items(), key=lambda item: sum(item[1].values()))
+        admin_day = dict(best, name=_disp_user(best_id))
+
+    equipment_bookings = []
+    for row in tmr_rows:
+        nums = json.loads(row["nums"] or "{}")
+        items = [{"short": short, "qty": qty, "num": nums.get(short)}
+                 for short, qty in json.loads(row["items"])]
         try:
-            d1 = datetime.strptime(r["dfrom_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
-            d2 = datetime.strptime(r["dto_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
+            date_from = datetime.strptime(row["dfrom_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
+            date_to = datetime.strptime(row["dto_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
         except ValueError:
-            d1, d2 = r["dfrom_iso"], r["dto_iso"]
-        lines.append(f"Время: {d1}, {r['tfrom']} — {d2}, {r['tto']}")
-        tmr_blocks.append("\n".join(lines))
-    tmr_text = "\n".join(tmr_blocks) if tmr_blocks else "— (нет)"
-    # занятость аудитории 626 на завтра
-    if b626_rows:
-        b626_lines = []
-        for b in b626_rows:
-            start, end = (_slot_bounds(b["slot"]) or ("", ""))
-            b626_lines.append(f"— {start.strip()}–{end.strip()}: {_disp_user(b['user_id'])} — {b['goal']}")
-        b626_text = "\n".join(b626_lines)
-    else:
-        b626_text = "— свободно"
-    text = ("📊 Ежедневная статистика Оборудыша\n\n"
-            f"— Активных бронирований: {issued_n}\n"
-            f"— Ожидают выдачи: {approved_n}\n"
-            f"— Согласовано: {curator_n}\n"
-            f"— Выдано: {issued_n}\n"
-            f"— Ожидают возврата: {ret_n}"
-            f"{admin_day}\n\n"
-            f"📅 Бронирования оборудования на завтра:\n{tmr_text}\n\n"
-            f"🏛 Занятость аудитории 626 на завтра:\n{b626_text}")
+            date_from, date_to = row["dfrom_iso"], row["dto_iso"]
+        equipment_bookings.append({
+            "id": row["id"], "user": _disp_user(row["user_id"]), "items": items,
+            "event": row["event"], "date_from": date_from, "time_from": row["tfrom"],
+            "date_to": date_to, "time_to": row["tto"],
+        })
+
+    studio_bookings = []
+    for row in b626_rows:
+        start, end = (_slot_bounds(row["slot"]) or ("", ""))
+        studio_bookings.append({
+            "start": start.strip(), "end": end.strip(), "user": _disp_user(row["user_id"]),
+            "goal": row["goal"],
+        })
+    text = tx.daily_digest_message(
+        issued_n, approved_n, curator_n, ret_n, admin_day,
+        equipment_bookings, studio_bookings,
+    )
     try:
         await bot.send_message(ADMIN_CHAT_ID, text)
     except Exception as e:
@@ -1991,9 +1952,7 @@ async def monthly_digest() -> None:
             top_counts[s] = top_counts.get(s, 0) + int(q)
     top_sorted = sorted(top_counts.items(), key=lambda x: -x[1])[:5]
 
-    text = f"📈 ИТОГИ МЕСЯЦА {prev_month}\n• Заявки: {reqs_month}\n• Брони 626: {b626_month}"
-    if top_sorted:
-        text += "\n• Топ оборудования:\n" + "\n".join(f"  · {item}: {cnt} шт" for item, cnt in top_sorted)
+    text = tx.monthly_digest_message(prev_month, reqs_month, b626_month, top_sorted)
     try:
         await bot.send_message(ADMIN_CHAT_ID, text)
     except Exception as e:
@@ -2036,48 +1995,48 @@ async def run_checks() -> None:
         if r["status"] == "issued" and deadline:
             left = (deadline - now).total_seconds()
             if 0 < left <= 3600 and not notif.get("pre"):
-                await notify(r["user_id"], f"Через час нужно вернуть оборудование по заявке ID {rid} — до {r['dto']}. Откройте Оборудыш, зайдите в карточку заявки и нажмите «Сдать оборудование», приложив фото комплекта.")
+                await notify(r["user_id"], tx.user_return_in_hour_message(rid, r["dto"]))
                 notif["pre"] = 1; changed = True
             elif left <= 0 and ts - notif.get("over", 0) > 7200:
-                await notify(r["user_id"], f"Возврат по заявке ID {rid} просрочен: срок был {r['dto']}. Как можно скорее откройте карточку заявки в Оборудыше, нажмите «Сдать оборудование» и приложите фото комплекта.")
+                await notify(r["user_id"], tx.user_return_overdue_message(rid, r["dto"]))
                 notif["over"] = ts; changed = True
 
         if r["curator"] and r["status"] == "approved" and start_at:
             left = (start_at - now).total_seconds()
             if 3600 < left <= 86400 and not notif.get("cur_issue_24"):
-                await notify(r["curator"], f"Заявка ID {rid}: выдача через сутки, {r['dfrom']}. Подготовьте комплект и откройте эту заявку в Оборудыше к времени выдачи.")
+                await notify(r["curator"], tx.curator_issue_day_message(rid, r["dfrom"]))
                 notif["cur_issue_24"] = 1; changed = True
             if 0 < left <= 3600 and not notif.get("cur_issue_1"):
-                await notify(r["curator"], f"Заявка ID {rid}: через час нужно выдать оборудование, время {r['dfrom']}. Откройте заявку в Оборудыше и нажмите «Выдать оборудование».")
+                await notify(r["curator"], tx.curator_issue_hour_message(rid, r["dfrom"]))
                 notif["cur_issue_1"] = 1; changed = True
 
         if r["curator"] and r["status"] == "issued" and deadline:
             left = (deadline - now).total_seconds()
             if 3600 < left <= 86400 and not notif.get("cur_return_24"):
-                await notify(r["curator"], f"Заявка ID {rid}: возврат через сутки, {r['dto']}. Откройте заявку в Оборудыше и будьте готовы принять комплект.")
+                await notify(r["curator"], tx.curator_return_day_message(rid, r["dto"]))
                 notif["cur_return_24"] = 1; changed = True
             if 0 < left <= 3600 and not notif.get("cur_return_1"):
-                await notify(r["curator"], f"Заявка ID {rid}: через час возврат, время {r['dto']}. Откройте заявку в Оборудыше; после сдачи проверьте комплект и нажмите «Принять возврат».")
+                await notify(r["curator"], tx.curator_return_hour_message(rid, r["dto"]))
                 notif["cur_return_1"] = 1; changed = True
 
         STALE = 6 * 3600
         if r["status"] == "new" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("nocur", 0) > STALE:
-            await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} без куратора уже {int((ts - r['created_ts']) // 3600)} ч — возьмите в работу.")
+            await notify(ADMIN_CHAT_ID, tx.stale_request_without_curator_message(rid, int((ts - r["created_ts"]) // 3600)))
             notif["nocur"] = ts; changed = True
         if r["status"] == "curator" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("noappr", 0) > STALE:
-            await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} у куратора {_disp_user(r['curator'])} не согласована — проверьте.")
+            await notify(ADMIN_CHAT_ID, tx.stale_request_unapproved_message(rid, _disp_user(r["curator"])))
             notif["noappr"] = ts; changed = True
 
         auto_cancel = None
         if r["status"] in ("new", "curator") and r["created_ts"] and ts - r["created_ts"] > 3 * 86400:
-            auto_cancel = "не рассмотрена за 3 дня"
+            auto_cancel = tx.auto_cancel_reason("review_timeout")
         elif r["status"] == "approved" and start_at and now > start_at:
-            auto_cancel = "срок получения истёк"
+            auto_cancel = tx.auto_cancel_reason("issue_timeout")
         if auto_cancel:
             with db() as c:
                 c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
             _push_hist("requests", rid, "canceled", "автоотмена: " + auto_cancel)
-            await notify(r["user_id"], f"Заявка ID {rid} отменена автоматически: {auto_cancel}. Оборудование освобождено — можно подать заново.")
+            await notify(r["user_id"], tx.request_auto_canceled_message(rid, auto_cancel))
             with db() as c:
                 row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
             await send_or_update_card("requests", row)
@@ -2092,13 +2051,18 @@ async def run_checks() -> None:
     for b in rows:
         notif = _get_notif("b626", b)
         bounds = _slot_bounds(b["slot"])
+        start = parse_dt(b["day"], bounds[0] if bounds else "00:00")
         end = parse_dt(b["day"], bounds[1] if bounds else "23:59")
         changed = False
+        if start and end and start <= now < end and not notif.get("start_wish"):
+            await notify(b["user_id"], tx.studio_626_start_message(b["id"]))
+            notif["start_wish"] = 1
+            changed = True
         if end and now > end and not notif.get("handover_user"):
-            await notify(b["user_id"], f"Бронь 626 №{b['id']} завершилась. Откройте её карточку в Оборудыше, нажмите «Сдать аудиторию» и приложите фото убранного помещения.")
+            await notify(b["user_id"], tx.studio_finished_user_message(b["id"]))
             notif["handover_user"] = 1; changed = True
         if end and now > end and b["curator"] and not notif.get("handover_curator"):
-            await notify(b["curator"], f"Бронь 626 №{b['id']} завершилась ({b['day']} {b['slot']}). Откройте бронь в Оборудыше и после фото пользователя примите аудиторию.")
+            await notify(b["curator"], tx.studio_finished_curator_message(b["id"], b["day"], b["slot"]))
             notif["handover_curator"] = 1; changed = True
         if changed:
             _set_notif("b626", b["id"], notif)
@@ -2109,7 +2073,7 @@ async def run_checks() -> None:
     for b in rows:
         notif = _get_notif("b626", b)
         if b["created_ts"] and ts - b["created_ts"] > 6 * 3600 and ts - notif.get("noappr", 0) > 6 * 3600:
-            await notify(ADMIN_CHAT_ID, f"Бронь 626 №{b['id']} ждёт согласования старшими ({b['day']} {b['slot']}).")
+            await notify(ADMIN_CHAT_ID, tx.stale_studio_booking_message(b["id"], b["day"], b["slot"]))
             notif["noappr"] = ts
             _set_notif("b626", b["id"], notif)
             data_changed = True
@@ -2138,13 +2102,20 @@ async def run_checks() -> None:
         await sse_broadcast()
 
 
+def _seconds_to_next_check(now=None) -> float:
+    """Секунды до ближайшей границы :00/:05/:10... по московскому времени."""
+    current = now or datetime.now(MSK)
+    passed = (current.minute % 5) * 60 + current.second + current.microsecond / 1000000.0
+    return max(0.05, 300.0 - passed)
+
+
 async def scheduler_loop() -> None:
     while True:
         try:
             await run_checks()
         except Exception as e:
             log.warning("scheduler: %s", e)
-        await asyncio.sleep(300)
+        await asyncio.sleep(_seconds_to_next_check())
 
 
 async def api_dev_tick(request: web.Request):
@@ -2179,17 +2150,13 @@ async def serve_static(request: web.Request):
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    await message.answer(
-        "Привет! Это 'Оборудыш' - бронирование съёмочного оборудования и студии 626 Media BMSTU.\n\n"
-        "Всё происходит в приложении - открывай:",
-        reply_markup=app_button(),
-    )
+    await message.answer(tx.start_message(), reply_markup=app_button())
 
 
 @dp.message(Command("chatid"))
 async def cmd_chatid(message: Message) -> None:
     """Прислать id чата - чтобы вписать ADMIN_CHAT_ID в .env."""
-    await message.answer(f"chat_id этого чата: <code>{message.chat.id}</code>", parse_mode="HTML")
+    await message.answer(tx.chat_id_message(message.chat.id), parse_mode="HTML")
 
 
 # Скрытые служебные команды для старших админов (не в меню бота - только знающий напишет руками).
@@ -2198,7 +2165,7 @@ async def cmd_digest(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
     await daily_digest()
-    await message.answer("Сводка отправлена в канал.")
+    await message.answer(tx.digest_done_message())
 
 
 @dp.message(Command("backup"))
@@ -2206,7 +2173,7 @@ async def cmd_backup(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
     weekly_backup()
-    await message.answer("Бэкап базы сделан.")
+    await message.answer(tx.backup_done_message())
 
 
 @dp.message(Command("checks"))
@@ -2214,7 +2181,7 @@ async def cmd_checks(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
     await run_checks()
-    await message.answer("Плановые проверки прогнаны.")
+    await message.answer(tx.checks_done_message())
 
 
 @dp.message(Command("export_requests"))
@@ -2257,13 +2224,13 @@ async def cmd_addadmin(message: Message) -> None:
         return
     target = _parse_id_arg(message)
     if target is None:
-        await message.answer("Использование: /addadmin <id>")
+        await message.answer(tx.add_admin_usage_message())
         return
     with db() as c:
         c.execute("INSERT OR IGNORE INTO extra_admins(user_id, added_by, added_ts) VALUES(?,?,?)",
                   (target, message.from_user.id, datetime.now(MSK).strftime("%Y-%m-%d %H:%M:%S")))
     EXTRA_ADMIN_IDS.add(target)
-    await message.answer(f"{target} теперь админ.")
+    await message.answer(tx.admin_added_message(target))
 
 
 @dp.message(Command("deladmin"))
@@ -2272,24 +2239,19 @@ async def cmd_deladmin(message: Message) -> None:
         return
     target = _parse_id_arg(message)
     if target is None:
-        await message.answer("Использование: /deladmin <id>")
+        await message.answer(tx.delete_admin_usage_message())
         return
     with db() as c:
         c.execute("DELETE FROM extra_admins WHERE user_id=?", (target,))
     EXTRA_ADMIN_IDS.discard(target)
-    await message.answer(f"{target} больше не админ.")
+    await message.answer(tx.admin_deleted_message(target))
 
 
 @dp.message(Command("admins"))
 async def cmd_admins(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
-    lines = [
-        "Старшие (.env): " + (", ".join(map(str, sorted(SENIOR_ADMIN_IDS))) or "—"),
-        "Админы (.env): " + (", ".join(map(str, sorted(ADMIN_IDS))) or "—"),
-        "Админы (добавлены /addadmin): " + (", ".join(map(str, sorted(EXTRA_ADMIN_IDS))) or "—"),
-    ]
-    await message.answer("\n".join(lines))
+    await message.answer(tx.admins_list_message(SENIOR_ADMIN_IDS, ADMIN_IDS, EXTRA_ADMIN_IDS))
 
 
 @dp.message(F.chat.type == "private")
@@ -2298,10 +2260,9 @@ async def any_private(message: Message) -> None:
     fo = getattr(message, "forward_origin", None)
     fchat = getattr(fo, "chat", None) if fo else None
     if fchat is not None:
-        await message.answer(f"id этого канала/чата: <code>{fchat.id}</code>\n"
-                             f"Впишите его в ADMIN_CHAT_ID в .env и перезапустите бота.", parse_mode="HTML")
+        await message.answer(tx.forwarded_chat_id_message(fchat.id), parse_mode="HTML")
         return
-    await message.answer("Я только открываю приложение и присылаю уведомления. Всё остальное - внутри:",
+    await message.answer(tx.private_fallback_message(),
                          reply_markup=app_button())
 
 
@@ -2379,7 +2340,7 @@ async def main() -> None:
     me = await bot.get_me()
     BOT_USERNAME = me.username
     await bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(text="Оборудыш", web_app=WebAppInfo(url=WEBAPP_URL))
+        menu_button=MenuButtonWebApp(text=tx.MENU_BUTTON_TEXT, web_app=WebAppInfo(url=WEBAPP_URL))
     )
     if not ADMIN_CHAT_ID:
         log.warning("ADMIN_CHAT_ID не задан - карточки заявок в админ-канал не пойдут. "
