@@ -924,16 +924,18 @@ def _decode_photos(photos) -> list:
     return out
 
 
-async def _send_blobs(chat_id: int, blobs, caption: str) -> None:
+async def _send_blobs(chat_id: int, blobs, caption: str, parse_mode=None) -> None:
     """Список bytes -> в чат одним сообщением (media group), подпись на первом."""
     if not chat_id or bot is None or not blobs:
         return
     try:
         if len(blobs) == 1:
-            await bot.send_photo(chat_id, BufferedInputFile(blobs[0], tx.PHOTO_FILENAME), caption=caption or None)
+            await bot.send_photo(chat_id, BufferedInputFile(blobs[0], tx.PHOTO_FILENAME),
+                                 caption=caption or None, parse_mode=parse_mode)
         else:
             media = [InputMediaPhoto(media=BufferedInputFile(b, tx.photo_filename(i + 1)),
-                                     caption=(caption if (i == 0 and caption) else None))
+                                     caption=(caption if (i == 0 and caption) else None),
+                                     parse_mode=(parse_mode if i == 0 else None))
                      for i, b in enumerate(blobs)]
             await bot.send_media_group(chat_id, media=media)
     except Exception as e:
@@ -1162,11 +1164,11 @@ async def api_req_action(request, body, uid):
             return jerr("??? ????? ????????? ???? ?? ???? ???? ?????????.")
         with db() as c: c.execute("UPDATE requests SET status='ret' WHERE id=?", (rid,))
         _push_hist("requests", rid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = tx.request_return_caption(rid, comment)
+        cap = tx.request_return_caption(rid, comment, len(photos))
         if r["curator"]:
             await notify(r["curator"], tx.request_return_submitted_message(rid))
-            await _send_blobs(r["curator"], photos, cap)
-        await _send_blobs(ADMIN_CHAT_ID, photos, cap)
+            await _send_blobs(r["curator"], photos, cap, "MarkdownV2")
+        await _send_blobs(ADMIN_CHAT_ID, photos, cap, "MarkdownV2")
     elif not is_admin(uid):
         return jerr("?????? ??? ???????.", 403)
     elif action == "curator":
@@ -1275,11 +1277,11 @@ async def api_626_action(request, body, uid):
         if not photos: return jerr("??? ????? ????????? ????????? ???? ?? ???? ????.")
         with db() as c: c.execute("UPDATE b626 SET status='ret' WHERE id=?", (bid,))
         _push_hist("b626", bid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = tx.studio_return_caption(bid, comment)
+        cap = tx.studio_return_caption(bid, comment, len(photos))
         if b["curator"]:
             await notify(b["curator"], tx.studio_return_submitted_message(bid))
-            await _send_blobs(b["curator"], photos, cap)
-        await _send_blobs(ADMIN_CHAT_ID, photos, cap)
+            await _send_blobs(b["curator"], photos, cap, "MarkdownV2")
+        await _send_blobs(ADMIN_CHAT_ID, photos, cap, "MarkdownV2")
     elif action in ("approved", "rejected"):
         if not is_senior(uid): return jerr("626 ????????? ?????? ??????? ??????.", 403)
         if b["status"] != "new": return jerr("??????? ????? ??????? ?????? ?? ????? ?????.")

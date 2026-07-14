@@ -171,6 +171,11 @@ def markdown_v2_bold(value):
     return "*%s*" % markdown_v2_escape(value)
 
 
+def markdown_v2_heading(value):
+    """Визуальный заголовок: Telegram не поддерживает синтаксис # из Markdown."""
+    return "*__%s__*" % markdown_v2_escape(value)
+
+
 def markdown_v2_code(value):
     text = "" if value is None else str(value)
     return "`%s`" % text.replace("\\", "\\\\").replace("`", "\\`")
@@ -190,7 +195,7 @@ def request_card_message(request_id, status, author_name, author_ref, date_from,
     ) for short, qty in items)
     lines = [
         "%s  %s" % (
-            markdown_v2_bold("📦 Заявка · %s" % STATUS_LABELS.get(status, status)),
+            markdown_v2_heading("📦 Заявка · %s" % STATUS_LABELS.get(status, status)),
             markdown_v2_code("ID %s" % request_id),
         ),
         "%s %s · %s" % (
@@ -227,7 +232,7 @@ def studio_card_message(booking_id, status, author_name, author_ref, day, slot,
     """Карточка брони аудитории 626 в служебном канале (MarkdownV2)."""
     lines = [
         "%s  %s" % (
-            markdown_v2_bold("🏛 Бронь 626 · %s" % STATUS_LABELS.get(status, status)),
+            markdown_v2_heading("🏛 Бронь 626 · %s" % STATUS_LABELS.get(status, status)),
             markdown_v2_code("№%s" % booking_id),
         ),
         "%s %s · %s" % (
@@ -303,10 +308,20 @@ def request_canceled_for_curator_message(request_id):
     return "Заявка ID %s отменена пользователем." % request_id
 
 
-def request_return_caption(request_id, comment=""):
-    """Подпись к фотографиям сдачи оборудования."""
-    suffix = "\nКомментарий: %s" % comment if comment else ""
-    return "Фото сдачи по заявке ID %s%s" % (request_id, suffix)
+def request_return_caption(request_id, comment="", photo_count=1):
+    """Форматированная подпись к фотографиям сдачи оборудования."""
+    lines = [
+        markdown_v2_heading("📷 Сдача оборудования"),
+        "%s · %s" % (
+            markdown_v2_code("ID %s" % request_id),
+            markdown_v2_code("%s фото" % photo_count),
+        ),
+    ]
+    if comment:
+        lines.append(">%s %s" % (
+            markdown_v2_bold("Комментарий:"), markdown_v2_escape(comment),
+        ))
+    return "\n".join(lines)
 
 
 def request_return_submitted_message(request_id):
@@ -359,10 +374,20 @@ def new_studio_booking_message(booking_id, day, slot):
     return "🏛 Новая бронь 626 №%s: %s %s — согласуйте её в приложении." % (booking_id, day, slot)
 
 
-def studio_return_caption(booking_id, comment=""):
-    """Подпись к фотографиям сдачи аудитории 626."""
-    suffix = "\nКомментарий: %s" % comment if comment else ""
-    return "Фото сдачи по брони 626 №%s%s" % (booking_id, suffix)
+def studio_return_caption(booking_id, comment="", photo_count=1):
+    """Форматированная подпись к фотографиям сдачи аудитории 626."""
+    lines = [
+        markdown_v2_heading("📷 Сдача аудитории 626"),
+        "%s · %s" % (
+            markdown_v2_code("№%s" % booking_id),
+            markdown_v2_code("%s фото" % photo_count),
+        ),
+    ]
+    if comment:
+        lines.append(">%s %s" % (
+            markdown_v2_bold("Комментарий:"), markdown_v2_escape(comment),
+        ))
+    return "\n".join(lines)
 
 
 def studio_return_submitted_message(booking_id):
@@ -561,22 +586,22 @@ def daily_digest_message(issued, approved, curator, awaiting_return, admin_day,
             "• Ожидают возврата: {awaiting_return}{admin}\n\n"
             "{equipment_title}\n{equipment}\n\n"
             "{studio_title}\n{studio}").format(
-                title=markdown_v2_bold("📊 Ежедневная статистика Оборудыша"),
+                title=markdown_v2_heading("📊 Ежедневная статистика Оборудыша"),
                 issued=issued, approved=approved, curator=curator,
                 awaiting_return=awaiting_return, admin=admin_text,
-                equipment_title=markdown_v2_bold("📅 Оборудование на завтра"),
+                equipment_title=markdown_v2_heading("📅 Оборудование на завтра"),
                 equipment=equipment_text, studio=studio_text,
-                studio_title=markdown_v2_bold("🏛 Аудитория 626 на завтра"),
+                studio_title=markdown_v2_heading("🏛 Аудитория 626 на завтра"),
             )
 
 
 def monthly_digest_message(month, requests_count, studio_count, top_items):
     """Полный текст ежемесячной сводки в служебный канал (MarkdownV2)."""
     text = "%s\n• Заявки: %s\n• Брони 626: %s" % (
-        markdown_v2_bold("📈 Итоги месяца · %s" % month),
+        markdown_v2_heading("📈 Итоги месяца · %s" % month),
         requests_count, studio_count)
     if top_items:
-        text += "\n\n%s\n" % markdown_v2_bold("Топ оборудования:")
+        text += "\n\n%s\n" % markdown_v2_heading("Топ оборудования:")
         text += "\n".join("• %s · %s" % (
             markdown_v2_escape(item), markdown_v2_code("%s шт" % count),
         ) for item, count in top_items)
