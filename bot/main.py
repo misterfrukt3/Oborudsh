@@ -841,9 +841,10 @@ async def send_or_update_card(table: str, row) -> None:
     try:
         if row["admin_msg"]:
             await bot.edit_message_text(text, chat_id=ADMIN_CHAT_ID, message_id=row["admin_msg"],
-                                        reply_markup=deeplink_kb())
+                                        reply_markup=deeplink_kb(), parse_mode="MarkdownV2")
         else:
-            m = await bot.send_message(ADMIN_CHAT_ID, text, reply_markup=deeplink_kb())
+            m = await bot.send_message(ADMIN_CHAT_ID, text, reply_markup=deeplink_kb(),
+                                       parse_mode="MarkdownV2")
             with db() as c:
                 c.execute(f"UPDATE {table} SET admin_msg=? WHERE id=?", (m.message_id, row["id"]))
     except Exception as e:
@@ -1924,7 +1925,7 @@ async def daily_digest() -> None:
         equipment_bookings, studio_bookings,
     )
     try:
-        await bot.send_message(ADMIN_CHAT_ID, text)
+        await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="MarkdownV2")
     except Exception as e:
         log.warning("digest failed: %s", e)
 
@@ -1954,7 +1955,7 @@ async def monthly_digest() -> None:
 
     text = tx.monthly_digest_message(prev_month, reqs_month, b626_month, top_sorted)
     try:
-        await bot.send_message(ADMIN_CHAT_ID, text)
+        await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="MarkdownV2")
     except Exception as e:
         log.warning("monthly digest failed: %s", e)
 

@@ -157,6 +157,25 @@ STATUS_LABELS = {
 }
 
 
+_MARKDOWN_V2_SPECIALS = set("\\_*[]()~`>#+-=|{}.!")
+
+
+def markdown_v2_escape(value):
+    """Экранирует произвольное значение для Telegram MarkdownV2."""
+    text = "" if value is None else str(value)
+    return "".join("\\" + char if char in _MARKDOWN_V2_SPECIALS else char
+                   for char in text)
+
+
+def markdown_v2_bold(value):
+    return "*%s*" % markdown_v2_escape(value)
+
+
+def markdown_v2_code(value):
+    text = "" if value is None else str(value)
+    return "`%s`" % text.replace("\\", "\\\\").replace("`", "\\`")
+
+
 def photo_filename(index):
     """Имя файла у второй и последующих фотографий медиагруппы."""
     return "photo%s.jpg" % index
@@ -165,40 +184,70 @@ def photo_filename(index):
 def request_card_message(request_id, status, author_name, author_ref, date_from,
                          date_to, event, items, comment="", late_notes=None,
                          curator=""):
-    """Карточка заявки на оборудование в служебном канале."""
-    item_lines = "\n".join("  · %s × %s" % (short, qty) for short, qty in items)
+    """Карточка заявки на оборудование в служебном канале (MarkdownV2)."""
+    item_lines = "\n".join("• %s × %s" % (
+        markdown_v2_escape(short), markdown_v2_code(qty),
+    ) for short, qty in items)
     lines = [
-        "📦 Заявка ID %s - %s" % (request_id, STATUS_LABELS.get(status, status)),
-        "От: %s (%s)" % (author_name or "?", author_ref),
-        "Когда: %s → %s" % (date_from, date_to),
-        "Мероприятие: %s" % event,
-        "Состав:\n%s" % item_lines,
+        "%s  %s" % (
+            markdown_v2_bold("📦 Заявка · %s" % STATUS_LABELS.get(status, status)),
+            markdown_v2_code("ID %s" % request_id),
+        ),
+        "%s %s · %s" % (
+            markdown_v2_bold("От:"), markdown_v2_escape(author_name or "?"),
+            markdown_v2_escape(author_ref),
+        ),
+        "%s %s → %s" % (
+            markdown_v2_bold("Когда:"), markdown_v2_code(date_from),
+            markdown_v2_code(date_to),
+        ),
+        "%s %s" % (markdown_v2_bold("Мероприятие:"), markdown_v2_escape(event)),
+        "%s\n%s" % (markdown_v2_bold("Состав:"), item_lines),
     ]
     if comment:
-        lines.append("Комментарий: %s" % comment)
+        lines.append(">%s %s" % (
+            markdown_v2_bold("Комментарий:"), markdown_v2_escape(comment),
+        ))
     if late_notes:
         labels = {"return": "поздний возврат (сб после 18:00)",
                   "issue": "поздняя выдача (сб после 18:00)"}
         note = "; ".join(labels[item] for item in late_notes if item in labels)
         if note:
-            lines.append("⚠️ %s — команда может отказать" % note)
+            lines.append(">⚠️ %s" % markdown_v2_escape(
+                "%s — команда может отказать" % note))
     if curator:
-        lines.append("Куратор: %s" % curator)
+        lines.append("%s %s" % (
+            markdown_v2_bold("Куратор:"), markdown_v2_escape(curator),
+        ))
     return "\n".join(lines)
 
 
 def studio_card_message(booking_id, status, author_name, author_ref, day, slot,
                         goal, needs, curator=""):
-    """Карточка брони аудитории 626 в служебном канале."""
+    """Карточка брони аудитории 626 в служебном канале (MarkdownV2)."""
     lines = [
-        "🏛 Бронь 626 №%s - %s" % (booking_id, STATUS_LABELS.get(status, status)),
-        "От: %s (%s)" % (author_name or "?", author_ref),
-        "Когда: %s · %s" % (day, slot),
-        "Цель: %s" % goal,
-        "Дополнительно: %s" % (", ".join(needs) or "без дополнительного оборудования"),
+        "%s  %s" % (
+            markdown_v2_bold("🏛 Бронь 626 · %s" % STATUS_LABELS.get(status, status)),
+            markdown_v2_code("№%s" % booking_id),
+        ),
+        "%s %s · %s" % (
+            markdown_v2_bold("От:"), markdown_v2_escape(author_name or "?"),
+            markdown_v2_escape(author_ref),
+        ),
+        "%s %s · %s" % (
+            markdown_v2_bold("Когда:"), markdown_v2_code(day),
+            markdown_v2_code(slot),
+        ),
+        "%s %s" % (markdown_v2_bold("Цель:"), markdown_v2_escape(goal)),
+        "%s %s" % (
+            markdown_v2_bold("Дополнительно:"),
+            markdown_v2_escape(", ".join(needs) or "без дополнительного оборудования"),
+        ),
     ]
     if curator:
-        lines.append("Куратор: %s" % curator)
+        lines.append("%s %s" % (
+            markdown_v2_bold("Куратор:"), markdown_v2_escape(curator),
+        ))
     return "\n".join(lines)
 
 
@@ -471,51 +520,66 @@ def stale_studio_booking_message(booking_id, day, slot):
 # ---------------------------------------------------------------------------
 def daily_digest_message(issued, approved, curator, awaiting_return, admin_day,
                          equipment_bookings, studio_bookings):
-    """Полный текст ежедневной сводки в служебный канал."""
+    """Полный текст ежедневной сводки в служебный канал (MarkdownV2)."""
     admin_text = ""
     if admin_day:
-        admin_text = ("\n— Админ дня: {name} (К/В/П/О/А: "
-                      "{k}/{v}/{p}/{o}/{a})").format(**admin_day)
+        admin_text = "\n\n🏆 %s %s\n%s" % (
+            markdown_v2_bold("Админ дня:"), markdown_v2_escape(admin_day["name"]),
+            markdown_v2_code("К/В/П/О/А: {k}/{v}/{p}/{o}/{a}".format(**admin_day)),
+        )
     equipment_blocks = []
     for booking in equipment_bookings:
-        lines = ["— ID %s: %s" % (booking["id"], booking["user"])]
+        lines = ["• %s · %s" % (
+            markdown_v2_code("ID %s" % booking["id"]),
+            markdown_v2_escape(booking["user"]),
+        )]
         for item in booking["items"]:
             if item["qty"] == 1 and item.get("num"):
-                lines.append("— %s №%s" % (item["short"], item["num"]))
+                item_text = "%s №%s" % (item["short"], item["num"])
             else:
-                lines.append("— %s × %s" % (item["short"], item["qty"]))
-        lines.append("Мероприятие: %s" % booking["event"])
-        lines.append("Время: %s, %s — %s, %s" % (
-            booking["date_from"], booking["time_from"],
-            booking["date_to"], booking["time_to"],
-        ))
+                item_text = "%s × %s" % (item["short"], item["qty"])
+            lines.append("  ↳ %s" % markdown_v2_escape(item_text))
+        lines.append("%s %s" % (
+            markdown_v2_bold("Мероприятие:"), markdown_v2_escape(booking["event"])))
+        lines.append("%s %s" % (markdown_v2_bold("Время:"), markdown_v2_code(
+            "%s, %s — %s, %s" % (
+                booking["date_from"], booking["time_from"],
+                booking["date_to"], booking["time_to"],
+            ))))
         equipment_blocks.append("\n".join(lines))
-    equipment_text = "\n".join(equipment_blocks) if equipment_blocks else "— нет"
-    studio_lines = ["— %s–%s: %s — %s" % (
-        item["start"], item["end"], item["user"], item["goal"]
+    equipment_text = "\n\n".join(equipment_blocks) if equipment_blocks else "— нет"
+    studio_lines = ["• %s · %s\n  ↳ %s" % (
+        markdown_v2_code("%s–%s" % (item["start"], item["end"])),
+        markdown_v2_escape(item["user"]), markdown_v2_escape(item["goal"]),
     ) for item in studio_bookings]
     studio_text = "\n".join(studio_lines) if studio_lines else "— свободно"
-    return ("📊 Ежедневная статистика Оборудыша\n\n"
-            "— Активных бронирований: {issued}\n"
-            "— Ожидают выдачи: {approved}\n"
-            "— Согласовано: {curator}\n"
-            "— Выдано: {issued}\n"
-            "— Ожидают возврата: {awaiting_return}{admin}\n\n"
-            "📅 Бронирования оборудования на завтра:\n{equipment}\n\n"
-            "🏛 Занятость аудитории 626 на завтра:\n{studio}").format(
+    return ("{title}\n\n"
+            "• Активных бронирований: {issued}\n"
+            "• Ожидают выдачи: {approved}\n"
+            "• Согласовано: {curator}\n"
+            "• Выдано: {issued}\n"
+            "• Ожидают возврата: {awaiting_return}{admin}\n\n"
+            "{equipment_title}\n{equipment}\n\n"
+            "{studio_title}\n{studio}").format(
+                title=markdown_v2_bold("📊 Ежедневная статистика Оборудыша"),
                 issued=issued, approved=approved, curator=curator,
                 awaiting_return=awaiting_return, admin=admin_text,
+                equipment_title=markdown_v2_bold("📅 Оборудование на завтра"),
                 equipment=equipment_text, studio=studio_text,
+                studio_title=markdown_v2_bold("🏛 Аудитория 626 на завтра"),
             )
 
 
 def monthly_digest_message(month, requests_count, studio_count, top_items):
-    """Полный текст ежемесячной сводки в служебный канал."""
-    text = "📈 ИТОГИ МЕСЯЦА %s\n• Заявки: %s\n• Брони 626: %s" % (
-        month, requests_count, studio_count)
+    """Полный текст ежемесячной сводки в служебный канал (MarkdownV2)."""
+    text = "%s\n• Заявки: %s\n• Брони 626: %s" % (
+        markdown_v2_bold("📈 Итоги месяца · %s" % month),
+        requests_count, studio_count)
     if top_items:
-        text += "\n• Топ оборудования:\n" + "\n".join(
-            "  · %s: %s шт" % (item, count) for item, count in top_items)
+        text += "\n\n%s\n" % markdown_v2_bold("Топ оборудования:")
+        text += "\n".join("• %s · %s" % (
+            markdown_v2_escape(item), markdown_v2_code("%s шт" % count),
+        ) for item, count in top_items)
     return text
 
 
