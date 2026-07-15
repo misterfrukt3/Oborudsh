@@ -1926,6 +1926,7 @@ async def daily_digest() -> None:
         issued_n, approved_n, curator_n, ret_n, admin_day,
         equipment_bookings, studio_bookings,
     )
+
     try:
         await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="MarkdownV2")
     except Exception as e:
