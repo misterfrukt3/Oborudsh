@@ -150,3 +150,11 @@ BOT_TOKEN, WEBAPP_URL, PORT=8737, ADMIN_CHAT_ID (канал), ADMIN_IDS, SENIOR_
 - Google Sheets sync is optional. When disabled or unavailable, the app continues normally and events stay queued. Hidden senior commands: `/scorestatus`, `/scoresync`.
 - Sheet `Начисления`: `event_id | date/time | full name | Telegram ID | type | object ID | points | description`. Sheet `Админы` is rebuilt from the event log after sync.
 - Daily/monthly reports and `/digest` use Telegram `sendRichMessage`, split at semantic sections below 30000 characters, with ordinary text fallback.
+
+## Продолжение на другом компьютере
+
+- Начать с `NEXT.md`.
+- Закрытая таблица людей: ID `1caWlBJbzYHt0-SK744UD9rU7VS28cNAJY7jxoXosqCs`, лист `люди`.
+- Интеграция этой таблицы пока не реализована: нужны заголовки столбцов и Service Account с доступом «Читатель».
+- Таблицу баллов ещё нужно создать; код очереди и синхронизации уже готов.
+- Перед production остаются актуализация каталога и финальный прогон.
