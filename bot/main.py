@@ -12,16 +12,19 @@
 напоминания/автоотмены (APScheduler), автосверка MB с Google-таблицей, фото сдачи.
 """
 import asyncio
+import base64
 import csv
 import hashlib
 import hmac
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -32,6 +35,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    InputRichMessage,
     MenuButtonWebApp,
     Message,
     WebAppInfo,
@@ -39,6 +43,7 @@ from aiogram.types import (
 import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
+import texts as tx
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / ".env")
@@ -63,24 +68,64 @@ ORG_MEMBERS_FILE = os.getenv("ORG_MEMBERS_FILE", str(BASE / "org_members.csv"))
 # справочник для автозаполнения по username (если файла нет - работает по старому шаблону)
 DIRECTORY_FILE = os.getenv("DIRECTORY_FILE", "")
 
+
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, "1" if default else "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+ENABLE_PRODUCTION_ROLE = env_bool("ENABLE_PRODUCTION_ROLE")
+GOOGLE_SHEETS_ENABLED = env_bool("GOOGLE_SHEETS_ENABLED")
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
+GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "").strip()
+GOOGLE_SHEET_EVENTS_TAB = os.getenv("GOOGLE_SHEET_EVENTS_TAB", "Начисления").strip() or "Начисления"
+GOOGLE_SHEET_SUMMARY_TAB = os.getenv("GOOGLE_SHEET_SUMMARY_TAB", "Админы").strip() or "Админы"
+
+
+def env_decimal(name: str, default: str) -> Decimal:
+    try:
+        value = Decimal(os.getenv(name, default).strip())
+        if value < 0:
+            raise InvalidOperation
+        return value
+    except (InvalidOperation, ValueError):
+        return Decimal(default)
+
+
+SCORE_DAILY_ADMIN = env_decimal("SCORE_DAILY_ADMIN", "0.1")
+SCORE_REQUEST = env_decimal("SCORE_REQUEST", "0.01")
+SCORE_626 = env_decimal("SCORE_626", "0.05")
+
 MSK = timezone(timedelta(hours=3))
 log = logging.getLogger("oborudka")
 
 bot: Bot = None  # type: ignore  # создаётся в main()
 BOT_USERNAME = ""
 dp = Dispatcher()
+SSE_CLIENTS = set()
 
 
 # ================= БД =================
 
+class ClosingConnection(sqlite3.Connection):
+    """sqlite3 context manager that commits/rolls back and always closes."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def init_db() -> None:
     with db() as c:
+        c.execute("PRAGMA journal_mode=WAL")
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users(
           id INTEGER PRIMARY KEY, name TEXT DEFAULT '', username TEXT DEFAULT '',
@@ -96,7 +141,7 @@ def init_db() -> None:
           dfrom_iso TEXT DEFAULT '', dto_iso TEXT DEFAULT '',
           tfrom TEXT DEFAULT '', tto TEXT DEFAULT '',
           created_ts REAL DEFAULT 0, notif TEXT DEFAULT '{}', escalated INTEGER DEFAULT 0,
-          nums TEXT DEFAULT '{}');
+          nums TEXT DEFAULT '{}', issued_by INTEGER, returned_by INTEGER);
         CREATE TABLE IF NOT EXISTS b626(
           id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, day TEXT, slot TEXT,
           goal TEXT, needs TEXT DEFAULT '[]', status TEXT DEFAULT 'new',
@@ -122,7 +167,52 @@ def init_db() -> None:
           action TEXT, ts TEXT);
         CREATE TABLE IF NOT EXISTS extra_admins(
           user_id INTEGER PRIMARY KEY, added_by INTEGER, added_ts TEXT);
+        CREATE TABLE IF NOT EXISTS equipment_units(
+          short TEXT, num INTEGER, serial TEXT DEFAULT '', note TEXT DEFAULT '',
+          state TEXT DEFAULT 'ready', updated_at TEXT DEFAULT '', updated_by INTEGER,
+          PRIMARY KEY(short, num));
+        CREATE TABLE IF NOT EXISTS score_events(
+          event_id TEXT PRIMARY KEY, happened_at TEXT, fio TEXT, admin_id INTEGER,
+          kind TEXT, object_id TEXT, points TEXT, details TEXT DEFAULT '',
+          status TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0,
+          next_retry REAL DEFAULT 0, sent_at TEXT DEFAULT '', last_error TEXT DEFAULT '');
+        CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_requests_status_dates ON requests(status, dfrom_iso, dto_iso);
+        CREATE INDEX IF NOT EXISTS idx_b626_user_id ON b626(user_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_b626_status_day ON b626(status, day);
+        CREATE INDEX IF NOT EXISTS idx_messages_ref ON messages(kind, ref, id);
+        CREATE INDEX IF NOT EXISTS idx_actions_ref ON actions(kind, ref, action, admin_id);
+        CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(ts, admin_id);
+        CREATE INDEX IF NOT EXISTS idx_score_events_due ON score_events(status, next_retry);
+        CREATE INDEX IF NOT EXISTS idx_equipment_units_state ON equipment_units(short, state, num);
         """)
+    _ensure_revision_triggers()
+
+
+REVISION_TABLES = (
+    "users", "requests", "b626", "messages", "extra_items", "cat_blocks",
+    "removed_items", "fav_sets", "reads", "actions", "extra_admins", "equipment_units",
+)
+
+
+def _ensure_revision_triggers() -> None:
+    """Change the revision after every user-visible database mutation."""
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO meta(k, v) VALUES('_revision', '0')")
+        for table in REVISION_TABLES:
+            for op in ("INSERT", "UPDATE", "DELETE"):
+                name = "revision_%s_%s" % (table, op.lower())
+                c.execute(
+                    "CREATE TRIGGER IF NOT EXISTS %s AFTER %s ON %s "
+                    "BEGIN UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='_revision'; END"
+                    % (name, op, table)
+                )
+
+
+def db_revision() -> str:
+    with db() as c:
+        row = c.execute("SELECT v FROM meta WHERE k='_revision'").fetchone()
+    return row["v"] if row else "0"
 
 
 def _migrate() -> None:
@@ -131,7 +221,8 @@ def _migrate() -> None:
         "requests": {"dfrom_iso": "TEXT DEFAULT ''", "dto_iso": "TEXT DEFAULT ''",
                      "tfrom": "TEXT DEFAULT ''", "tto": "TEXT DEFAULT ''",
                      "created_ts": "REAL DEFAULT 0", "notif": "TEXT DEFAULT '{}'",
-                     "escalated": "INTEGER DEFAULT 0", "nums": "TEXT DEFAULT '{}'"},
+                     "escalated": "INTEGER DEFAULT 0", "nums": "TEXT DEFAULT '{}'",
+                     "issued_by": "INTEGER", "returned_by": "INTEGER"},
         "b626": {"created_ts": "REAL DEFAULT 0", "notif": "TEXT DEFAULT '{}'"},
         "users": {"block_until": "TEXT DEFAULT ''"},
         "messages": {"role": "TEXT DEFAULT ''"},
@@ -143,12 +234,35 @@ def _migrate() -> None:
             c.execute("CREATE TABLE actions(id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER, kind TEXT, ref INTEGER, action TEXT, ts TEXT)")
         if "extra_admins" not in tables:
             c.execute("CREATE TABLE extra_admins(user_id INTEGER PRIMARY KEY, added_by INTEGER, added_ts TEXT)")
+        if "score_events" not in tables:
+            c.execute("""CREATE TABLE score_events(
+              event_id TEXT PRIMARY KEY, happened_at TEXT, fio TEXT, admin_id INTEGER,
+              kind TEXT, object_id TEXT, points TEXT, details TEXT DEFAULT '',
+              status TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0,
+              next_retry REAL DEFAULT 0, sent_at TEXT DEFAULT '', last_error TEXT DEFAULT '')""")
+        if "equipment_units" not in tables:
+            c.execute("""CREATE TABLE equipment_units(
+              short TEXT, num INTEGER, serial TEXT DEFAULT '', note TEXT DEFAULT '',
+              state TEXT DEFAULT 'ready', updated_at TEXT DEFAULT '', updated_by INTEGER,
+              PRIMARY KEY(short, num))""")
     with db() as c:
         for table, cols in adds.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
             for k, v in cols.items():
                 if k not in have:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {k} {v}")
+        c.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_requests_status_dates ON requests(status, dfrom_iso, dto_iso);
+        CREATE INDEX IF NOT EXISTS idx_b626_user_id ON b626(user_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_b626_status_day ON b626(status, day);
+        CREATE INDEX IF NOT EXISTS idx_messages_ref ON messages(kind, ref, id);
+        CREATE INDEX IF NOT EXISTS idx_actions_ref ON actions(kind, ref, action, admin_id);
+        CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(ts, admin_id);
+        CREATE INDEX IF NOT EXISTS idx_score_events_due ON score_events(status, next_retry);
+        CREATE INDEX IF NOT EXISTS idx_equipment_units_state ON equipment_units(short, state, num);
+        """)
+    _ensure_revision_triggers()
 
 
 # ---- каталог на сервере: общее кол-во по позициям (для проверки занятости) ----
@@ -158,7 +272,7 @@ BOOKING_LOCK = asyncio.Lock()
 
 
 def load_catalog() -> None:
-    """?????? prototype/catalog.js (??? ?? ????, ??? ????? ?????)."""
+    """Загрузить каталог из prototype/catalog.js и дополнений из базы."""
     global TOTALS, CATALOG_META
     try:
         raw = (WEBAPP_DIR / "catalog.js").read_text(encoding="utf-8")
@@ -167,7 +281,7 @@ def load_catalog() -> None:
         CATALOG_META = {i["short"]: {"cat": c["cat"], "total": int(i.get("total") or 1), "level": i.get("level") or ""} for c in data for i in c["items"]}
     except Exception as e:
         TOTALS, CATALOG_META = {}, {}
-        log.warning("prototype/catalog.js ?? ???????? (%s) - ????????? ???????? ????????? ?????????", e)
+        log.warning("prototype/catalog.js не прочитан (%s) — проверка наличия ограничена", e)
     try:
         with db() as c:
             for r in c.execute("SELECT cat, short, total, level FROM extra_items").fetchall():
@@ -176,8 +290,35 @@ def load_catalog() -> None:
             for r in c.execute("SELECT short FROM removed_items").fetchall():
                 TOTALS.pop(r["short"], None); CATALOG_META.pop(r["short"], None)
     except Exception as e:
-        log.warning("extra_items/removed_items ?? ?????????: %s", e)
-    log.info("???????: %s ???????", len(TOTALS))
+        log.warning("extra_items/removed_items не прочитаны: %s", e)
+    log.info("Каталог: %s позиций", len(TOTALS))
+
+
+def sync_equipment_units() -> None:
+    """Создать недостающие паспорта, не удаляя заполненные и исторические записи."""
+    stamp = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
+    with db() as c:
+        for short, meta in CATALOG_META.items():
+            for num in range(1, int(meta.get("total") or 1) + 1):
+                c.execute(
+                    "INSERT OR IGNORE INTO equipment_units(short, num, updated_at) VALUES(?,?,?)",
+                    (short, num, stamp),
+                )
+
+
+def ready_numbers(short: str) -> list:
+    """Номера исправных экземпляров, существующих в текущем каталоге."""
+    total = int((CATALOG_META.get(short) or {}).get("total") or 0)
+    if total < 1:
+        return []
+    with db() as c:
+        rows = c.execute(
+            "SELECT num FROM equipment_units "
+            "WHERE short=? AND num<=? AND state='ready' ORDER BY num",
+            (short, total),
+        ).fetchall()
+    return [row["num"] for row in rows]
+
 
 # ---- автосверка Media BMSTU по опубликованной таблице (лист 'список ребят') ----
 _MB_CACHE = {"ts": 0.0, "names": None}
@@ -187,7 +328,7 @@ def _norm_name(s: str) -> str:
     return " ".join((s or "").lower().replace("ё", "е").split())
 
 def clean_text(value, limit):
-    """????? ?? ???????? ??????? ?? ?????? ??????????? ????????? ?? ?????????."""
+    """Очистить пользовательский текст от опасных символов и ограничить длину."""
     return str(value or "").replace("<", "").replace(">", "").replace('"', "").replace("'", "").strip()[:limit]
 
 
@@ -314,9 +455,9 @@ def check_availability(items, d1, d2, exclude_rid=0):
         return None
     busy = busy_map(d1, d2, exclude_rid)
     bad = [s for s, q in items
-           if s in TOTALS and busy.get(s, 0) + int(q) > TOTALS[s]]
+           if s in CATALOG_META and busy.get(s, 0) + int(q) > len(ready_numbers(s))]
     if bad:
-        return "На выбранные даты уже занято: " + ", ".join(bad) + ". Уберите позиции или смените даты."
+        return "На выбранные даты не хватает исправных экземпляров: " + ", ".join(bad) + ". Уберите позиции или смените даты."
     return None
 
 
@@ -333,11 +474,11 @@ def _valid_slot(value):
 
 def validate_request_window(d1, d2, t1, t2):
     first, last = _parse_iso_day(d1), _parse_iso_day(d2)
-    if not first or not last or not _valid_slot(t1) or not _valid_slot(t2): return "??????? ?????????? ???? ? ????? ? ????? 30 ????? (09:00?21:30)."
-    if last < first or (last == first and t2 <= t1): return "??????? ?????? ???? ????? ?????????."
-    if (last - first).days > 61: return "???????????? ???? ???????????? ? 62 ???."
-    if first < datetime.now(MSK).date() + timedelta(days=2): return "???????????? ????? ??????????? ??????? ?? 2 ??? ?? ?????????."
-    if first.weekday() == 6 or last.weekday() == 6: return "????????? ? ??????? ? ??????????? ??????????."
+    if not first or not last or not _valid_slot(t1) or not _valid_slot(t2): return "Укажите корректные даты и время с шагом 30 минут (09:00–21:30)."
+    if last < first or (last == first and t2 <= t1): return "Дата возврата должна быть позже даты получения."
+    if (last - first).days > 61: return "Максимальный срок бронирования — 62 дня."
+    if first < datetime.now(MSK).date() + timedelta(days=2): return "Оборудование можно забронировать минимум за 2 дня до получения."
+    if first.weekday() == 6 or last.weekday() == 6: return "Получение и возврат в воскресенье запрещены."
     return None
 
 
@@ -347,25 +488,25 @@ def _active_cat_blocks():
 
 
 def validate_items(uid, raw_items, media=False, allow_restricted=False):
-    if not isinstance(raw_items, list) or not raw_items: return None, "???????? ???? ?? ???? ??????? ? ???????."
-    if len(raw_items) > 50: return None, "? ????? ?????? ????? ???? ?? ?????? 50 ???????."
+    if not isinstance(raw_items, list) or not raw_items: return None, "Добавьте хотя бы одну позицию в заявку."
+    if len(raw_items) > 50: return None, "В одной заявке может быть не больше 50 позиций."
     blocks, user, out, seen = _active_cat_blocks(), get_user(uid), [], set()
     role = user["role"] if user else ""
     for pair in raw_items:
-        if not isinstance(pair, (list, tuple)) or len(pair) != 2: return None, "???????????? ?????? ??????."
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2: return None, "Некорректный формат позиции."
         short, qty = pair
-        if not isinstance(short, str): return None, "???????????? ???????? ???????."
+        if not isinstance(short, str): return None, "Некорректное название позиции."
         short = short.strip()
-        if not short or short in seen or short not in CATALOG_META: return None, "? ?????? ???? ??????????? ??? ????????????? ???????."
-        if isinstance(qty, bool): return None, "???????????? ?????????? ???????."
+        if not short or short in seen or short not in CATALOG_META: return None, "В заявке есть неизвестная или повторяющаяся позиция."
+        if isinstance(qty, bool): return None, "Некорректное количество экземпляров."
         try: qty = int(qty)
-        except (TypeError, ValueError): return None, "???????????? ?????????? ???????."
+        except (TypeError, ValueError): return None, "Некорректное количество экземпляров."
         meta = CATALOG_META[short]
-        if qty < 1 or qty > meta["total"]: return None, "?????????? ??????? ??????? ?? ??????? ?????????? ???????."
-        if meta["cat"] in blocks: return None, "????????? ?%s? ???????? ??????????." % meta["cat"]
+        if qty < 1 or qty > meta["total"]: return None, "Количество экземпляров превышает доступное в каталоге."
+        if meta["cat"] in blocks: return None, "Категория «%s» временно недоступна." % meta["cat"]
         if not allow_restricted:
-            if meta["level"] == "глава" and not is_senior(uid): return None, "??? ??????? ???????? ?????? ??????? ???????."
-            if meta["level"] == "акт" and role not in ("активист", "production") and not media: return None, "??? ??????? ???????? ?????????? ??? ?????????????? ?? ?????."
+            if meta["level"] == "глава" and not is_senior(uid): return None, "Эта позиция доступна только старшим администраторам."
+            if meta["level"] == "акт" and role not in ("активист", "production") and not media: return None, "Эта позиция доступна активистам или ответственному за медиа."
         out.append([short, qty]); seen.add(short)
     return out, None
 
@@ -379,8 +520,8 @@ def _slot_bounds(slot):
 
 def validate_626_window(day, slot):
     date, bounds = _parse_iso_day(day), _slot_bounds(slot)
-    if not date or not bounds: return None, "??????? ?????????? ???? ? ????? 626 (09:00?21:30, ??? 30 ?????)."
-    if date < datetime.now(MSK).date() + timedelta(days=2): return None, "????????? 626 ????? ??????????? ??????? ?? 2 ???."
+    if not date or not bounds: return None, "Укажите корректную дату и время для 626 (09:00–21:30, шаг 30 минут)."
+    if date < datetime.now(MSK).date() + timedelta(days=2): return None, "Аудиторию 626 можно забронировать минимум за 2 дня."
     return bounds[0] + "–" + bounds[1], None
 
 
@@ -403,14 +544,17 @@ def used_numbers(short, d1, d2, exclude_rid=0):
     return used
 
 
-def assign_numbers(items, d1, d2, exclude_rid=0):
-    result = {}
+def assign_numbers(items, d1, d2, exclude_rid=0, preferred=None):
+    """Назначить только исправные и свободные номера, проверив выбор администратора."""
+    result, preferred = {}, preferred or {}
     for short, qty in items:
-        total = CATALOG_META[short]["total"]
-        if total <= 1: continue
-        free = [n for n in range(1, total + 1) if n not in used_numbers(short, d1, d2, exclude_rid)]
-        if len(free) < qty: return None, "?? ???????? ????????? ??????????? ??????? ?%s?." % short
-        result[short] = free[:qty]
+        used = used_numbers(short, d1, d2, exclude_rid)
+        free = [num for num in ready_numbers(short) if num not in used]
+        wanted = _numbers_from_value(preferred.get(short))
+        chosen = wanted if len(wanted) == int(qty) else free[:int(qty)]
+        if len(set(chosen)) != int(qty) or any(num not in free for num in chosen):
+            return None, "Не хватает исправных свободных экземпляров позиции «%s»." % short
+        result[short] = chosen
     return result, None
 
 
@@ -437,7 +581,7 @@ def dayload_map() -> dict:
 
 
 def slot_expand(slot: str):
-    """????????????? ???? 626 ?? ?????????; ????????? ? ??????? ????."""
+    """Развернуть интервал 626 по получасам; результат включает начало."""
     bounds = _slot_bounds(slot)
     if not bounds: return []
     t, end = datetime.strptime(bounds[0], "%H:%M"), datetime.strptime(bounds[1], "%H:%M")
@@ -510,7 +654,9 @@ def touch_user(tg_user: dict):
             c.execute("INSERT INTO users(id, username, photo, created) VALUES(?,?,?,?)",
                       (uid, uname, photo, now_str()))
         else:
-            c.execute("UPDATE users SET username=?, photo=? WHERE id=?", (uname, photo, uid))
+            c.execute("""UPDATE users SET username=?, photo=?
+                         WHERE id=? AND (username<>? OR photo<>?)""",
+                      (uname, photo, uid, uname, photo))
 
 
 # ================= Сериализация для фронта =================
@@ -522,9 +668,14 @@ def _disp_user(uid) -> str:
     return ("@" + u["username"]) if u["username"] else (u["name"] or "админ")
 
 
-def _chat_for(kind: str, ref: int, owner_id: int, curator_id=None):
-    with db() as c:
-        rows = c.execute("SELECT * FROM messages WHERE kind=? AND ref=? ORDER BY id", (kind, ref)).fetchall()
+def _disp_user_from(users: dict, uid) -> str:
+    u = users.get(uid) if uid else None
+    if not u:
+        return "админ"
+    return ("@" + u["username"]) if u["username"] else (u["name"] or "админ")
+
+
+def _shape_chat(rows, owner_id: int, curator_id=None):
     out = []
     for m in rows:
         role = m["role"] or ""
@@ -541,51 +692,54 @@ def _chat_for(kind: str, ref: int, owner_id: int, curator_id=None):
     return out
 
 
-def _seen(user_id: int, kind: str, ref: int) -> int:
-    with db() as c:
-        r = c.execute("SELECT seen FROM reads WHERE user_id=? AND kind=? AND ref=?", (user_id, kind, ref)).fetchone()
-    return r["seen"] if r else 0
+def _unread_from(rows, seen: int, viewer: int) -> int:
+    return sum(1 for row in rows if row["id"] > seen and row["sender"] != viewer)
 
 
-def _unread(kind: str, ref: int, viewer: int) -> int:
-    with db() as c:
-        r = c.execute("SELECT COUNT(*) n FROM messages WHERE kind=? AND ref=? AND id>? AND sender<>?",
-                      (kind, ref, _seen(viewer, kind, ref), viewer)).fetchone()
-    return r["n"]
-
-
-def shape_req(r, viewer: int) -> dict:
-    author = get_user(r["user_id"])
+def shape_req(r, viewer: int, users=None, messages=None, seen=None) -> dict:
+    users = users or {}
+    messages = messages or {}
+    seen = seen or {}
+    author = users.get(r["user_id"]) if users else get_user(r["user_id"])
     deps = json.loads(author["deps"]) if author else []
+    can_chat = viewer == r["user_id"] or viewer == r["curator"] or is_senior(viewer)
+    chat_rows = messages.get(("req", r["id"]), []) if can_chat else []
     return {
         "id": r["id"], "me": r["user_id"] == viewer, "curMe": r["curator"] == viewer,
-        "author": (author["name"] or _disp_user(r["user_id"])) if author else "?",
+        "author": (author["name"] or _disp_user_from(users, r["user_id"])) if author else "?",
         "dep": deps[0] if deps else "",
         "items": json.loads(r["items"]), "event": r["event"], "comment": r["comment"],
         "from": r["dfrom"], "to": r["dto"], "status": r["status"],
         "d1Iso": r["dfrom_iso"], "d2Iso": r["dto_iso"], "t1": r["tfrom"], "t2": r["tto"],
-        "curator": _disp_user(r["curator"]) if r["curator"] else None,
+        "curator": _disp_user_from(users, r["curator"]) if r["curator"] else None,
         "pwUsed": bool(r["pw"]), "media": bool(r["media"]), "escalated": bool(r["escalated"]),
         "lateNote": late_note(r),
         "takenAt": r["taken_at"], "returnedAt": r["returned_at"],
         "history": json.loads(r["history"]),
-        "chat": _chat_for("req", r["id"], r["user_id"], r["curator"]) if (viewer == r["user_id"] or viewer == r["curator"] or is_senior(viewer)) else [],
-        "unread": _unread("req", r["id"], viewer) if (viewer == r["user_id"] or viewer == r["curator"] or is_senior(viewer)) else 0,
+        "chat": _shape_chat(chat_rows, r["user_id"], r["curator"]) if can_chat else [],
+        "unread": _unread_from(chat_rows, seen.get(("req", r["id"]), 0), viewer) if can_chat else 0,
         "nums": json.loads(r["nums"] or "{}") if is_admin(viewer) else {},
+        "issuedBy": _disp_user_from(users, r["issued_by"]) if r["issued_by"] else None,
+        "returnedBy": _disp_user_from(users, r["returned_by"]) if r["returned_by"] else None,
     }
 
 
-def shape_626(b, viewer: int) -> dict:
-    author = get_user(b["user_id"])
+def shape_626(b, viewer: int, users=None, messages=None, seen=None) -> dict:
+    users = users or {}
+    messages = messages or {}
+    seen = seen or {}
+    author = users.get(b["user_id"]) if users else get_user(b["user_id"])
+    can_chat = viewer == b["user_id"] or viewer == b["curator"] or is_senior(viewer)
+    chat_rows = messages.get(("626", b["id"]), []) if can_chat else []
     return {
         "id": b["id"], "me": b["user_id"] == viewer, "curMe": b["curator"] == viewer,
-        "author": (author["name"] or _disp_user(b["user_id"])) if author else "?",
+        "author": (author["name"] or _disp_user_from(users, b["user_id"])) if author else "?",
         "when": b["day"], "slot": b["slot"], "goal": b["goal"],
         "needs": json.loads(b["needs"]), "status": b["status"],
-        "curator": _disp_user(b["curator"]) if b["curator"] else None,
+        "curator": _disp_user_from(users, b["curator"]) if b["curator"] else None,
         "history": json.loads(b["history"]),
-        "chat": _chat_for("626", b["id"], b["user_id"], b["curator"]) if (viewer == b["user_id"] or viewer == b["curator"] or is_senior(viewer)) else [],
-        "unread": _unread("626", b["id"], viewer) if (viewer == b["user_id"] or viewer == b["curator"] or is_senior(viewer)) else 0,
+        "chat": _shape_chat(chat_rows, b["user_id"], b["curator"]) if can_chat else [],
+        "unread": _unread_from(chat_rows, seen.get(("626", b["id"]), 0), viewer) if can_chat else 0,
     }
 
 
@@ -614,12 +768,60 @@ def _cat_until_passed(s: str) -> bool:
     return False
 
 
+def unit_summary() -> list:
+    """Краткие паспорта только для позиций, которые существуют в текущем каталоге."""
+    with db() as c:
+        rows = c.execute("SELECT * FROM equipment_units ORDER BY short COLLATE NOCASE, num").fetchall()
+    return [{
+        "short": row["short"], "num": row["num"], "serial": row["serial"],
+        "note": row["note"], "state": row["state"], "updatedAt": row["updated_at"],
+        "updatedBy": _disp_user(row["updated_by"]) if row["updated_by"] else "система",
+    } for row in rows if row["short"] in CATALOG_META and row["num"] <= CATALOG_META[row["short"]]["total"]]
+
+
+def unit_passport(short: str, num: int):
+    with db() as c:
+        unit = c.execute(
+            "SELECT * FROM equipment_units WHERE short=? AND num=?", (short, num)
+        ).fetchone()
+        reqs = c.execute(
+            "SELECT * FROM requests WHERE nums<>'{}' ORDER BY id DESC"
+        ).fetchall()
+    if not unit or short not in CATALOG_META or num > CATALOG_META[short]["total"]:
+        return None
+    history = []
+    for row in reqs:
+        try:
+            nums = json.loads(row["nums"] or "{}")
+        except (TypeError, ValueError):
+            nums = {}
+        if num not in _numbers_from_value(nums.get(short)):
+            continue
+        history.append({
+            "requestId": row["id"], "user": _disp_user(row["user_id"]),
+            "from": row["dfrom"], "to": row["dto"], "status": row["status"],
+            "issuedBy": _disp_user(row["issued_by"]) if row["issued_by"] else "—",
+            "returnedBy": _disp_user(row["returned_by"]) if row["returned_by"] else "—",
+            "takenAt": row["taken_at"] or "—", "returnedAt": row["returned_at"] or "—",
+        })
+    return {
+        "short": unit["short"], "num": unit["num"], "serial": unit["serial"],
+        "note": unit["note"], "state": unit["state"], "updatedAt": unit["updated_at"],
+        "updatedBy": _disp_user(unit["updated_by"]) if unit["updated_by"] else "система",
+        "history": history,
+    }
+
+
 def boot_payload(uid: int) -> dict:
-    u = get_user(uid)
+    with db() as c:
+        users = {row["id"]: row for row in c.execute("SELECT * FROM users").fetchall()}
+    u = users.get(uid)
     if u and u["verified"] == "blocked" and _block_expired(u["block_until"]):
         with db() as c:  # срок блокировки истёк - снимаем сами
             c.execute("UPDATE users SET verified='ok', block_reason='', block_until='' WHERE id=?", (uid,))
-        u = get_user(uid)
+        with db() as c:
+            users = {row["id"]: row for row in c.execute("SELECT * FROM users").fetchall()}
+        u = users.get(uid)
     adm, sen = is_admin(uid), is_senior(uid)
     with db() as c:
         if adm:
@@ -628,39 +830,48 @@ def boot_payload(uid: int) -> dict:
         else:
             reqs = c.execute("SELECT * FROM requests WHERE user_id=? ORDER BY id DESC", (uid,)).fetchall()
             b626s = c.execute("SELECT * FROM b626 WHERE user_id=? ORDER BY id DESC", (uid,)).fetchall()
+        message_rows = c.execute("SELECT * FROM messages ORDER BY id").fetchall()
+        read_rows = c.execute("SELECT kind, ref, seen FROM reads WHERE user_id=?", (uid,)).fetchall()
+        extra_items = c.execute("SELECT * FROM extra_items ORDER BY id").fetchall()
+        cat_blocks = c.execute("SELECT * FROM cat_blocks").fetchall()
+        removed_items = c.execute("SELECT short FROM removed_items").fetchall()
+        fav_sets = c.execute("SELECT * FROM fav_sets WHERE user_id=? ORDER BY id", (uid,)).fetchall()
+        pend = c.execute("SELECT * FROM users WHERE verified='pending'").fetchall() if sen else []
+        allu = c.execute("SELECT * FROM users WHERE agreed=1 ORDER BY name").fetchall() if sen else []
+    messages = {}
+    for row in message_rows:
+        messages.setdefault((row["kind"], row["ref"]), []).append(row)
+    seen = {(row["kind"], row["ref"]): row["seen"] for row in read_rows}
     out = {
         "ok": True, "isAdmin": adm, "isSenior": sen,
+        "revision": db_revision(),
+        "features": {"productionRole": ENABLE_PRODUCTION_ROLE},
         "registered": bool(u and u["agreed"]),
         "verified": u["verified"] if u else "none",
         "blockReason": (u["block_reason"] if u else "") or "",
-        "requests": [shape_req(r, uid) for r in reqs],
-        "bookings626": [shape_626(b, uid) for b in b626s],
+        "requests": [shape_req(r, uid, users, messages, seen) for r in reqs],
+        "bookings626": [shape_626(b, uid, users, messages, seen) for b in b626s],
         "dayload": dayload_map(),
         "busy626": busy626_map(),
     }
-    with db() as c:  # каталог: добавленные позиции и блокировки категорий - всем (каталог у юзеров это учитывает)
-        out["extraItems"] = [{"cat": r["cat"], "short": r["short"], "full": r["full"],
-                              "total": r["total"], "level": r["level"] or None}
-                             for r in c.execute("SELECT * FROM extra_items ORDER BY id").fetchall()]
-        out["catBlocks"] = {r["cat"]: {"until": r["until"], "term": r["term"]}
-                            for r in c.execute("SELECT * FROM cat_blocks").fetchall()}
-        out["removedItems"] = [r["short"] for r in c.execute("SELECT short FROM removed_items").fetchall()]
-        out["favSets"] = [{"id": r["id"], "name": r["name"], "items": json.loads(r["items"])}
-                          for r in c.execute("SELECT * FROM fav_sets WHERE user_id=? ORDER BY id", (uid,)).fetchall()]
+    out["extraItems"] = [{"cat": r["cat"], "short": r["short"], "full": r["full"],
+                          "total": r["total"], "level": r["level"] or None} for r in extra_items]
+    out["catBlocks"] = {r["cat"]: {"until": r["until"], "term": r["term"]} for r in cat_blocks}
+    out["removedItems"] = [r["short"] for r in removed_items]
+    out["favSets"] = [{"id": r["id"], "name": r["name"], "items": json.loads(r["items"])} for r in fav_sets]
+    if adm:
+        out["equipmentUnits"] = unit_summary()
     if u:
         orgs = json.loads(u["orgs"])
         out["profile"] = {
-            "name": u["name"], "short": short_name(u["name"]) or _disp_user(uid),
+            "name": u["name"], "short": short_name(u["name"]) or _disp_user_from(users, uid),
             "tg": ("@" + u["username"]) if u["username"] else "",
             "photo": u["photo"], "orgs": orgs, "deps": json.loads(u["deps"]),
             "status": u["role"],
         }
     if sen:
-        with db() as c:
-            pend = c.execute("SELECT * FROM users WHERE verified='pending'").fetchall()
-            allu = c.execute("SELECT * FROM users WHERE agreed=1 ORDER BY name").fetchall()
         out["verifQueue"] = [{
-            "id": p["id"], "name": p["name"] or _disp_user(p["id"]),
+            "id": p["id"], "name": p["name"] or _disp_user_from(users, p["id"]),
             "org": ", ".join(json.loads(p["orgs"])), "role": p["role"],
             "tg": "@" + p["username"] if p["username"] else "id " + str(p["id"]),
         } for p in pend]
@@ -683,8 +894,6 @@ def short_name(full: str) -> str:
 async def notify(uid: int, text: str) -> None:
     if bot is None or not uid:
         return
-    if "?" in text:
-        text = "Статус заявки обновлён. Откройте Оборудыш, чтобы посмотреть детали."
     try:
         await bot.send_message(uid, text)
     except Exception as e:
@@ -698,22 +907,18 @@ async def notify_seniors(text: str) -> None:
 
 def app_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📦 Открыть Оборудыш", web_app=WebAppInfo(url=WEBAPP_URL)),
+        InlineKeyboardButton(text=tx.APP_BUTTON_TEXT, web_app=WebAppInfo(url=WEBAPP_URL)),
     ]])
 
 
 def deeplink_kb() -> InlineKeyboardMarkup:
     """Для групп/каналов web_app-кнопки запрещены - даём t.me-ссылку."""
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть в приложении", url=f"https://t.me/{BOT_USERNAME}?startapp"),
+        InlineKeyboardButton(text=tx.DEEPLINK_BUTTON_TEXT, url=f"https://t.me/{BOT_USERNAME}?startapp"),
     ]])
 
 
-ST_LABEL = {
-    "new": "Новая", "curator": "Назначен куратор", "approved": "Согласована",
-    "issued": "Выдана", "ret": "Возврат на проверке", "closed": "Закрыта",
-    "rejected": "Отклонена", "canceled": "Отменена пользователем",
-}
+ST_LABEL = tx.STATUS_LABELS
 
 
 def late_note(r) -> str:
@@ -733,34 +938,22 @@ def late_note(r) -> str:
 
 
 def req_card_text(r) -> str:
-    items = "\n".join(f"  · {s} × {q}" for s, q in json.loads(r["items"]))
     author = get_user(r["user_id"])
-    lines = [
-        f"📦 Заявка ID {r['id']} - {ST_LABEL.get(r['status'], r['status'])}",
-        f"От: {(author['name'] if author else '?')} ({_disp_user(r['user_id'])})",
-        f"Когда: {r['dfrom']} -> {r['dto']}",
-        f"Мероприятие: {r['event']}",
-        f"Состав:\n{items}",
-    ]
-    if r["comment"]:
-        lines.append(f"Комментарий: {r['comment']}")
-    ln = late_note(r)
-    if ln:
-        lines.append("⚠️ " + ln + " - команда может отказать")
-    if r["curator"]:
-        lines.append(f"Куратор: {_disp_user(r['curator'])}")
-    return "\n".join(lines)
+    return tx.request_card_message(
+        r["id"], r["status"], author["name"] if author else "",
+        _disp_user(r["user_id"]), r["dfrom"], r["dto"], r["event"],
+        json.loads(r["items"]), r["comment"], late_note(r),
+        _disp_user(r["curator"]) if r["curator"] else "",
+    )
 
 
 def b626_card_text(b) -> str:
     author = get_user(b["user_id"])
-    needs = ", ".join(json.loads(b["needs"])) or "без допов"
-    txt = (f"🏛 Бронь 626 №{b['id']} - {ST_LABEL.get(b['status'], b['status'])}\n"
-           f"От: {(author['name'] if author else '?')} ({_disp_user(b['user_id'])})\n"
-           f"Когда: {b['day']} · {b['slot']}\nЦель: {b['goal']}\nДопы: {needs}")
-    if b["curator"]:
-        txt += f"\nКуратор: {_disp_user(b['curator'])}"
-    return txt
+    return tx.studio_card_message(
+        b["id"], b["status"], author["name"] if author else "",
+        _disp_user(b["user_id"]), b["day"], b["slot"], b["goal"],
+        json.loads(b["needs"]), _disp_user(b["curator"]) if b["curator"] else "",
+    )
 
 
 async def send_or_update_card(table: str, row) -> None:
@@ -770,10 +963,14 @@ async def send_or_update_card(table: str, row) -> None:
     text = req_card_text(row) if table == "requests" else b626_card_text(row)
     try:
         if row["admin_msg"]:
-            await bot.edit_message_text(text, chat_id=ADMIN_CHAT_ID, message_id=row["admin_msg"],
-                                        reply_markup=deeplink_kb())
+            await bot.edit_message_text(
+                text, chat_id=ADMIN_CHAT_ID, message_id=row["admin_msg"],
+                reply_markup=deeplink_kb(), parse_mode="MarkdownV2",
+            )
         else:
-            m = await bot.send_message(ADMIN_CHAT_ID, text, reply_markup=deeplink_kb())
+            m = await bot.send_message(
+                ADMIN_CHAT_ID, text, reply_markup=deeplink_kb(), parse_mode="MarkdownV2",
+            )
             with db() as c:
                 c.execute(f"UPDATE {table} SET admin_msg=? WHERE id=?", (m.message_id, row["id"]))
     except Exception as e:
@@ -783,14 +980,24 @@ async def send_or_update_card(table: str, row) -> None:
 # ================= API =================
 
 def jerr(msg: str, status: int = 400) -> web.Response:
-    # Старые/неправильно закодированные записи не должны попадать пользователю нечитаемым текстом.
-    if "?" in msg:
-        msg = "Не удалось выполнить действие. Проверьте условия заявки и повторите попытку."
     return web.json_response({"error": msg}, status=status)
+
+
+async def sse_broadcast() -> None:
+    dead = []
+    for queue in tuple(SSE_CLIENTS):
+        try:
+            if queue.empty():
+                queue.put_nowait(db_revision())
+        except (asyncio.QueueFull, RuntimeError):
+            dead.append(queue)
+    for queue in dead:
+        SSE_CLIENTS.discard(queue)
 
 
 def auth(handler):
     async def wrapped(request: web.Request):
+        before = db_revision()
         body = await request.json()
         tg_user = check_init_data(body.get("initData", ""))
         if not tg_user and DEV_USER_ID:
@@ -798,7 +1005,10 @@ def auth(handler):
         if not tg_user:
             return jerr("Не удалось проверить подпись Telegram. Откройте приложение из Telegram.", 401)
         touch_user(tg_user)
-        return await handler(request, body, tg_user["id"])
+        response = await handler(request, body, tg_user["id"])
+        if db_revision() != before:
+            await sse_broadcast()
+        return response
     return wrapped
 
 
@@ -820,16 +1030,20 @@ def _decode_photos(photos) -> list:
     return out
 
 
-async def _send_blobs(chat_id: int, blobs, caption: str) -> None:
+async def _send_blobs(chat_id: int, blobs, caption: str, parse_mode=None) -> None:
     """Список bytes -> в чат одним сообщением (media group), подпись на первом."""
     if not chat_id or bot is None or not blobs:
         return
     try:
         if len(blobs) == 1:
-            await bot.send_photo(chat_id, BufferedInputFile(blobs[0], "photo.jpg"), caption=caption or None)
+            await bot.send_photo(
+                chat_id, BufferedInputFile(blobs[0], tx.PHOTO_FILENAME),
+                caption=caption or None, parse_mode=parse_mode,
+            )
         else:
             media = [InputMediaPhoto(media=BufferedInputFile(b, f"photo{i + 1}.jpg"),
-                                     caption=(caption if (i == 0 and caption) else None))
+                                     caption=(caption if (i == 0 and caption) else None),
+                                     parse_mode=(parse_mode if i == 0 else None))
                      for i, b in enumerate(blobs)]
             await bot.send_media_group(chat_id, media=media)
     except Exception as e:
@@ -843,7 +1057,50 @@ async def send_photos_b64(chat_id: int, photos, caption: str) -> None:
 
 @auth
 async def api_me(request, body, uid):
-    return web.json_response(boot_payload(uid))
+    started = time.perf_counter()
+    response = web.json_response(boot_payload(uid))
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = "boot;dur=%.1f" % elapsed_ms
+    if elapsed_ms >= 300:
+        log.warning("slow /api/me for %s: %.1f ms", uid, elapsed_ms)
+    return response
+
+
+@auth
+async def api_revision(request, body, uid):
+    return web.json_response({"ok": True, "revision": db_revision()})
+
+
+async def api_events(request: web.Request):
+    """Авторизованный SSE-сигнал: клиент сам проверяет revision и запрашивает /api/me."""
+    tg_user = check_init_data(request.query.get("initData", ""))
+    if not tg_user and DEV_USER_ID:
+        tg_user = {"id": DEV_USER_ID, "username": "dev", "first_name": "Dev"}
+    if not tg_user:
+        raise web.HTTPUnauthorized(text="Telegram initData required")
+    touch_user(tg_user)
+    response = web.StreamResponse(status=200, headers={
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    })
+    await response.prepare(request)
+    queue = asyncio.Queue(maxsize=1)
+    SSE_CLIENTS.add(queue)
+    try:
+        await response.write(("event: ready\ndata: %s\n\n" % db_revision()).encode())
+        while True:
+            try:
+                revision = await asyncio.wait_for(queue.get(), timeout=20)
+                await response.write(("event: change\ndata: %s\n\n" % revision).encode())
+            except asyncio.TimeoutError:
+                await response.write(b": keepalive\n\n")
+    except (ConnectionResetError, asyncio.CancelledError, RuntimeError):
+        pass
+    finally:
+        SSE_CLIENTS.discard(queue)
+    return response
 
 
 @auth
@@ -861,7 +1118,7 @@ async def api_register(request, body, uid):
     if mb and not deps:
         return jerr("Выберите хотя бы один отдел Media BMSTU.")
     # желаемая роль (пользователь выбирает при регистрации; старший подтвердит при верификации)
-    ALLOWED_ROLES = ("активист", "стажёр", "СО/ССФ", "production")
+    ALLOWED_ROLES = ("активист", "стажёр", "СО/ССФ") + (("production",) if ENABLE_PRODUCTION_ROLE else ())
     want_role = (body.get("role") or "").strip()
     if want_role not in ALLOWED_ROLES:
         want_role = ""
@@ -906,7 +1163,7 @@ async def api_register(request, body, uid):
 async def api_req_create(request, body, uid):
     u = get_user(uid)
     if not (u and u["agreed"] and u["verified"] == "ok"):
-        return jerr("??????? ?? ?????????????.")
+        return jerr("Сначала завершите регистрацию и верификацию.")
     d1, d2, t1, t2 = body.get("d1") or "", body.get("d2") or "", body.get("t1") or "", body.get("t2") or ""
     err = validate_request_window(d1, d2, t1, t2)
     if err:
@@ -916,7 +1173,7 @@ async def api_req_create(request, body, uid):
         return jerr(err)
     event = clean_text(body.get("event"), 100)
     if not event:
-        return jerr("??????? ???????????.")
+        return jerr("Укажите название мероприятия.")
     hist = [["new", now_str()]]
     async with BOOKING_LOCK:
         err = check_availability(items, d1, d2)
@@ -939,9 +1196,9 @@ async def api_req_update(request, body, uid):
     with db() as c:
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     if not r:
-        return jerr("?????? ?? ???????.", 404)
+        return jerr("Заявка не найдена.", 404)
     if r["user_id"] != uid or r["status"] not in ("new", "curator"):
-        return jerr("?????? ????? ?????? ???? ?????? ?? ????????????.")
+        return jerr("Эту заявку уже нельзя изменить или отменить.")
     d1, d2, t1, t2 = body.get("d1") or "", body.get("d2") or "", body.get("t1") or "", body.get("t2") or ""
     err = validate_request_window(d1, d2, t1, t2)
     if err:
@@ -951,7 +1208,7 @@ async def api_req_update(request, body, uid):
         return jerr(err)
     event = clean_text(body.get("event"), 100)
     if not event:
-        return jerr("??????? ???????????.")
+        return jerr("Укажите название мероприятия.")
     async with BOOKING_LOCK:
         err = check_availability(items, d1, d2, exclude_rid=rid)
         if err:
@@ -960,9 +1217,9 @@ async def api_req_update(request, body, uid):
             c.execute("UPDATE requests SET items=?, dfrom=?, dto=?, event=?, comment=?, media=?, pw=?, dfrom_iso=?, dto_iso=?, tfrom=?, tto=? WHERE id=?",
                       (json.dumps(items, ensure_ascii=False), body.get("from", ""), body.get("to", ""), event,
                        clean_text(body.get("comment"), 500), int(bool(body.get("media"))), int(bool(body.get("pw")) or r["pw"]), d1, d2, t1, t2, rid))
-    _push_hist("requests", rid, r["status"], "???????? ?????????????")
+    _push_hist("requests", rid, r["status"], "данные обновлены")
     if r["curator"]:
-        await notify(r["curator"], f"?? ?????? ID {rid} ???????? ?????????? - ?????????? ? ??????????.")
+        await notify(r["curator"], f"✏️ В заявке ID {rid} изменены данные — проверьте даты и оборудование.")
     with db() as c:
         row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     await send_or_update_card("requests", row)
@@ -970,16 +1227,62 @@ async def api_req_update(request, body, uid):
 
 @auth
 async def api_availability(request, body, uid):
-    """Занятость позиций на диапазон дат (для каталога в мастере)."""
+    """Занятость и свободные исправные номера на диапазон дат."""
+    d1, d2 = body.get("d1") or "", body.get("d2") or ""
+    exclude = int(body.get("exclude") or 0)
+    free_nums = {}
+    for item in body.get("items") or []:
+        short = item[0] if isinstance(item, (list, tuple)) and item else ""
+        if short in CATALOG_META:
+            used = used_numbers(short, d1, d2, exclude)
+            free_nums[short] = [num for num in ready_numbers(short) if num not in used]
     return web.json_response({
         "ok": True,
-        "busy": busy_map(body.get("d1") or "", body.get("d2") or "", int(body.get("exclude") or 0)),
+        "busy": busy_map(d1, d2, exclude),
+        "freeNums": free_nums,
     })
 
 
+@auth
+async def api_equipment_unit(request, body, uid):
+    if not is_admin(uid):
+        return jerr("Только для администраторов.", 403)
+    short = clean_text(body.get("short"), 80)
+    try:
+        num = int(body.get("num"))
+    except (TypeError, ValueError):
+        return jerr("Некорректный номер экземпляра.")
+    passport = unit_passport(short, num)
+    if not passport:
+        return jerr("Экземпляр не найден.", 404)
+    return web.json_response({"ok": True, "unit": passport})
+
+
+@auth
+async def api_equipment_unit_update(request, body, uid):
+    if not is_admin(uid):
+        return jerr("Только для администраторов.", 403)
+    short = clean_text(body.get("short"), 80)
+    try:
+        num = int(body.get("num"))
+    except (TypeError, ValueError):
+        return jerr("Некорректный номер экземпляра.")
+    state = clean_text(body.get("state") or "ready", 20)
+    if state not in ("ready", "repair", "retired"):
+        return jerr("Некорректное состояние экземпляра.")
+    if not unit_passport(short, num):
+        return jerr("Экземпляр не найден.", 404)
+    with db() as c:
+        c.execute(
+            "UPDATE equipment_units SET serial=?, note=?, state=?, updated_at=?, updated_by=? "
+            "WHERE short=? AND num=?",
+            (clean_text(body.get("serial"), 120), clean_text(body.get("note"), 1000),
+             state, datetime.now(MSK).strftime("%Y-%m-%d %H:%M"), uid, short, num),
+        )
+    return web.json_response(boot_payload(uid))
+
+
 def _push_hist(table: str, rid: int, status: str, note: str = "") -> None:
-    if "?" in note:
-        note = "статус обновлён"
     with db() as c:
         row = c.execute(f"SELECT history FROM {table} WHERE id=?", (rid,)).fetchone()
         h = json.loads(row["history"])
@@ -994,6 +1297,204 @@ def _log_action(admin_id: int, kind: str, ref: int, action: str) -> None:
                   (admin_id, kind, ref, action, datetime.now(MSK).strftime("%Y-%m-%d %H:%M:%S")))
 
 
+def _decimal_text(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
+def enqueue_score(event_id: str, admin_id: int, kind: str, object_id, points: Decimal, details: str) -> bool:
+    """Persist one idempotent score event. Google can be configured later."""
+    user = get_user(admin_id)
+    fio = (user["name"] or "").strip() if user else ""
+    if not fio:
+        log.warning("score %s skipped: admin %s has no full name", event_id, admin_id)
+        return False
+    with db() as c:
+        cur = c.execute("""INSERT OR IGNORE INTO score_events(
+            event_id, happened_at, fio, admin_id, kind, object_id, points, details,
+            status, attempts, next_retry) VALUES(?,?,?,?,?,?,?,?, 'pending',0,0)""",
+            (event_id, datetime.now(MSK).isoformat(timespec="seconds"), fio, admin_id,
+             kind, str(object_id), _decimal_text(points), details))
+    return cur.rowcount > 0
+
+
+def enqueue_request_scores(request_id: int) -> int:
+    """After close, award every unique admin who issued or accepted the request."""
+    with db() as c:
+        rows = c.execute("""SELECT DISTINCT admin_id FROM actions
+                            WHERE kind='requests' AND ref=?
+                              AND action IN ('issue','return_closed')""", (request_id,)).fetchall()
+    return sum(1 for row in rows if enqueue_score(
+        "request:%s:%s" % (request_id, row["admin_id"]), row["admin_id"],
+        "request", request_id, SCORE_REQUEST, "Выдача или приём оборудования"))
+
+
+def _score_tab_range(tab: str, cells: str) -> str:
+    return "'%s'!%s" % (tab.replace("'", "''"), cells)
+
+
+def _pending_scores(force: bool = False):
+    with db() as c:
+        if force:
+            return c.execute("SELECT * FROM score_events WHERE status='pending' ORDER BY happened_at").fetchall()
+        return c.execute("""SELECT * FROM score_events
+                            WHERE status='pending' AND next_retry<=?
+                            ORDER BY happened_at""", (time.time(),)).fetchall()
+
+
+def score_status() -> dict:
+    with db() as c:
+        counts = {row["status"]: row["n"] for row in c.execute(
+            "SELECT status, COUNT(*) n FROM score_events GROUP BY status").fetchall()}
+        failed = c.execute("SELECT COUNT(*) n FROM score_events WHERE status='pending' AND last_error<>''").fetchone()["n"]
+        last_error = c.execute("""SELECT last_error FROM score_events
+                                  WHERE last_error<>'' ORDER BY happened_at DESC LIMIT 1""").fetchone()
+    return {
+        "enabled": GOOGLE_SHEETS_ENABLED,
+        "googleEnabled": GOOGLE_SHEETS_ENABLED, "failed": failed,
+        "pending": counts.get("pending", 0),
+        "sent": counts.get("sent", 0),
+        "last_error": last_error["last_error"] if last_error else "",
+    }
+
+
+def _google_service():
+    if not GOOGLE_SHEET_ID or not GOOGLE_SERVICE_ACCOUNT_JSON_B64:
+        raise RuntimeError("Не заполнены GOOGLE_SHEET_ID или GOOGLE_SERVICE_ACCOUNT_JSON_B64")
+    try:
+        raw = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64).decode("utf-8")
+        info = json.loads(raw)
+        from google.oauth2.service_account import Credentials
+        from googleapiclient.discovery import build
+    except Exception as exc:
+        raise RuntimeError("Не удалось прочитать ключ Google: %s" % exc) from exc
+    credentials = Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+
+def _ensure_google_tabs(service) -> None:
+    meta = service.spreadsheets().get(
+        spreadsheetId=GOOGLE_SHEET_ID, fields="sheets.properties.title").execute()
+    existing = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    requests = []
+    for title in (GOOGLE_SHEET_EVENTS_TAB, GOOGLE_SHEET_SUMMARY_TAB):
+        if title not in existing:
+            requests.append({"addSheet": {"properties": {"title": title}}})
+    if requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=GOOGLE_SHEET_ID, body={"requests": requests}).execute()
+    values = service.spreadsheets().values()
+    values.update(
+        spreadsheetId=GOOGLE_SHEET_ID,
+        range=_score_tab_range(GOOGLE_SHEET_EVENTS_TAB, "A1:H1"),
+        valueInputOption="RAW",
+        body={"values": [["event_id", "дата и время", "ФИО", "Telegram ID", "тип",
+                           "ID заявки/брони", "баллы", "описание"]]},
+    ).execute()
+    values.update(
+        spreadsheetId=GOOGLE_SHEET_ID,
+        range=_score_tab_range(GOOGLE_SHEET_SUMMARY_TAB, "A1:D1"),
+        valueInputOption="RAW",
+        body={"values": [["ФИО", "Telegram ID", "итоговые баллы", "последнее начисление"]]},
+    ).execute()
+
+
+def _mark_score_retry(event_ids, error: str) -> None:
+    delays = (60, 300, 900, 3600)
+    with db() as c:
+        for event_id in event_ids:
+            row = c.execute("SELECT attempts FROM score_events WHERE event_id=?", (event_id,)).fetchone()
+            attempts = (row["attempts"] if row else 0) + 1
+            delay = delays[min(attempts - 1, len(delays) - 1)]
+            c.execute("""UPDATE score_events SET attempts=?, next_retry=?, last_error=?
+                         WHERE event_id=?""", (attempts, time.time() + delay, error[:500], event_id))
+
+
+def sync_scores_once(force: bool = False) -> dict:
+    rows = _pending_scores(force)
+    if not rows:
+        return {"sent": 0, "pending": score_status()["pending"]}
+    event_ids = [row["event_id"] for row in rows]
+    try:
+        service = _google_service()
+        _ensure_google_tabs(service)
+        values = service.spreadsheets().values()
+        existing_result = values.get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=_score_tab_range(GOOGLE_SHEET_EVENTS_TAB, "A2:A"),
+        ).execute()
+        existing_ids = {str(row[0]) for row in existing_result.get("values", []) if row}
+        append_rows = [[row["event_id"], row["happened_at"], row["fio"], str(row["admin_id"]),
+                        row["kind"], row["object_id"], row["points"], row["details"]]
+                       for row in rows if row["event_id"] not in existing_ids]
+        if append_rows:
+            values.append(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=_score_tab_range(GOOGLE_SHEET_EVENTS_TAB, "A:H"),
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+                body={"values": append_rows},
+            ).execute()
+
+        ledger = values.get(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=_score_tab_range(GOOGLE_SHEET_EVENTS_TAB, "A2:H"),
+        ).execute().get("values", [])
+        totals = {}
+        for row in ledger:
+            if len(row) < 7:
+                continue
+            fio = str(row[2]).strip()
+            if not fio:
+                continue
+            try:
+                points = Decimal(str(row[6]).replace(",", "."))
+            except InvalidOperation:
+                continue
+            item = totals.setdefault(fio, {"admin_id": str(row[3]) if len(row) > 3 else "",
+                                           "points": Decimal("0"), "last": ""})
+            item["points"] += points
+            happened = str(row[1]) if len(row) > 1 else ""
+            if happened >= item["last"]:
+                item["last"] = happened
+                item["admin_id"] = str(row[3]) if len(row) > 3 else item["admin_id"]
+        summary = [[fio, data["admin_id"], _decimal_text(data["points"]), data["last"]]
+                   for fio, data in sorted(totals.items())]
+        values.clear(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=_score_tab_range(GOOGLE_SHEET_SUMMARY_TAB, "A2:D"), body={},
+        ).execute()
+        if summary:
+            values.update(
+                spreadsheetId=GOOGLE_SHEET_ID,
+                range=_score_tab_range(GOOGLE_SHEET_SUMMARY_TAB, "A2:D"),
+                valueInputOption="RAW", body={"values": summary},
+            ).execute()
+        with db() as c:
+            now = datetime.now(MSK).isoformat(timespec="seconds")
+            c.executemany("""UPDATE score_events SET status='sent', sent_at=?, last_error=''
+                           WHERE event_id=?""", [(now, event_id) for event_id in event_ids])
+        return {"sent": len(event_ids), "pending": score_status()["pending"]}
+    except Exception as exc:
+        _mark_score_retry(event_ids, str(exc))
+        raise
+
+
+async def sync_scores(force: bool = False) -> dict:
+    if not GOOGLE_SHEETS_ENABLED:
+        raise RuntimeError("Google Sheets выключен в .env")
+    return await asyncio.to_thread(sync_scores_once, force)
+
+
+async def score_worker() -> None:
+    while True:
+        if GOOGLE_SHEETS_ENABLED:
+            try:
+                await sync_scores()
+            except Exception as exc:
+                log.warning("Google Sheets score sync failed: %s", exc)
+        await asyncio.sleep(60)
+
+
 @auth
 async def api_req_action(request, body, uid):
     rid, action = body.get("id"), body.get("action")
@@ -1001,34 +1502,38 @@ async def api_req_action(request, body, uid):
     with db() as c:
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     if not r:
-        return jerr("?????? ?? ???????.", 404)
+        return jerr("Заявка не найдена.", 404)
     owner = r["user_id"]
     curator_or_senior = r["curator"] == uid or is_senior(uid)
 
     if action == "cancel":
         if uid != owner or r["status"] not in ("new", "curator"):
-            return jerr("???????? ????? ?????? ???? ?????? ?? ????????????.")
-        with db() as c: c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
+            return jerr("Отменить заявку может только её владелец до согласования.")
+        with db() as c:
+            c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
         _push_hist("requests", rid, "canceled")
-        if r["curator"]: await notify(r["curator"], f"?????? ID {rid} ???????? ?????????????.")
+        if r["curator"]:
+            await notify(r["curator"], f"Заявка ID {rid} отменена пользователем.")
     elif action == "userret":
         if uid != owner or r["status"] != "issued":
-            return jerr("????? ????? ?????? ???????? ??????.")
+            return jerr("Сдать можно только выданную заявку.")
         photos = _decode_photos(body.get("photos"))
         if not photos:
-            return jerr("??? ????? ????????? ???? ?? ???? ???? ?????????.")
-        with db() as c: c.execute("UPDATE requests SET status='ret' WHERE id=?", (rid,))
-        _push_hist("requests", rid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = "Return photos ? request ID %s" % rid + ("\n" + comment if comment else "")
+            return jerr("Для сдачи приложите хотя бы одну фотографию.")
+        with db() as c:
+            c.execute("UPDATE requests SET status='ret' WHERE id=?", (rid,))
+        _push_hist("requests", rid, "ret", "фото отправлены" + (" · " + comment if comment else ""))
+        caption = tx.request_return_caption(rid, comment)
         if r["curator"]:
-            await notify(r["curator"], f"?? ??????? ?? ?????? ID {rid} - ????????? ???????? ? ??????????.")
-            await _send_blobs(r["curator"], photos, cap)
-        await _send_blobs(ADMIN_CHAT_ID, photos, cap)
+            await notify(
+                r["curator"],
+                f"📷 Сдача по заявке ID {rid} отправлена — проверьте оборудование в приложении.",
+            )
+            await _send_blobs(r["curator"], photos, caption)
+        await _send_blobs(ADMIN_CHAT_ID, photos, caption)
     elif not is_admin(uid):
-        return jerr("?????? ??? ???????.", 403)
+        return jerr("Недостаточно прав.", 403)
     elif action == "curator":
-        # Заявку берут только без действующего куратора. После снятия с себя
-        # кураторства передать можно и выданную/сданную заявку, не меняя её статус.
         if r["curator"] or r["status"] not in ("new", "issued", "ret"):
             return jerr("Эту заявку сейчас нельзя принять в кураторство.")
         new_status = "curator" if r["status"] == "new" else r["status"]
@@ -1036,59 +1541,100 @@ async def api_req_action(request, body, uid):
             c.execute("UPDATE requests SET status=?, curator=? WHERE id=?", (new_status, uid, rid))
         _push_hist("requests", rid, new_status, "новый куратор")
         _log_action(uid, "requests", rid, "curator")
-        await notify(owner, f"По заявке ID {rid} назначен куратор {_disp_user(uid)}. Откройте Оборудыш, чтобы посмотреть детали.")
+        await notify(
+            owner,
+            f"По заявке ID {rid} назначен куратор {_disp_user(uid)}. "
+            "Откройте Оборудыш, чтобы посмотреть детали.",
+        )
     elif action == "uncurator":
         if r["curator"] != uid or r["status"] not in ("curator", "approved", "issued", "ret"):
-            return jerr("????? ??????????? ????? ?????? ?? ????? ?????? ?? ????????.")
+            return jerr("Снять кураторство может только текущий куратор активной заявки.")
         new_status = "new" if r["status"] in ("curator", "approved") else r["status"]
-        with db() as c: c.execute("UPDATE requests SET status=?, curator=NULL WHERE id=?", (new_status, rid))
-        _push_hist("requests", rid, new_status, "??????? ???? ????")
-        await notify(owner, f"?? ?? ?????? ID {rid} ???????? ???????.")
-        if ADMIN_CHAT_ID and bot is not None: await notify(ADMIN_CHAT_ID, f"?? ?????? ID {rid} ????? ??? ???????? - ????? ????? ? ??????.")
+        with db() as c:
+            c.execute("UPDATE requests SET status=?, curator=NULL WHERE id=?", (new_status, rid))
+        _push_hist("requests", rid, new_status, "куратор снял себя")
+        await notify(owner, f"По заявке ID {rid} куратор снял себя.")
+        if ADMIN_CHAT_ID and bot is not None:
+            await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} снова без куратора — возьмите её в работу.")
     elif action in ("approved", "rejected"):
         if r["status"] != "curator" or not curator_or_senior:
-            return jerr("??????????? ??? ????????? ????? ??????? ?????? ???? ??????? ?????.", 403)
-        with db() as c: c.execute("UPDATE requests SET status=? WHERE id=?", ("approved" if action == "approved" else "rejected", rid))
-        _push_hist("requests", rid, action, comment if action == "rejected" else "")
+            return jerr("Согласовать или отклонить заявку может только её куратор или старший.", 403)
+        new_status = "approved" if action == "approved" else "rejected"
+        with db() as c:
+            c.execute("UPDATE requests SET status=? WHERE id=?", (new_status, rid))
+        _push_hist("requests", rid, new_status, comment if action == "rejected" else "")
         _log_action(uid, "requests", rid, action)
-        await notify(owner, f"?? ?????? ID {rid} ???????????! ?????????: {r['dfrom']}." if action == "approved" else f"? ?????? ID {rid} ?????????." + (f" ???????: {comment}" if comment else ""))
+        if action == "approved":
+            await notify(owner, f"✅ Заявка ID {rid} согласована. Получение: {r['dfrom']}.")
+        else:
+            await notify(
+                owner,
+                f"⛔ Заявка ID {rid} отклонена."
+                + (f" Причина: {comment}" if comment else ""),
+            )
     elif action == "issue":
         if r["status"] != "approved" or not curator_or_senior:
-            return jerr("?????? ???????????? ????? ??????? ?????? ???? ??????? ?????.", 403)
+            return jerr("Выдать оборудование может только куратор заявки или старший.", 403)
         raw_items = body.get("items") if body.get("items") is not None else json.loads(r["items"])
         items, err = validate_items(uid, raw_items, allow_restricted=True)
-        if err: return jerr(err)
+        if err:
+            return jerr(err)
         async with BOOKING_LOCK:
             err = check_availability(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid)
-            if err: return jerr(err)
-            nums, err = assign_numbers(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid)
-            if err: return jerr(err)
+            if err:
+                return jerr(err)
+            nums, err = assign_numbers(
+                items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid,
+                preferred=body.get("nums"),
+            )
+            if err:
+                return jerr(err)
             with db() as c:
-                c.execute("UPDATE requests SET items=?, status='issued', taken_at=?, nums=? WHERE id=?", (json.dumps(items, ensure_ascii=False), now_str(), json.dumps(nums, ensure_ascii=False), rid))
-        note = "?????? ???????" if items != json.loads(r["items"]) else ""
-        _push_hist("requests", rid, "issued", (note + (" ? " + comment if comment else "")).strip(" ?"))
+                c.execute(
+                    "UPDATE requests SET items=?, status='issued', taken_at=?, nums=?, issued_by=? WHERE id=?",
+                    (json.dumps(items, ensure_ascii=False), now_str(),
+                     json.dumps(nums, ensure_ascii=False), uid, rid),
+                )
+        note = "состав изменён" if items != json.loads(r["items"]) else ""
+        _push_hist("requests", rid, "issued", (note + (" · " + comment if comment else "")).strip(" ·"))
         _log_action(uid, "requests", rid, "issue")
-        lines = "\n".join("  - %s x %s" % (short, qty) for short, qty in items)
-        await notify(owner, "Equipment issued for request ID %s:\n%s\nReturn by: %s." % (rid, lines, r["dto"]) + ("\nComment: " + comment if comment else ""))
+        await notify(owner, tx.equipment_issued_message(rid, items, r["dto"], comment, CATALOG_META))
     elif action == "return":
         if r["status"] != "ret":
-            return jerr("??????? ???????????? ?????? ????? ???????????? ? ????.")
+            return jerr("Принять возврат можно только после сдачи пользователем.")
         if not curator_or_senior:
-            return jerr("??????? ??????? ????? ??????? ?????? ???? ??????? ?????.", 403)
+            return jerr("Принять возврат может только куратор заявки или старший.", 403)
         if comment and not is_senior(uid):
             with db() as c:
                 c.execute("UPDATE requests SET escalated=1 WHERE id=?", (rid,))
-                c.execute("INSERT INTO messages(kind, ref, sender, text, tm, role) VALUES('req',?,?,?,?,'admin')", (rid, uid, "?? ???????? ? ?????????: " + comment, datetime.now(MSK).strftime("%H:%M")))
-            _push_hist("requests", rid, "ret", "?????????? ??????? -> ???????: " + comment); _log_action(uid, "requests", rid, "return_escalated")
-            await notify_seniors(f"? ?????????? ??????? ?? ?????? ID {rid}: '{comment}'. ????????? ? ??????????.")
+                c.execute(
+                    "INSERT INTO messages(kind, ref, sender, text, tm, role) "
+                    "VALUES('req',?,?,?,?,'admin')",
+                    (rid, uid, "Проблема при возврате: " + comment,
+                     datetime.now(MSK).strftime("%H:%M")),
+                )
+            _push_hist("requests", rid, "ret", "проблемный возврат → старшим: " + comment)
+            _log_action(uid, "requests", rid, "return_escalated")
+            await notify_seniors(
+                f"⚠️ Проблемный возврат по заявке ID {rid}: «{comment}». Подробности в приложении."
+            )
         else:
-            if r["escalated"] and not is_senior(uid): return jerr("???? ??????? ??????? ??????? ???????.")
-            with db() as c: c.execute("UPDATE requests SET status='closed', escalated=0, returned_at=COALESCE(returned_at, ?) WHERE id=?", (now_str(), rid))
-            _push_hist("requests", rid, "closed"); _log_action(uid, "requests", rid, "return_closed")
-            await notify(owner, f"? ??????? ?? ?????? ID {rid} ??????, ?????? ???????. ???????!")
+            if r["escalated"] and not is_senior(uid):
+                return jerr("Этот возврат уже передан старшим.")
+            with db() as c:
+                c.execute(
+                    "UPDATE requests SET status='closed', escalated=0, "
+                    "returned_at=COALESCE(returned_at, ?), returned_by=? WHERE id=?",
+                    (now_str(), uid, rid),
+                )
+            _push_hist("requests", rid, "closed")
+            _log_action(uid, "requests", rid, "return_closed")
+            enqueue_request_scores(rid)
+            await notify(owner, f"✅ Возврат по заявке ID {rid} принят, заявка закрыта. Спасибо!")
     else:
         return jerr("Действие недоступно.")
-    with db() as c: row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+    with db() as c:
+        row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     await send_or_update_card("requests", row)
     return web.json_response(boot_payload(uid))
 
@@ -1096,67 +1642,108 @@ async def api_req_action(request, body, uid):
 async def api_626_create(request, body, uid):
     u = get_user(uid)
     if not (u and u["agreed"] and u["verified"] == "ok"):
-        return jerr("??????? ?? ?????????????.")
+        return jerr("Сначала завершите регистрацию и верификацию.")
     day = body.get("day") or ""
     slot, err = validate_626_window(day, body.get("slot") or "")
     if err: return jerr(err)
     goal = clean_text(body.get("goal"), 100)
-    if not goal: return jerr("????????? ???? ????????????.")
+    if not goal: return jerr("Укажите цель бронирования.")
     needs = body.get("needs") or []
     if not isinstance(needs, list) or len(needs) > 10 or any(not isinstance(item, str) for item in needs):
-        return jerr("???????????? ?????? ????????????.")
+        return jerr("Некорректный список дополнительного оборудования.")
     async with BOOKING_LOCK:
         taken = set(busy626_map().get(day, []))
-        if taken & set(slot_expand(slot)): return jerr("??? ????? ??? ?????? - ???????? ?????? ?????.")
+        if taken & set(slot_expand(slot)): return jerr("Этот слот уже занят — выберите другое время.")
         hist = [["new", now_str()]]
         with db() as c:
             cur = c.execute("INSERT INTO b626(user_id, day, slot, goal, needs, history, created_ts) VALUES(?,?,?,?,?,?,?)", (uid, day, slot, goal, json.dumps([clean_text(item, 200) for item in needs], ensure_ascii=False), json.dumps(hist, ensure_ascii=False), time.time()))
             bid = cur.lastrowid; row = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
     await send_or_update_card("b626", row)
-    await notify_seniors(f"?? ????? ????? 626 ?{bid}: {day} {slot} - ???????????? ? ??????????.")
+    await notify_seniors(f"🏛 Новая бронь 626 №{bid}: {day} {slot} — требуется согласование.")
     return web.json_response(boot_payload(uid))
 
 @auth
 async def api_626_action(request, body, uid):
     bid, action = body.get("id"), body.get("action")
     comment = clean_text(body.get("comment"), 500)
-    with db() as c: b = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
-    if not b: return jerr("????? ?? ???????.", 404)
-    owner, curator_or_senior = b["user_id"], b["curator"] == uid or is_senior(uid)
+    with db() as c:
+        b = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
+    if not b:
+        return jerr("Бронь не найдена.", 404)
+    owner = b["user_id"]
+    curator_or_senior = b["curator"] == uid or is_senior(uid)
     if action == "cancel":
-        if uid != owner or b["status"] not in ("new", "approved"): return jerr("???????? ????? ?????? ???? ???????? ?????.")
-        with db() as c: c.execute("UPDATE b626 SET status='canceled' WHERE id=?", (bid,))
+        if uid != owner or b["status"] not in ("new", "approved"):
+            return jerr("Отменить бронь может только её владелец до начала.")
+        with db() as c:
+            c.execute("UPDATE b626 SET status='canceled' WHERE id=?", (bid,))
         _push_hist("b626", bid, "canceled")
     elif action == "handover":
-        if uid != owner or b["status"] != "approved": return jerr("????? ????? ?????? ????????????? ?????.")
+        if uid != owner or b["status"] != "approved":
+            return jerr("Сдать можно только согласованную бронь.")
         photos = _decode_photos(body.get("photos"))
-        if not photos: return jerr("??? ????? ????????? ????????? ???? ?? ???? ????.")
-        with db() as c: c.execute("UPDATE b626 SET status='ret' WHERE id=?", (bid,))
-        _push_hist("b626", bid, "ret", "???? ????????????" + (" ? " + comment if comment else ""))
-        cap = "Return photos ? studio 626 ID %s" % bid + ("\n" + comment if comment else "")
+        if not photos:
+            return jerr("Для сдачи аудитории приложите хотя бы одну фотографию.")
+        with db() as c:
+            c.execute("UPDATE b626 SET status='ret' WHERE id=?", (bid,))
+        _push_hist("b626", bid, "ret", "фото отправлены" + (" · " + comment if comment else ""))
+        caption = tx.studio_return_caption(bid, comment)
         if b["curator"]:
-            await notify(b["curator"], f"?? ????? 626 ?{bid}: ???????????? ???? ?????????, ????????? ????.")
-            await _send_blobs(b["curator"], photos, cap)
-        await _send_blobs(ADMIN_CHAT_ID, photos, cap)
+            await notify(
+                b["curator"],
+                f"📷 Бронь 626 №{bid}: пользователь отправил фото сдачи, проверьте аудиторию.",
+            )
+            await _send_blobs(b["curator"], photos, caption)
+        await _send_blobs(ADMIN_CHAT_ID, photos, caption)
     elif action in ("approved", "rejected"):
-        if not is_senior(uid): return jerr("626 ????????? ?????? ??????? ??????.", 403)
-        if b["status"] != "new": return jerr("??????? ????? ??????? ?????? ?? ????? ?????.")
-        with db() as c: c.execute("UPDATE b626 SET status=? WHERE id=?", (action, bid))
-        _push_hist("b626", bid, action, comment if action == "rejected" else ""); _log_action(uid, "b626", bid, action)
-        await notify(owner, f"?? ????? 626 ?{bid} ({b['day']} {b['slot']}): " + ("?? ???????????! ??????? ???????? ? ????????." if action == "approved" else "? ?????????." + (f" ???????: {comment}" if comment else "")))
+        if not is_senior(uid):
+            return jerr("Брони 626 согласуют только старшие администраторы.", 403)
+        if b["status"] != "new":
+            return jerr("Решение по этой брони уже принято.")
+        with db() as c:
+            c.execute("UPDATE b626 SET status=? WHERE id=?", (action, bid))
+        _push_hist("b626", bid, action, comment if action == "rejected" else "")
+        _log_action(uid, "b626", bid, action)
+        if action == "approved":
+            await notify(
+                owner,
+                f"✅ Бронь 626 №{bid} ({b['day']} {b['slot']}) согласована. "
+                "Дождитесь назначения куратора.",
+            )
+        else:
+            await notify(
+                owner,
+                f"⛔ Бронь 626 №{bid} отклонена."
+                + (f" Причина: {comment}" if comment else ""),
+            )
     elif action == "curator":
-        if not is_admin(uid): return jerr("?????? ??? ???????.", 403)
-        if b["status"] != "approved" or b["curator"]: return jerr("??????????? ???????? ????? ???????????? ? ???? ????????.")
-        with db() as c: c.execute("UPDATE b626 SET curator=? WHERE id=?", (uid, bid))
-        _log_action(uid, "b626", bid, "curator"); await notify(owner, f"?? ?? ????? 626 ?{bid} ???????? ??????? {_disp_user(uid)}.")
+        if not is_admin(uid):
+            return jerr("Недостаточно прав.", 403)
+        if b["status"] != "approved" or b["curator"]:
+            return jerr("Куратором можно стать только у согласованной свободной брони.")
+        with db() as c:
+            c.execute("UPDATE b626 SET curator=? WHERE id=?", (uid, bid))
+        _log_action(uid, "b626", bid, "curator")
+        await notify(owner, f"По брони 626 №{bid} назначен куратор {_disp_user(uid)}.")
     elif action == "closed":
-        if b["status"] != "ret": return jerr("????????? ????? ?????? ??????? ????? (?? ????????).")
-        if not curator_or_senior: return jerr("????????? ????? ????? ?? ??????? ??? ??????? ?????.", 403)
-        with db() as c: c.execute("UPDATE b626 SET status='closed' WHERE id=?", (bid,))
-        _push_hist("b626", bid, "closed", comment); _log_action(uid, "b626", bid, "closed")
-        await notify(owner, f"?? ????? 626 ?{bid} ?????????. ???????, ????????? ???!")
-    else: return jerr("Действие недоступно.")
-    with db() as c: row = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
+        if b["status"] != "ret":
+            return jerr("Завершить можно только бронь после сдачи.")
+        if not curator_or_senior:
+            return jerr("Завершить бронь может её куратор или старший.", 403)
+        with db() as c:
+            c.execute("UPDATE b626 SET status='closed' WHERE id=?", (bid,))
+        _push_hist("b626", bid, "closed", comment)
+        _log_action(uid, "b626", bid, "closed")
+        if b["curator"]:
+            enqueue_score(
+                "626:%s:%s" % (bid, b["curator"]), b["curator"], "626", bid,
+                SCORE_626, "Куратор брони 626",
+            )
+        await notify(owner, f"✅ Бронь 626 №{bid} завершена. Спасибо, приходите ещё!")
+    else:
+        return jerr("Действие недоступно.")
+    with db() as c:
+        row = c.execute("SELECT * FROM b626 WHERE id=?", (bid,)).fetchone()
     await send_or_update_card("b626", row)
     return web.json_response(boot_payload(uid))
 
@@ -1222,6 +1809,8 @@ async def api_verify(request, body, uid):
         return jerr("Пользователь не найден.", 404)
     if action == "ok":
         role = body.get("role") or "активист"
+        if role == "production" and not ENABLE_PRODUCTION_ROLE:
+            return jerr("Роль production временно отключена.", 400)
         with db() as c:
             c.execute("UPDATE users SET verified='ok', role=? WHERE id=?", (role, target))
         await notify(target, f"✅ Верификация пройдена! Роль: {role}. Приложение открыто - можно бронировать.")
@@ -1293,7 +1882,8 @@ async def api_user_role(request, body, uid):
         return jerr("Только для старших админов.", 403)
     target = body.get("userId")
     role = (body.get("role") or "").strip()
-    if role not in ("активист", "стажёр", "СО/ССФ", "production"):
+    allowed_roles = ("активист", "стажёр", "СО/ССФ") + (("production",) if ENABLE_PRODUCTION_ROLE else ())
+    if role not in allowed_roles:
         return jerr("Неизвестная роль.")
     if not get_user(target):
         return jerr("Пользователь не найден.", 404)
@@ -1385,6 +1975,7 @@ async def api_equip_add(request, body, uid):
         c.execute("INSERT INTO extra_items(cat, short, full, total, level, created) VALUES(?,?,?,?,?,?)",
                   (cat, short, full, total, level, now_str()))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1396,6 +1987,7 @@ async def api_equip_del(request, body, uid):
     with db() as c:
         c.execute("DELETE FROM extra_items WHERE short=?", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1410,6 +2002,7 @@ async def api_equip_remove(request, body, uid):
     with db() as c:
         c.execute("INSERT OR IGNORE INTO removed_items(short) VALUES(?)", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1421,6 +2014,7 @@ async def api_equip_restore(request, body, uid):
     with db() as c:
         c.execute("DELETE FROM removed_items WHERE short=?", (short,))
     load_catalog()
+    sync_equipment_units()
     return web.json_response(boot_payload(uid))
 
 
@@ -1506,6 +2100,105 @@ def build_export_text(kind):
                              f"Состав: {items}\n---")
             fname = "requests.md"
     return fname, "\n".join(lines)
+
+
+MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|>])")
+
+
+def md_escape(value) -> str:
+    return MD_SPECIAL.sub(r"\\\1", str(value or ""))
+
+
+def _rich_chunks(sections, limit=30000):
+    chunks, current = [], ""
+    for section in sections:
+        section = str(section).strip()
+        if not section:
+            continue
+        candidate = (current + "\n\n" + section).strip()
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        while len(section) > limit:
+            cut = section.rfind("\n", 0, limit)
+            if cut < limit // 2:
+                cut = limit
+            chunks.append(section[:cut].strip())
+            section = section[cut:].strip()
+        current = section
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def send_rich_markdown(chat_id: int, sections) -> None:
+    if bot is None or not chat_id:
+        return
+    for chunk in _rich_chunks(sections):
+        try:
+            await bot.send_rich_message(chat_id, rich_message=InputRichMessage(markdown=chunk))
+        except Exception as exc:
+            log.warning("rich message failed, plain fallback: %s", exc)
+            rest = chunk
+            while rest:
+                cut = rest.rfind("\n", 0, 3900)
+                if cut < 1000:
+                    cut = min(3900, len(rest))
+                await bot.send_message(chat_id, rest[:cut])
+                rest = rest[cut:].lstrip()
+
+
+def build_export_text(kind):
+    """Build a mobile-friendly Markdown document without tables."""
+    generated = datetime.now(MSK).strftime("%d.%m.%Y %H:%M")
+    stamp = datetime.now(MSK).strftime("%Y-%m-%d")
+    with db() as c:
+        users = {row["id"]: row for row in c.execute("SELECT * FROM users").fetchall()}
+        requests_rows = c.execute("SELECT * FROM requests ORDER BY id").fetchall() if kind == "requests" else []
+        studio_rows = c.execute("SELECT * FROM b626 ORDER BY id").fetchall() if kind == "626" else []
+    if kind == "admins":
+        stats = admin_activity()
+        lines = ["# Администраторы Оборудыша", "", "_Сформировано: %s_" % generated]
+        for item in stats:
+            lines.extend(["", "## %s" % md_escape(item["name"]),
+                          "- Курировал: **%s**" % item["curated"],
+                          "- Выдал: **%s**" % item["issued"],
+                          "- Принял: **%s**" % item["returned"],
+                          "- Отказал: **%s**" % item["rejected"]])
+        rejecters = [item for item in sorted(stats, key=lambda x: -x["rejected"]) if item["rejected"]]
+        if rejecters:
+            lines.extend(["", "---", "", "## Топ по отказам"])
+            lines.extend("%s. %s — **%s**" % (i, md_escape(item["name"]), item["rejected"])
+                         for i, item in enumerate(rejecters, 1))
+        filename = "oborudysh-admins-%s.md" % stamp
+    elif kind == "626":
+        lines = ["# Брони аудитории 626", "", "_Сформировано: %s_" % generated]
+        for row in studio_rows:
+            author = users.get(row["user_id"])
+            curator = _disp_user_from(users, row["curator"]) if row["curator"] else "—"
+            lines.extend(["", "## Бронь №%s" % row["id"],
+                          "- Автор: **%s**" % md_escape(author["name"] if author else "?"),
+                          "- День: `%s`" % md_escape(row["day"]), "- Слот: `%s`" % md_escape(row["slot"]),
+                          "- Цель: %s" % md_escape(row["goal"]),
+                          "- Статус: **%s**" % md_escape(ST_LABEL.get(row["status"], row["status"])),
+                          "- Куратор: %s" % md_escape(curator)])
+        filename = "oborudysh-626-%s.md" % stamp
+    else:
+        lines = ["# Заявки Оборудыша", "", "_Сформировано: %s_" % generated]
+        for row in requests_rows:
+            author = users.get(row["user_id"])
+            curator = _disp_user_from(users, row["curator"]) if row["curator"] else "—"
+            lines.extend(["", "## Заявка №%s" % row["id"],
+                          "- Автор: **%s**" % md_escape(author["name"] if author else "?"),
+                          "- Мероприятие: %s" % md_escape(row["event"]),
+                          "- Даты: `%s` → `%s`" % (md_escape(row["dfrom"]), md_escape(row["dto"])),
+                          "- Статус: **%s**" % md_escape(ST_LABEL.get(row["status"], row["status"])),
+                          "- Куратор: %s" % md_escape(curator), "", "### Состав"])
+            lines.extend("- %s × %s" % (md_escape(short), qty) for short, qty in json.loads(row["items"]))
+        filename = "oborudysh-requests-%s.md" % stamp
+    return filename, "\n".join(lines).rstrip() + "\n"
 
 
 @auth
@@ -1724,88 +2417,6 @@ def _meta_set(k, v):
         c.execute("INSERT OR REPLACE INTO meta(k, v) VALUES(?,?)", (k, v))
 
 
-async def daily_digest() -> None:
-    """Ежедневная статистика в общий канал (22:00)."""
-    if bot is None or not ADMIN_CHAT_ID:
-        return
-    now = datetime.now(MSK)
-    today = now.strftime("%Y-%m-%d")
-    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-    with db() as c:
-        new_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='new'").fetchone()["n"]
-        issued_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='issued'").fetchone()["n"]
-        approved_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='approved'").fetchone()["n"]
-        curator_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='curator'").fetchone()["n"]
-        ret_n = c.execute("SELECT COUNT(*) n FROM requests WHERE status='ret'").fetchone()["n"]
-        tmr_rows = c.execute(
-            "SELECT * FROM requests WHERE (status='approved' AND dfrom_iso=?) OR (status='issued' AND dto_iso=?) ORDER BY id",
-            (tomorrow, tomorrow)).fetchall()
-        b626_rows = c.execute(
-            "SELECT * FROM b626 WHERE status IN ('new','approved') AND day=? ORDER BY slot", (tomorrow,)).fetchall()
-        act_rows = c.execute(
-            "SELECT admin_id, kind, action, COUNT(*) n FROM actions WHERE ts LIKE ?||'%' GROUP BY admin_id, kind, action",
-            (today,)).fetchall()
-    # админ дня - разбивка К(курировал)/В(выдал)/П(принял возврат)/О(отказал)/А(действия с 626) за сегодня
-    per_admin = {}
-    for row in act_rows:
-        st = per_admin.setdefault(row["admin_id"], {"k": 0, "v": 0, "p": 0, "o": 0, "a": 0})
-        if row["kind"] == "requests":
-            if row["action"] == "curator":
-                st["k"] += row["n"]
-            elif row["action"] == "issue":
-                st["v"] += row["n"]
-            elif row["action"] == "return_closed":
-                st["p"] += row["n"]
-            elif row["action"] == "rejected":
-                st["o"] += row["n"]
-        elif row["kind"] == "b626":
-            st["a"] += row["n"]
-    admin_day = ""
-    if per_admin:
-        best_id, best = max(per_admin.items(), key=lambda kv: sum(kv[1].values()))
-        admin_day = (f"\n— Админ дня: {_disp_user(best_id)} "
-                     f"(К/В/П/О/А: {best['k']}/{best['v']}/{best['p']}/{best['o']}/{best['a']})")
-    # бронирования оборудования на завтра (и выдача, и возврат - одним списком)
-    tmr_blocks = []
-    for r in tmr_rows:
-        nums = json.loads(r["nums"] or "{}")
-        lines = [f"— ID {r['id']}: {_disp_user(r['user_id'])}"]
-        for short, qty in json.loads(r["items"]):
-            num = nums.get(short)
-            lines.append(f"— {short} №{num}" if qty == 1 and num else f"— {short} × {qty}")
-        lines.append(f"Мероприятие: {r['event']}")
-        try:
-            d1 = datetime.strptime(r["dfrom_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
-            d2 = datetime.strptime(r["dto_iso"], "%Y-%m-%d").strftime("%d.%m.%Y")
-        except ValueError:
-            d1, d2 = r["dfrom_iso"], r["dto_iso"]
-        lines.append(f"Время: {d1}, {r['tfrom']} — {d2}, {r['tto']}")
-        tmr_blocks.append("\n".join(lines))
-    tmr_text = "\n".join(tmr_blocks) if tmr_blocks else "— (нет)"
-    # занятость аудитории 626 на завтра
-    if b626_rows:
-        b626_lines = []
-        for b in b626_rows:
-            start, end = (_slot_bounds(b["slot"]) or ("", ""))
-            b626_lines.append(f"— {start.strip()}–{end.strip()}: {_disp_user(b['user_id'])} — {b['goal']}")
-        b626_text = "\n".join(b626_lines)
-    else:
-        b626_text = "— свободно"
-    text = ("📊 Ежедневная статистика Оборудыша\n\n"
-            f"— Активных бронирований: {issued_n}\n"
-            f"— Ожидают выдачи: {approved_n}\n"
-            f"— Согласовано: {curator_n}\n"
-            f"— Выдано: {issued_n}\n"
-            f"— Ожидают возврата: {ret_n}"
-            f"{admin_day}\n\n"
-            f"📅 Бронирования оборудования на завтра:\n{tmr_text}\n\n"
-            f"🏛 Занятость аудитории 626 на завтра:\n{b626_text}")
-    try:
-        await bot.send_message(ADMIN_CHAT_ID, text)
-    except Exception as e:
-        log.warning("digest failed: %s", e)
-
-
 async def monthly_digest() -> None:
     """Сводка в общий канал (1-го числа в 12:00): итоги прошлого месяца."""
     if bot is None or not ADMIN_CHAT_ID:
@@ -1833,9 +2444,77 @@ async def monthly_digest() -> None:
     if top_sorted:
         text += "\n• Топ оборудования:\n" + "\n".join(f"  · {item}: {cnt} шт" for item, cnt in top_sorted)
     try:
-        await bot.send_message(ADMIN_CHAT_ID, text)
+        await send_rich_markdown(ADMIN_CHAT_ID, [text])
     except Exception as e:
         log.warning("monthly digest failed: %s", e)
+
+
+async def daily_digest(award_score: bool = False) -> None:
+    """Send a Rich Message report; only the scheduled run awards admin-of-day."""
+    if bot is None or not ADMIN_CHAT_ID:
+        return
+    now = datetime.now(MSK)
+    today = now.strftime("%Y-%m-%d")
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    with db() as c:
+        counts = {status: c.execute(
+            "SELECT COUNT(*) n FROM requests WHERE status=?", (status,)
+        ).fetchone()["n"] for status in ("new", "curator", "approved", "issued", "ret")}
+        actions = c.execute(
+            "SELECT admin_id, kind, action, COUNT(*) n FROM actions "
+            "WHERE ts LIKE ?||'%' GROUP BY admin_id, kind, action", (today,)
+        ).fetchall()
+        tomorrow_requests = c.execute(
+            "SELECT * FROM requests WHERE (status='approved' AND dfrom_iso=?) OR "
+            "(status='issued' AND dto_iso=?) ORDER BY id", (tomorrow, tomorrow)
+        ).fetchall()
+        tomorrow_626 = c.execute(
+            "SELECT * FROM b626 WHERE status IN ('new','approved') AND day=? ORDER BY slot", (tomorrow,)
+        ).fetchall()
+        users = {row["id"]: row for row in c.execute("SELECT id,name,username FROM users").fetchall()}
+
+    totals = {}
+    for row in actions:
+        stats = totals.setdefault(row["admin_id"], {"k": 0, "v": 0, "p": 0, "o": 0, "a": 0})
+        key = ({"curator": "k", "issue": "v", "return_closed": "p", "rejected": "o"}.get(row["action"])
+               if row["kind"] == "requests" else ("a" if row["kind"] == "b626" else None))
+        if key:
+            stats[key] += row["n"]
+    admin_text = "_\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0439 \u0441\u0435\u0433\u043e\u0434\u043d\u044f \u043d\u0435 \u0431\u044b\u043b\u043e_\n"
+    if totals:
+        best_id, best = max(totals.items(), key=lambda item: (sum(item[1].values()), -item[0]))
+        name = _disp_user_from(users, best_id)
+        admin_text = (f"*{md_escape(name)}*\n"
+                      f"\u041a\u0443\u0440\u0438\u0440\u043e\u0432\u0430\u043b: {best['k']} \u00b7 \u0412\u044b\u0434\u0430\u043b: {best['v']} \u00b7 "
+                      f"\u041f\u0440\u0438\u043d\u044f\u043b: {best['p']} \u00b7 \u041e\u0442\u043a\u0430\u0437\u0430\u043b: {best['o']} \u00b7 626: {best['a']}\n")
+        if award_score:
+            enqueue_score(f"daily_admin:{today}", best_id, "daily_admin", today,
+                          SCORE_DAILY_ADMIN, f"Админ дня {today}")
+
+    request_lines = []
+    for row in tomorrow_requests:
+        direction = ("\u0412\u044b\u0434\u0430\u0447\u0430" if row["status"] == "approved" and row["dfrom_iso"] == tomorrow
+                     else "\u0412\u043e\u0437\u0432\u0440\u0430\u0442")
+        owner = _disp_user_from(users, row["user_id"])
+        items = ", ".join(f"{md_escape(short)} \u00d7 {qty}" for short, qty in json.loads(row["items"] or "[]"))
+        request_lines.append(f"*{direction}, ID {row['id']}* \u2014 {md_escape(owner)}\n{items}\n")
+    room_lines = []
+    for row in tomorrow_626:
+        start, end = _slot_bounds(row["slot"]) or ("", "")
+        owner = _disp_user_from(users, row["user_id"])
+        room_lines.append(f"*{md_escape(start.strip())}\u2013{md_escape(end.strip())}* \u2014 {md_escape(owner)}\n{md_escape(row['goal'])}\n")
+
+    sections = [
+        "# \u0415\u0436\u0435\u0434\u043d\u0435\u0432\u043d\u0430\u044f \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u041e\u0431\u043e\u0440\u0443\u0434\u044b\u0448\u0430\n" + now.strftime("%d.%m.%Y, %H:%M") + "\n",
+        "## \u0417\u0430\u044f\u0432\u043a\u0438\n"
+        f"- \u041d\u043e\u0432\u044b\u0435: {counts['new']}\n- \u041d\u0430 \u0441\u043e\u0433\u043b\u0430\u0441\u043e\u0432\u0430\u043d\u0438\u0438: {counts['curator']}\n"
+        f"- \u041e\u0436\u0438\u0434\u0430\u044e\u0442 \u0432\u044b\u0434\u0430\u0447\u0438: {counts['approved']}\n- \u0412\u044b\u0434\u0430\u043d\u044b: {counts['issued']}\n"
+        f"- \u041e\u0436\u0438\u0434\u0430\u044e\u0442 \u043f\u0440\u0438\u0451\u043c\u0430: {counts['ret']}\n",
+        "## \u0410\u0434\u043c\u0438\u043d \u0434\u043d\u044f\n" + admin_text,
+        "## \u041e\u0431\u043e\u0440\u0443\u0434\u043e\u0432\u0430\u043d\u0438\u0435 \u043d\u0430 \u0437\u0430\u0432\u0442\u0440\u0430\n" + ("\n".join(request_lines) or "_\u041d\u0435\u0442 \u0432\u044b\u0434\u0430\u0447 \u0438 \u0432\u043e\u0437\u0432\u0440\u0430\u0442\u043e\u0432_\n"),
+        "## \u0410\u0443\u0434\u0438\u0442\u043e\u0440\u0438\u044f 626 \u043d\u0430 \u0437\u0430\u0432\u0442\u0440\u0430\n" + ("\n".join(room_lines) or "_\u0421\u0432\u043e\u0431\u043e\u0434\u043d\u043e_\n"),
+    ]
+    await send_rich_markdown(ADMIN_CHAT_ID, sections)
 
 
 def weekly_backup() -> None:
@@ -1866,6 +2545,7 @@ async def run_checks() -> None:
     for r in rows:
         rid = r["id"]
         notif = _get_notif("requests", r)
+        start_at = parse_dt(r["dfrom_iso"], r["tfrom"])
         deadline = parse_dt(r["dto_iso"], r["tto"])
         changed = False
 
@@ -1879,6 +2559,24 @@ async def run_checks() -> None:
                                            f"Верните оборудование как можно скорее.")
                 notif["over"] = ts; changed = True
 
+        if r["curator"] and r["status"] == "approved" and start_at:
+            left = (start_at - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("cur_issue_24"):
+                await notify(r["curator"], f"📦 Завтра выдача по заявке ID {rid} ({r['dfrom']}). Проверьте состав и время.")
+                notif["cur_issue_24"] = 1; changed = True
+            if 0 < left <= 3600 and not notif.get("cur_issue_1"):
+                await notify(r["curator"], f"⏰ Через час выдача по заявке ID {rid} ({r['dfrom']}).")
+                notif["cur_issue_1"] = 1; changed = True
+
+        if r["curator"] and r["status"] == "issued" and deadline:
+            left = (deadline - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("cur_return_24"):
+                await notify(r["curator"], f"📦 Завтра возврат по заявке ID {rid} ({r['dto']}).")
+                notif["cur_return_24"] = 1; changed = True
+            if 0 < left <= 3600 and not notif.get("cur_return_1"):
+                await notify(r["curator"], f"⏰ Через час возврат по заявке ID {rid} ({r['dto']}).")
+                notif["cur_return_1"] = 1; changed = True
+
         # напоминания в общий канал о зависших (порог 6 ч, повтор раз в 6 ч)
         STALE = 6 * 3600
         if r["status"] == "new" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("nocur", 0) > STALE:
@@ -1891,7 +2589,7 @@ async def run_checks() -> None:
         auto_cancel = None
         if r["status"] in ("new", "curator") and r["created_ts"] and ts - r["created_ts"] > 3 * 86400:
             auto_cancel = "не рассмотрена за 3 дня"
-        elif r["status"] == "approved" and deadline and now > deadline:
+        elif r["status"] == "approved" and start_at and now > start_at:
             auto_cancel = "срок получения истёк"
         if auto_cancel:
             with db() as c:
@@ -1911,12 +2609,21 @@ async def run_checks() -> None:
     for b in rows:
         notif = _get_notif("b626", b)
         bounds = _slot_bounds(b["slot"])
-        end_hm = bounds[1] if bounds else "23:59"
-        end = parse_dt(b["day"], end_hm)
-        if end and now > end and not notif.get("handover"):
-            await notify(b["user_id"], f"🏛 Бронь 626 №{b['id']} закончилась - не забудьте сдать аудиторию "
+        start = parse_dt(b["day"], bounds[0] if bounds else "00:00")
+        end = parse_dt(b["day"], bounds[1] if bounds else "23:59")
+        changed = False
+        if start and end and start <= now < end and not notif.get("start_wish"):
+            await notify(b["user_id"], tx.studio_626_start_message(b["id"]))
+            notif["start_wish"] = 1; changed = True
+        if end and now > end and not notif.get("handover_user"):
+            await notify(b["user_id"], f"🏛 Бронь 626 №{b['id']} закончилась — не забудьте сдать аудиторию "
                                        f"(фото в приложении).")
-            notif["handover"] = 1
+            notif["handover_user"] = 1; changed = True
+        if end and now > end and b["curator"] and not notif.get("handover_curator"):
+            await notify(b["curator"], f"🏛 Бронь 626 №{b['id']} закончилась ({b['day']} {b['slot']}). "
+                                       "Проверьте фото сдачи.")
+            notif["handover_curator"] = 1; changed = True
+        if changed:
             _set_notif("b626", b["id"], notif)
 
     # 626 без согласования >6 ч - напоминание в канал
@@ -1933,7 +2640,7 @@ async def run_checks() -> None:
     today = now.strftime("%Y-%m-%d")
     if now.hour >= 22 and _meta_get("digest_date") != today:
         _meta_set("digest_date", today)
-        await daily_digest()
+        await daily_digest(award_score=True)
     last_bk = _meta_get("backup_date")
     stale_bk = True
     if last_bk:
@@ -1960,13 +2667,23 @@ async def run_checks() -> None:
                 c.execute("DELETE FROM cat_blocks WHERE cat=?", (row["cat"],))
 
 
+def _seconds_to_next_check(now=None) -> float:
+    """Секунды до ближайшей московской границы :00/:05/:10…"""
+    current = now or datetime.now(MSK)
+    passed = (current.minute % 5) * 60 + current.second + current.microsecond / 1000000.0
+    return max(0.05, 300.0 - passed)
+
+
 async def scheduler_loop() -> None:
     while True:
+        before = db_revision()
         try:
             await run_checks()
         except Exception as e:
             log.warning("scheduler: %s", e)
-        await asyncio.sleep(300)
+        if db_revision() != before:
+            await sse_broadcast()
+        await asyncio.sleep(_seconds_to_next_check())
 
 
 async def api_dev_tick(request: web.Request):
@@ -1992,8 +2709,12 @@ async def serve_static(request: web.Request):
         raise web.HTTPNotFound()
 
     resp = web.FileResponse(file)
-    if file.suffix in (".html", ".js", ".css"):
+    if file.suffix == ".html":
         resp.headers["Cache-Control"] = "no-cache"  # чтобы правки долетали без очистки кэша
+    elif file.suffix in (".css", ".js", ".woff2", ".png", ".jpg", ".jpeg", ".svg") and request.query_string:
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif file.suffix in (".css", ".js", ".woff2", ".png", ".jpg", ".jpeg", ".svg"):
+        resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
 
 
@@ -2021,6 +2742,30 @@ async def cmd_digest(message: Message) -> None:
         return
     await daily_digest()
     await message.answer("Сводка отправлена в канал.")
+
+
+@dp.message(Command("scorestatus"))
+async def cmd_scorestatus(message: Message) -> None:
+    if not is_senior(message.from_user.id):
+        return
+    status = score_status()
+    state = "включена" if status["googleEnabled"] else "выключена"
+    await message.answer(
+        f"Google Sheets: {state}\nОжидают отправки: {status['pending']}\n"
+        f"С ошибкой: {status['failed']}\nОтправлено: {status['sent']}"
+    )
+
+
+@dp.message(Command("scoresync"))
+async def cmd_scoresync(message: Message) -> None:
+    if not is_senior(message.from_user.id):
+        return
+    try:
+        result = await sync_scores(force=True)
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+    await message.answer(f"Отправлено: {result['sent']}; ошибок: {result.get('failed', 0)}.")
 
 
 @dp.message(Command("backup"))
@@ -2141,6 +2886,7 @@ async def main() -> None:
     init_db()
     _migrate()
     load_catalog()
+    sync_equipment_units()
     with db() as c:
         EXTRA_ADMIN_IDS = {r["user_id"] for r in c.execute("SELECT user_id FROM extra_admins")}
     for bad in [x for x in (ADMIN_IDS | SENIOR_ADMIN_IDS) if x < 0]:
@@ -2150,11 +2896,14 @@ async def main() -> None:
     # base64-фото в JSON: поднимаем лимит тела запроса (дефолт aiohttp - 1 МБ)
     app = web.Application(client_max_size=32 * 1024 * 1024)
     app.router.add_post("/api/me", api_me)
+    app.router.add_post("/api/revision", api_revision)
     app.router.add_post("/api/register", api_register)
     app.router.add_post("/api/request/create", api_req_create)
     app.router.add_post("/api/request/update", api_req_update)
     app.router.add_post("/api/request/action", api_req_action)
     app.router.add_post("/api/availability", api_availability)
+    app.router.add_post("/api/equipment/unit", api_equipment_unit)
+    app.router.add_post("/api/equipment/unit/update", api_equipment_unit_update)
     app.router.add_post("/api/626/create", api_626_create)
     app.router.add_post("/api/626/action", api_626_action)
     app.router.add_post("/api/chat", api_chat)
@@ -2175,6 +2924,7 @@ async def main() -> None:
     app.router.add_post("/api/stats", api_stats)
     app.router.add_post("/api/resync", api_resync)
     app.router.add_post("/api/dev/tick", api_dev_tick)
+    app.router.add_get("/api/events", api_events)
     app.router.add_get("/{path:.*}", serve_static)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -2182,6 +2932,7 @@ async def main() -> None:
     log.info("Статика+API: http://localhost:%s -> %s", PORT, WEBAPP_DIR)
 
     sched = asyncio.get_event_loop().create_task(scheduler_loop())
+    scores = asyncio.get_event_loop().create_task(score_worker())
 
     if dev_mode:
         log.warning("DEV-режим: бот не запущен (нет BOT_TOKEN), все запросы = пользователь %s. "
@@ -2190,6 +2941,7 @@ async def main() -> None:
             await asyncio.Event().wait()
         finally:
             sched.cancel()
+            scores.cancel()
             await runner.cleanup()
         return
 
@@ -2197,7 +2949,7 @@ async def main() -> None:
     me = await bot.get_me()
     BOT_USERNAME = me.username
     await bot.set_chat_menu_button(
-        menu_button=MenuButtonWebApp(text="Оборудыш", web_app=WebAppInfo(url=WEBAPP_URL))
+        menu_button=MenuButtonWebApp(text=tx.MENU_BUTTON_TEXT, web_app=WebAppInfo(url=WEBAPP_URL))
     )
     if not ADMIN_CHAT_ID:
         log.warning("ADMIN_CHAT_ID не задан - карточки заявок в админ-канал не пойдут. "
@@ -2209,6 +2961,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         sched.cancel()
+        scores.cancel()
         await runner.cleanup()
 
 

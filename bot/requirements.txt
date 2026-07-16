@@ -1,2 +1,4 @@
-aiogram>=3.7,<4
+aiogram==3.29.1
 python-dotenv>=1.0
+google-api-python-client>=2.187,<3
+google-auth>=2.40,<3

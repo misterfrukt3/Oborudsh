@@ -9,7 +9,7 @@
 | `prototype/index.html`   | Разметка + вся JS-логика фронтенда (без CSS). Работает в 2 режимах: браузер = кликабельное демо на моках; внутри Telegram = боевой клиент к API (`SRV`-режим)                                                                                            |
 | `prototype/style.css`    | Весь CSS (токены `:root`/`.dark`, типографическая шкала `--fs-*`, шкала скруглений `--r-*`, все компоненты). Подключается через `<link>` в `index.html`                                                                                                 |
 | `prototype/catalog.js`   | Каталог из парсера Google-таблицы: `window.OBORUDKA_CATALOG`, 11 категорий, 200 позиций. Уровни: `"акт"` (только активисты), `"глава"` (только старшие), null                                                                                            |
-| `bot/main.py`            | **Весь бэкенд** (~1730 строк): aiohttp (API + статика prototype/) + aiogram 3 (бот) + SQLite (`bot/oborudka.db`) + планировщик. Python 3.8+ (у заказчика на VPS 3.8 — `is_relative_to` и прочий 3.9+ синтаксис НЕЛЬЗЯ)                                   |
+| `bot/main.py` | Backend: aiohttp + aiogram 3 + SQLite + scheduler. Runtime: isolated project Python 3.10+ venv; never change system Python or other bot environments. |
 | `bot/make_members.py`    | Генератор `bot/org_members.csv` из Excel для автосверки организаций (`ORG_MEMBERS_FILE`)                                                                                                                                                                 |
 | `Карта кода бота/`       | **Разбор кода по слоям в Obsidian** (bases + wikilinks + mermaid). Старт — `00 Карта бота.md`. Там же гайды: `Гайд — 4 правки с промтами.md`, `Гайд — куда развивать.md`, `Гайд — стилизация бота в Telegram.md`, `Промт — запуск нейронки на правки.md` |
 | `bot/equipment.json`     | Каталог от парсера в JSON (пока не используется; сервер читает prototype/catalog.js)                                                                                                                                                                     |
@@ -26,10 +26,18 @@
 ## bot/.env
 BOT_TOKEN, WEBAPP_URL, PORT=8737, ADMIN_CHAT_ID (канал), ADMIN_IDS, SENIOR_ADMIN_IDS (личные id через запятую), DEV_USER_ID (только локально), MB_SHEET_URL (CSV листа «список ребят» для автосверки MB; пусто = выкл), ORG_MEMBERS_FILE (файл со списком организаций от make_members.py; дефолт bot/org_members.csv). Тело запроса поднято до 32 МБ прямо в aiohttp (`client_max_size`), поэтому фото сдачи проходят без внешнего веб-сервера.
 
-## ✅ СТАТУС РАБОТ (09.07.2026)
+## ✅ СТАТУС РАБОТ (16.07.2026)
 
-За 8 итераций закрыт весь функционал + расширенная статистика + дизайн-полировка. Каждая итерация проверена (бэк e2e в DEV,
-фронт в preview).
+Основной функционал и финальная релизная сборка закрыты. Локальные тесты и DEV E2E пройдены; финальная проверка в реальном Telegram выполняется после выкладки.
+
+**Итерация 12 — единый релиз (16.07.2026):**
+- Добавлены паспорта каждого экземпляра оборудования: серийный номер, заметка, состояния «готов / на ремонте / списан», история выдач и возвратов. Ремонтные и списанные экземпляры больше не предлагаются при выдаче.
+- Добавлен недельный календарь команды в панели администратора с задачами по оборудованию и аудитории 626.
+- Живое обновление переведено на авторизованный SSE с проверкой лёгкой ревизии; при обрыве остаётся резервный опрос раз в 12 секунд, а скрытое Mini App не расходует соединение.
+- Добавлены напоминания куратору за сутки и час до выдачи/возврата, пожелания после выдачи и при начале брони 626; планировщик выровнен по московским пятиминутным границам.
+- Восстановлены все повреждённые русские сообщения. Редактируемые тексты вынесены в `bot/texts.py` и `prototype/texts.js`.
+- Сохранены изменения релиза 16 июля: очередь начислений `score_events`, опциональная синхронизация Google Sheets, скрытие production флагом, оптимизация SQLite и `/api/revision`, локальный Montserrat.
+- Проверено: 17 unit-тестов, Python/JS syntax, полный DEV E2E заявки и 626, паспорт экземпляра, SSE ready/change, статика и cache headers.
 
 **Итерация 8 (09.07.2026):**
 - Добавлено: блокировка категории — кнопки-пресеты (1 час / 6 часов / 12 часов / навсегда / до периода) вместо календаря-по-умолчанию, календарь показывается только при «до периода» (`catBlkTermPick`/`drawCatBlock`, `prototype/index.html`); срок считается на сервере (`api_category_block`, `bot/main.py`) — час-пресеты через `timedelta(hours=N)`, «до периода» до 23:59 выбранного дня; авто-снятие обновлено под час-точность (`_cat_until_passed`, было `_date_passed` только по дате; бан пользователя — отдельная функция, не тронута); новый формат ежедневной статистики в канал (`daily_digest`) — 5 строк-метрик, «Админ дня» с разбивкой К/В/П/О/А (Курировал/Выдал/Принял/Отказал/действия с 626 — буквы намеренно не начинаются с «С,В,О», чтобы не читалось как аббревиатура), общий список бронирований на завтра (выдача+возврат вместе, с составом и номерами экземпляров), новый блок занятости аудитории 626 на завтра; номера экземпляров при выдаче теперь сохраняются (`requests.nums`) — раньше терялись сразу после уведомления; команды `/addadmin <id>`, `/deladmin <id>`, `/admins` — старший добавляет/убирает обычных админов без правки `.env` и рестарта (`extra_admins` в БД + `EXTRA_ADMIN_IDS` в памяти, `is_admin()` учитывает).
@@ -120,10 +128,25 @@ BOT_TOKEN, WEBAPP_URL, PORT=8737, ADMIN_CHAT_ID (канал), ADMIN_IDS, SENIOR_
 - Роли: **четыре** (СО/ССФ → стажёр → активист → production; production — макс., доступ пока = активист). Уровень `глава` — только старшие (кода «БИПКИ» БОЛЬШЕ НЕТ). Организации: MB и/или СО/ССФ, список 34 орг + «Другое». Отделы только у MB.
 - Мастер: календарь с месяцами (через Новый год) и подсветкой загруженности (🟢0–1/🟡2–4/🟠5–6/🔴7+), слоты 09:00–21:30/30 мин, заявка за 2 дня. **Выходные:** получение и возврат в воскресенье — жёсткий запрет (`dateBlock`); возврат/выдача в субботу после 18:00 — разрешены, но с мягким предупреждением (`dateSoftWarn`), а команде в карточке — пометка «поздняя выдача/возврат» (`late_note`, может отказать). Номера экземпляров: админу минимальный свободный, юзер не видит.
 - Панели админа/старшего разделены; у старшего очередей оборудования нет. Верхняя панель ролей — только в браузерном демо; в Telegram вход через «Служебное» на главном (бейджи внимания) и «‹ Режим пользователя».
-- Версии: v1 — готово. v1.1 (рассылки, избранные наборы, повтор заявки) — готово. Расширенная статистика — готово. QR-сканер / порядочность-рейтинг / Sheets-синк из планов **сняты** (неактуальны).
+- Versions: v1 and v1.1 are complete. QR scanner and integrity rating remain out of scope. Direct Google Sheets score sync is now implemented through `score_events`.
 
 ## Стиль работы с заказчиком
 - Пишет списками правок на русском — отвечать по пунктам, делом, стиль ответов краткий (`/caveman` активен). Итерации быстрые: правка → проверка в превью/тестом → «жду следующий список».
 - После каждой правки/итерации — краткий отчёт заказчику двумя списками: **Добавлено:** / **Исправлено:**. Писать понятным языком (что изменилось для пользователя/на экране), без имён функций/кода/эндпоинтов — заказчик не программист. Технические детали (имена функций и т.п.) — только в этот файл, в блок СТАТУС РАБОТ, отдельно от отчёта заказчику.
 - Обновление деплоя всегда описывать: какие файлы заменить, что дописать в .env, нужен ли перезапуск (статика — не нужен, main.py — нужен).
 - Заказчик прокликивает сам в реальном Telegram; напоминать про перенос `prototype/catalog.js`, `prototype/style.css` и новых переменных .env на сервер.
+
+## Release context (16.07.2026)
+
+- There is one production bot, one `/opt/oborudka` service, one SQLite database and one Google spreadsheet. Local DEV mode is the test environment; do not create a second bot/service.
+- Runtime is Python 3.10+ in the project venv. Never replace `/usr/bin/python3` or modify venvs of other bots. `aiogram==3.29.1` is pinned in `bot/requirements.txt`.
+- `production` remains implemented but is temporarily hidden. `ENABLE_PRODUCTION_ROLE=0` removes it from registration, verification, user management and visible copy, and API assignment is rejected. Set the flag to `1` and restart to restore it.
+- Frontend polling uses lightweight `/api/revision`; `/api/me` is loaded only when the database revision changes. Polling pauses while the Mini App is hidden.
+- SQLite connections opened through `db()` close after each context, WAL/busy timeout and read indexes are enabled, and boot payload relations are batch-loaded.
+- Montserrat is served from `prototype/fonts/`; versioned static assets are cached. Caddy must use `encode zstd gzip`.
+- `score_events` is the durable local score queue. RabbitMQ and the old external `producer.py` are not used.
+- Score event keys are `daily_admin:YYYY-MM-DD`, `request:ID:ADMIN_ID`, and `626:ID:ADMIN_ID`; uniqueness prevents repeat awards.
+- Admin of day earns `0.1` once per date. A closed equipment request awards `0.01` to each unique admin who issued or accepted it. A closed 626 booking awards `0.05` to its current curator. Old closed objects are not backfilled.
+- Google Sheets sync is optional. When disabled or unavailable, the app continues normally and events stay queued. Hidden senior commands: `/scorestatus`, `/scoresync`.
+- Sheet `Начисления`: `event_id | date/time | full name | Telegram ID | type | object ID | points | description`. Sheet `Админы` is rebuilt from the event log after sync.
+- Daily/monthly reports and `/digest` use Telegram `sendRichMessage`, split at semantic sections below 30000 characters, with ordinary text fallback.

@@ -5,10 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260716">
 </head>
 <body>
 
@@ -31,7 +28,8 @@
   <div id="overlay"></div>
 </div>
 
-<script src="catalog.js"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script src="catalog.js?v=20260716"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script src="texts.js?v=20260716"></script>
 <script>
 "use strict";
 /* запрет масштабирования интерфейса: жест «щипок» и двойной тап */
@@ -91,13 +89,14 @@ function chatMsg(m, invert){
 function applyBoot(d){
   d = cleanIncoming(d || {});
   SRV = d;
+  _revision = String(d.revision || _revision || "");
   if(d.profile){
     if(d.profile.name) profile.name = d.profile.name;
     if(d.profile.short) profile.short = d.profile.short;
     if(d.profile.tg) profile.tg = d.profile.tg;
     profile.orgs = d.profile.orgs || [];
     profile.deps = d.profile.deps || [];
-    if(d.profile.status) profile.status = d.profile.status;
+    if(d.profile.status) profile.status = (d.profile.status==="production" && !productionEnabled()) ? "\u0430\u043a\u0442\u0438\u0432\u0438\u0441\u0442" : d.profile.status;
     if(d.profile.photo) profile.photo = d.profile.photo;
   }
   requests = d.requests || [];
@@ -106,6 +105,7 @@ function applyBoot(d){
   if(d.users) usersDb = d.users;
   if(d.busy626) BUSY626 = d.busy626;   // занятость 626 из boot (dayload — в SRV.dayload)
   if(d.favSets) favSets = d.favSets;
+  if(d.equipmentUnits) equipmentUnits = d.equipmentUnits;
   rebuildCatalog(d.extraItems, d.catBlocks, d.removedItems);  // каталог = база + добавленное − скрытое + блокировки
 }
 /* куратор этой заявки — я? (в демо куратор помечен строкой "@you") */
@@ -212,6 +212,9 @@ const CATALOG_BASE = window.OBORUDKA_CATALOG || [
 let CATALOG = CATALOG_BASE;
 /* SRV: пересобрать каталог из базы + добавленных позиций и блокировок категорий (идемпотентно, на каждый boot) */
 function rebuildCatalog(extraItems, catBlocks, removedItems){
+  const signature = JSON.stringify([extraItems||[],catBlocks||[],removedItems||[]]);
+  if(signature===rebuildCatalog.signature) return;
+  rebuildCatalog.signature = signature;
   const base = JSON.parse(JSON.stringify(CATALOG_BASE));
   const removed = new Set(removedItems||[]);
   (extraItems||[]).forEach(it=>{
@@ -311,6 +314,7 @@ let profile = {name:"Птицын Фрукт Медийщикович", short:"�
 let stack = [];
 let wiz = null, wiz626 = null, issueCheck = null, adminTab = "queue", userQ = "";
 let favSets = []; // избранные наборы оборудки (свои)
+let equipmentUnits = [], unitPassport = null, unitQ = "", adminWeek = 0, issueFreeNums = {};
 const $ = id => document.getElementById(id);
 
 /* ================= НАВИГАЦИЯ ================= */
@@ -367,6 +371,21 @@ document.addEventListener("keydown", e=>{
 /* ================= РЕНДЕР ================= */
 const SCREENS = {};
 let _scrKey = "";
+function productionEnabled(){ return !!(SRV && SRV.features && SRV.features.productionRole); }
+function hideProductionUi(root){
+  if(productionEnabled()) return;
+  root.querySelectorAll("button").forEach(button=>{
+    const action = button.getAttribute("onclick") || "";
+    if(action.indexOf("production")!==-1 || button.textContent.trim()==="production") button.remove();
+  });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while(walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node=>{
+    node.textContent = node.textContent.replace(/,\s*production/g, "").replace(/\/production/g, "")
+      .replace(/production/g, "\u0430\u043a\u0442\u0438\u0432\u0438\u0441\u0442");
+  });
+}
 function render(){
   const s = cur();
   const out = SCREENS[s.name](s.params);
@@ -384,6 +403,7 @@ function render(){
     inputs[el.id] = {v:el.value, f:document.activeElement===el, s:el.selectionStart};
   });
   scr.innerHTML = '<div class="screen-inner'+(same?" nofade":"")+'">'+out.body+'</div>' + (out.mainbtn||"");
+  hideProductionUi(scr);
   for(const id in inputs){
     const el = $(id);
     if(el && !el.value){ el.value = inputs[id].v;
@@ -1430,6 +1450,10 @@ SCREENS.adminHub = () => {
         <div class="grow"><b style="font-size:16px">Панель админа</b>
         <div class="hud">без куратора: <b>${noCur.length}</b> · мои: <b>${mine.length}</b></div></div>
       </div>
+      <div class="admin-tools">
+        <div class="list-item" onclick="adminWeek=0;navTo('adminCalendar')"><div class="emoji-badge">${uic("chart",19)}</div><div class="grow">Недельный календарь<div class="sub">все задачи команды</div></div><span class="chev">›</span></div>
+        <div class="list-item" onclick="navTo('equipmentUnits')"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Паспорта экземпляров<div class="sub">состояние и история</div></div><span class="chev">›</span></div>
+      </div>
       <div class="seg" role="tablist">
         <button class="${adminTab==="queue"?"on":""}" role="tab" aria-selected="${adminTab==="queue"}" onclick="adminTab='queue';render()">Без куратора</button>
         <button class="${adminTab==="mine"?"on":""}" role="tab" aria-selected="${adminTab==="mine"}" onclick="adminTab='mine';render()">Мои</button>
@@ -1474,6 +1498,68 @@ SCREENS.adminHub = () => {
       <div style="margin-top:14px"><button class="mainbtn secondary" style="pointer-events:auto" onclick="setRole('user')">‹ Режим пользователя</button></div>`,
   };
 };
+
+function mondayIso(offset){
+  const d=new Date(); d.setHours(12,0,0,0);
+  d.setDate(d.getDate()-((d.getDay()+6)%7)+(offset||0)*7);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function isoShift(iso,n){const d=new Date(iso+"T12:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
+function adminTasks(){
+  const out=[];
+  requests.forEach(r=>{
+    if(["closed","rejected","canceled"].includes(r.status))return;
+    let action="",day=r.d1Iso;
+    if(!r.curator)action="Взять в кураторство";
+    else if(r.status==="curator")action="Согласовать";
+    else if(r.status==="approved")action="Выдать";
+    else if(["issued","ret"].includes(r.status)){action="Принять возврат";day=r.d2Iso;}
+    if(action&&day)out.push({day,action,title:"Заявка ID "+r.id+" · "+r.event,mine:!!r.curMe,click:"navTo('adminReq',{id:"+r.id+"})"});
+  });
+  bookings626.forEach(b=>{
+    if(["closed","rejected","canceled"].includes(b.status))return;
+    let action=b.status==="new"?"Согласовать 626":(!b.curator?"Взять в кураторство":"Принять 626");
+    out.push({day:b.when,action,title:"626 №"+b.id+" · "+b.goal,mine:!!b.curMe,click:"navTo('studioDetail',{id:"+b.id+"})"});
+  });
+  return out;
+}
+SCREENS.adminCalendar=()=>{
+  const start=mondayIso(adminWeek),days=Array.from({length:7},(_,i)=>isoShift(start,i));
+  const names=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"],tasks=adminTasks();
+  return {body:`<div class="week-head"><button class="cal-nav" aria-label="Предыдущая неделя" onclick="adminWeek--;render()">‹</button>
+    <div><h1 class="big">Задачи команды</h1><div class="sub">${fmtIso(days[0])}–${fmtIso(days[6])}</div></div>
+    <button class="cal-nav" aria-label="Следующая неделя" onclick="adminWeek++;render()">›</button></div>
+    <div class="week-list">${days.map((day,i)=>{const list=tasks.filter(t=>t.day===day);return `<section class="week-day ${day===isoPlus(0)?"today":""}">
+      <div class="week-date"><b>${names[i]}</b><span>${fmtIso(day)}</span></div>
+      <div class="week-tasks">${list.map(t=>`<button class="week-task ${t.mine?"mine":""}" onclick="${t.click}"><span class="task-action">${t.action}</span><span>${t.title}</span>${t.mine?'<small>моя задача</small>':""}</button>`).join("")||'<div class="sub week-empty">Задач нет</div>'}</div>
+    </section>`;}).join("")}</div>`,mainbtn:mainBtn("К текущей неделе","adminWeek=0;render()","secondary")};
+};
+const UNIT_ST={ready:"Готов",repair:"На ремонте",retired:"Списан"};
+SCREENS.equipmentUnits=()=>{
+  const q=unitQ.toLowerCase(),list=equipmentUnits.filter(u=>!q||u.short.toLowerCase().includes(q)||String(u.num).includes(q));
+  return {body:`<h1 class="big">Паспорта экземпляров</h1><p class="sub" style="margin-bottom:12px">Серийные номера, состояние и история выдач.</p>
+    <div class="search"><input id="unit-search" type="text" placeholder="Позиция или номер" value="${escAttr(unitQ)}" oninput="unitQ=this.value;renderKeepFocus()"></div>
+    <div style="margin-top:12px">${list.map(u=>`<div class="list-item" onclick="openUnit('${escJs(u.short)}',${u.num})">${thumb(u.short,38)}<div class="grow"><b>${u.short} · №${u.num}</b><div class="hud">${u.serial?"серийный: "+u.serial:"серийный не указан"}</div></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span><span class="chev">›</span></div>`).join("")||'<div class="card sub">Ничего не найдено</div>'}</div>`};
+};
+function openUnit(short,num){
+  if(SRV){if(_busy)return;_busy=true;api("equipment/unit",{short,num}).then(d=>{_busy=false;unitPassport=d.unit;navTo("unitPassport")}).catch(e=>{_busy=false;toast("Ошибка: "+e.message)});return;}
+  const u=equipmentUnits.find(x=>x.short===short&&x.num===num)||{short,num,serial:"",note:"",state:"ready",updatedAt:"—",updatedBy:"система"};
+  unitPassport=Object.assign({history:[]},u);navTo("unitPassport");
+}
+SCREENS.unitPassport=()=>{const u=unitPassport;if(!u)return {body:'<div class="card sub">Экземпляр не найден</div>'};return {body:`
+  <div class="card"><div class="row">${thumb(u.short,48)}<div class="grow"><div class="hud">Паспорт экземпляра</div><h1 class="big">${u.short} · №${u.num}</h1></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span></div></div>
+  <div class="sec-label">Серийный номер</div><input id="unit-serial" type="text" maxlength="120" value="${escAttr(u.serial)}" placeholder="Не указан">
+  <div class="sec-label">Заметка</div><textarea id="unit-note" rows="3" maxlength="1000" placeholder="Комплектация, дефекты, ремонт…">${escHtml(u.note)}</textarea>
+  <div class="sec-label">Состояние</div><select id="unit-state">${[["ready","Готов"],["repair","На ремонте"],["retired","Списан"]].map(x=>`<option value="${x[0]}" ${u.state===x[0]?"selected":""}>${x[1]}</option>`).join("")}</select>
+  <p class="sub" style="padding:8px 4px">Последнее изменение: ${u.updatedAt||"—"} · ${u.updatedBy||"система"}</p>
+  <div class="sec-label">История экземпляра</div>${(u.history||[]).map(h=>`<div class="card unit-history tappable" onclick="navTo('adminReq',{id:${h.requestId}})"><b>Заявка ID ${h.requestId} · ${h.user}</b><div class="hud">Бронь: ${h.from} → ${h.to}</div><div class="hud">Выдал: ${h.issuedBy} (${h.takenAt})</div><div class="hud">Принял: ${h.returnedBy} (${h.returnedAt})</div><div class="hud">Итог: ${ST[h.status]?ST[h.status].l:h.status}</div></div>`).join("")||'<div class="card sub">Этот экземпляр ещё не выдавался</div>'}`,
+  mainbtn:mainBtn("Сохранить паспорт","saveUnit()")};};
+function saveUnit(){
+  const u=unitPassport,body={short:u.short,num:u.num,serial:$("unit-serial").value.trim(),note:$("unit-note").value.trim(),state:$("unit-state").value};
+  if(SRV){srvDo("equipment/unit/update",body,()=>{goBack();toast("Паспорт сохранён")});return;}
+  Object.assign(u,body,{updatedAt:"сейчас",updatedBy:"@you"});goBack();toast("Паспорт сохранён");
+}
+
 function take626(id){
   if(SRV){ srvDo("626/action",{id, action:"curator"}, ()=>{ render(); toast("Вы куратор брони 626 №"+id+". Пользователю ушло уведомление."); }); return; }
   const b = bookings626.find(x=>x.id===id);
@@ -1584,23 +1670,37 @@ function rejReqModal(id){
 /* Теоретические номера экземпляров: система предлагает минимальный свободный,
    админ может тапом сменить на другой свободный. Пользователь номера не видит. */
 function freeNumsOf(short){
-  const it = itemOf(short);
-  const total = it ? it.total : 1;
-  if(total<=1) return null;
-  const busyCount = lockOf(short)%total; // мок: первые N заняты
-  const free = []; for(let n=busyCount+1;n<=total;n++) free.push(n);
+  if(SRV) return issueFreeNums[short]||[];
+  const it=itemOf(short),total=it?it.total:1,busyCount=lockOf(short)%Math.max(total,1);
+  const free=[];for(let n=busyCount+1;n<=total;n++)free.push(n);
   return free.length?free:[1];
 }
-function openIssue(id, isReturn){
-  const r = requests.find(x=>x.id===id);
-  issueCheck = {id, isReturn:!!isReturn, done:{}, nums:{}, items:r.items.map(i=>[i[0],i[1]]), changed:false};
-  /* по умолчанию всё отмечено — админ снимает галочку только с проблемных позиций */
-  issueCheck.items.forEach(i=>{ issueCheck.done[i[0]]=true; const f=freeNumsOf(i[0]); if(f) issueCheck.nums[i[0]]=f[0]; });
+function initIssue(r,isReturn){
+  issueCheck={id:r.id,isReturn:!!isReturn,done:{},nums:{},items:r.items.map(i=>[i[0],i[1]]),changed:false};
+  issueCheck.items.forEach(i=>{
+    issueCheck.done[i[0]]=true;
+    const saved=r.nums&&r.nums[i[0]];
+    const free=isReturn?(Array.isArray(saved)?saved:(saved?[saved]:[])):freeNumsOf(i[0]);
+    issueCheck.nums[i[0]]=free.slice(0,i[1]);
+  });
   drawIssue(r);
 }
-function cycleNum(short, rid){
-  const f = freeNumsOf(short);
-  issueCheck.nums[short] = f[(f.indexOf(issueCheck.nums[short])+1)%f.length];
+function openIssue(id,isReturn){
+  const r=requests.find(x=>x.id===id);
+  if(SRV&&!isReturn){
+    if(_busy)return;_busy=true;
+    api("availability",{d1:r.d1Iso,d2:r.d2Iso,exclude:r.id,items:r.items})
+      .then(d=>{_busy=false;issueFreeNums=d.freeNums||{};initIssue(r,false)})
+      .catch(e=>{_busy=false;toast("Ошибка: "+e.message)});
+    return;
+  }
+  initIssue(r,isReturn);
+}
+function cycleNum(short,rid){
+  const free=freeNumsOf(short),item=issueCheck.items.find(i=>i[0]===short),qty=item?item[1]:1;
+  if(!free.length)return;
+  const current=issueCheck.nums[short]||[],at=Math.max(0,free.indexOf(current[0]));
+  issueCheck.nums[short]=Array.from({length:qty},(_,i)=>free[(at+1+i)%free.length]);
   drawIssue(requests.find(x=>x.id===rid));
 }
 /* нет позиции в наличии — админ убирает её из выдачи или добавляет замену */
@@ -1610,14 +1710,21 @@ function issueDrop(short, rid){
   issueCheck.changed = true;
   drawIssue(requests.find(x=>x.id===rid));
 }
-function issueAdd(short, rid){
-  const ex = issueCheck.items.find(i=>i[0]===short);
-  if(ex) ex[1]++; else {
-    issueCheck.items.push([short,1]);
-    const f = freeNumsOf(short); if(f) issueCheck.nums[short]=f[0];
+function issueAdd(short,rid){
+  const r=requests.find(x=>x.id===rid);
+  if(SRV&&issueFreeNums[short]===undefined){
+    if(_busy)return;_busy=true;
+    api("availability",{d1:r.d1Iso,d2:r.d2Iso,exclude:r.id,items:[[short,1]]})
+      .then(d=>{_busy=false;issueFreeNums[short]=(d.freeNums||{})[short]||[];issueAdd(short,rid)})
+      .catch(e=>{_busy=false;toast("Ошибка: "+e.message)});
+    return;
   }
-  issueCheck.changed = true;
-  drawIssue(requests.find(x=>x.id===rid));
+  const ex=issueCheck.items.find(i=>i[0]===short);
+  if(ex)ex[1]++;else issueCheck.items.push([short,1]);
+  const item=issueCheck.items.find(i=>i[0]===short),free=freeNumsOf(short);
+  issueCheck.nums[short]=free.slice(0,item[1]);
+  issueCheck.changed=true;
+  drawIssue(r);
 }
 function issueAddSheet(rid){
   const q = (issueCheck.addQ||"").toLowerCase();
@@ -1650,7 +1757,7 @@ function drawIssue(r){
       ${issueCheck.items.map(i=>{ const es=escJs(i[0]); return `
         <div class="check-row ${issueCheck.done[i[0]]?"on":""}" ${chkA(issueCheck.done[i[0]])} onclick="issueCheck.done['${es}']=!issueCheck.done['${es}'];drawIssue(requests.find(x=>x.id===${r.id}))">
           <span class="checkbox">✓</span><span class="grow">${i[0]}${i[1]>1?" × "+i[1]:""}</span>
-          ${issueCheck.nums[i[0]]?'<button class="btn-sm" style="font-family:var(--mono)" onclick="event.stopPropagation();cycleNum(\''+es+'\','+r.id+')">№ '+issueCheck.nums[i[0]]+'</button>':""}
+          ${(issueCheck.nums[i[0]]||[]).length?'<button class="btn-sm" style="font-family:var(--mono)" onclick="event.stopPropagation();cycleNum(\''+es+'\','+r.id+')">№ '+issueCheck.nums[i[0]].join(", ")+'</button>':""}
           ${issueCheck.isReturn?'<span class="hud">'+(issueCheck.done[i[0]]?"OK":"—")+'</span>'
             :'<button class="btn-sm danger" onclick="event.stopPropagation();issueDrop(\''+es+'\','+r.id+')">✕</button>'}
         </div>`; }).join("")||'<p class="sub" style="padding:8px 0">Все позиции убраны — добавьте хотя бы одну или отклоните заявку.</p>'}
@@ -1669,7 +1776,8 @@ function doIssue(){
   if(SRV){
     const isRet = issueCheck.isReturn;
     srvDo("request/action",{id:issueCheck.id, action:isRet?"return":"issue", comment:comm,
-      items:(!isRet && issueCheck.changed) ? issueCheck.items : undefined},
+      items:(!isRet && issueCheck.changed) ? issueCheck.items : undefined,
+      nums:!isRet ? issueCheck.nums : undefined},
       ()=>{ $("overlay").innerHTML=""; render();
         toast(isRet ? (comm ? "📷 Есть комментарий — возврат ушёл старшим" : "✅ Возврат принят, заявка закрыта")
                     : "🟢 Выдано. Пользователю ушёл список."); });
@@ -2215,7 +2323,7 @@ async function bootApp(){
     else if(d.registered && d.verified==="pending") resetTo("regWait");
     else if(d.registered && d.verified==="rejected") resetTo("rejected");
     else resetTo("rules");
-    startPolling();
+    startRealtime();
   }catch(e){
     SRV = null;
     let agreed = false; try{ agreed = !!localStorage.getItem("obor_agreed"); }catch(_e){}
@@ -2225,23 +2333,45 @@ async function bootApp(){
 }
 /* живое обновление: раз в 12 с тянем свежие данные и перерисовываем текущий экран.
    Не дёргаем, пока открыт шит/модалка или пользователь печатает. */
-let _pollT = null, _lastSig = "";
-function startPolling(){
-  if(_pollT) return;
-  _pollT = setInterval(async ()=>{
-    if(!SRV) return;
-    if($("overlay").innerHTML) return;
-    const ae = document.activeElement;
-    if(ae && (ae.tagName==="INPUT" || ae.tagName==="TEXTAREA")) return;
-    try{
-      const d = await api("me");
-      /* перерисовываем только если данные реально изменились — иначе экран не дёргаем */
-      const sig = JSON.stringify([d.requests, d.bookings626, d.verifQueue, d.users, d.profile]);
-      if(sig===_lastSig){ SRV = d; return; }
-      _lastSig = sig; applyBoot(d); render();
-    }catch(e){}
-  }, 12000);
+let _pollT=null,_revision="",_events=null,_sseOpen=false,_refreshing=false,_refreshPending=false,_deferT=null;
+function liveBlocked(){
+  const ae=document.activeElement;
+  return document.hidden||!!$("overlay").innerHTML||!!(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"));
 }
+async function refreshLive(){
+  if(!SRV||_refreshing)return;
+  if(liveBlocked()){_refreshPending=true;clearTimeout(_deferT);_deferT=setTimeout(refreshLive,1000);return;}
+  _refreshing=true;_refreshPending=false;
+  try{
+    const revision=await api("revision");
+    if(String(revision.revision)===_revision)return;
+    const d=await api("me");applyBoot(d);render();
+  }catch(e){}finally{_refreshing=false;}
+}
+function startPolling(){
+  if(_pollT)return;
+  _pollT=setInterval(()=>{if(!_sseOpen||_refreshPending)refreshLive();},12000);
+}
+function stopPolling(){if(_pollT){clearInterval(_pollT);_pollT=null;}}
+function stopRealtime(){
+  if(_events){_events.close();_events=null;}
+  _sseOpen=false;stopPolling();clearTimeout(_deferT);
+}
+function startRealtime(){
+  if(!SRV||document.hidden)return;
+  startPolling();
+  if(!window.EventSource)return;
+  if(_events)_events.close();
+  _events=new EventSource("/api/events?initData="+encodeURIComponent(TG?TG.initData:""));
+  _events.addEventListener("ready",()=>{_sseOpen=true;stopPolling();});
+  _events.addEventListener("change",()=>refreshLive());
+  _events.onerror=()=>{_sseOpen=false;startPolling();};
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden)stopRealtime();
+  else if(SRV){startRealtime();refreshLive();}
+});
+window.addEventListener("beforeunload",stopRealtime);
 if(IN_TG){
   document.body.classList.add("in-tg");
   TG.ready(); TG.expand();

@@ -1,5 +1,179 @@
 # Оборудыш: запуск Mini App в Telegram и деплой
 
+## Что добавляет релиз 16.07.2026
+
+- Автоматическая миграция создаёт паспорта `equipment_units` и поля `issued_by`/`returned_by`; базу сбрасывать не нужно.
+- Перенести также `bot/texts.py`, `prototype/texts.js` и всю папку `prototype/fonts/`.
+- Caddy должен пропускать SSE без буферизации и использовать `encode zstd gzip`.
+- После первого запуска проверить паспорт экземпляра, недельный календарь и `/api/events`.
+- Google Sheets сначала оставить выключенным (`GOOGLE_SHEETS_ENABLED=0`), затем включить и выполнить `/scoresync`.
+
+
+## Главное: как обновить уже работающего Оборудыша на VPS
+
+Ниже — порядок для текущей схемы: один каталог `/opt/oborudka`, один сервис `oborudka.service`, одна база `bot/oborudka.db` и один боевой бот.
+
+### Что подготовить на компьютере
+
+Для этого обновления на сервер нужно перенести:
+
+- `bot/main.py`;
+- `bot/requirements.txt`;
+- `prototype/index.html`;
+- `prototype/style.css`;
+- всю папку `prototype/fonts/`;
+- `prototype/catalog.js`, если серверная копия отличается от локальной.
+
+Настоящий `bot/.env` и локальную `bot/oborudka.db` на сервер не копировать. На VPS остаются его собственные `.env` и база.
+
+### 1. Подключиться к VPS и остановить бота
+
+```bash
+ssh ИМЯ_ПОЛЬЗОВАТЕЛЯ@IP_СЕРВЕРА
+sudo systemctl stop oborudka
+```
+
+Проверьте, что сервис действительно остановлен:
+
+```bash
+sudo systemctl status oborudka
+```
+
+Нормальное состояние перед обновлением — `inactive (dead)`.
+
+### 2. Обязательно сохранить текущую версию и базу
+
+```bash
+cd /opt/oborudka
+stamp=$(date +%Y%m%d-%H%M%S)
+sudo mkdir -p /opt/oborudka-backups/$stamp
+sudo cp bot/oborudka.db /opt/oborudka-backups/$stamp/oborudka.db
+sudo cp bot/main.py bot/requirements.txt /opt/oborudka-backups/$stamp/
+sudo cp -a prototype /opt/oborudka-backups/$stamp/prototype
+echo "Резервная копия: /opt/oborudka-backups/$stamp"
+```
+
+Не удаляйте `bot/oborudka.db`: в ней находятся пользователи, заявки, переписки и очередь начислений.
+
+### 3. Перенести новые файлы
+
+Если проект на VPS подключён к Git и изменения уже опубликованы:
+
+```bash
+cd /opt/oborudka
+git pull
+```
+
+Если файлы загружаются вручную через WinSCP/SFTP, замените их по тем же путям внутри `/opt/oborudka`. Папку `prototype/fonts/` переносите целиком.
+
+После копирования проверьте наличие основных файлов:
+
+```bash
+cd /opt/oborudka
+ls -l bot/main.py bot/requirements.txt prototype/index.html prototype/style.css
+ls -l prototype/fonts/
+```
+
+### 4. Обновить отдельное Python-окружение Оборудыша
+
+Команда ниже обновляет только окружение Оборудыша. Python и библиотеки остальных ботов она не меняет.
+
+```bash
+cd /opt/oborudka
+bot/venv/bin/python -m pip install --upgrade pip
+bot/venv/bin/pip install -r bot/requirements.txt
+bot/venv/bin/python --version
+```
+
+Нужен Python 3.10 или новее. Если `bot/venv` ещё не существует, сначала создайте его отдельным Python 3.10+:
+
+```bash
+cd /opt/oborudka
+python3.10 -m venv bot/venv
+bot/venv/bin/pip install -r bot/requirements.txt
+```
+
+Системный `/usr/bin/python3` не заменять.
+
+### 5. Дописать новые настройки в серверный `.env`
+
+Откройте существующий файл:
+
+```bash
+sudo nano /opt/oborudka/bot/.env
+```
+
+Добавьте отсутствующие строки:
+
+```dotenv
+ENABLE_PRODUCTION_ROLE=0
+
+GOOGLE_SHEETS_ENABLED=0
+GOOGLE_SHEET_ID=
+GOOGLE_SERVICE_ACCOUNT_JSON_B64=
+GOOGLE_SHEET_EVENTS_TAB=Начисления
+GOOGLE_SHEET_SUMMARY_TAB=Админы
+
+SCORE_DAILY_ADMIN=0.1
+SCORE_REQUEST=0.01
+SCORE_626=0.05
+```
+
+Сначала оставьте `GOOGLE_SHEETS_ENABLED=0`. Бот запустится штатно, а начисления будут сохраняться в локальной очереди. После настройки таблицы заполните Google-реквизиты, поставьте `GOOGLE_SHEETS_ENABLED=1` и перезапустите сервис.
+
+`DEV_USER_ID` на VPS не задавать. `ENABLE_PRODUCTION_ROLE=0` оставляет production скрытым; для будущего возврата роли поставьте `1` и перезапустите бота.
+
+### 6. Запустить обновлённого бота
+
+```bash
+sudo systemctl start oborudka
+sudo systemctl status oborudka
+```
+
+Если статус `active (running)`, посмотрите последние логи:
+
+```bash
+sudo journalctl -u oborudka -n 100 --no-pager
+```
+
+В логах не должно быть traceback, ошибок импорта или сообщений о неверном `.env`.
+
+### 7. Что проверить после обновления
+
+1. Открывается Mini App и не висит на загрузке.
+2. В регистрации нет роли production.
+3. Пользователь видит каталог и может создать заявку.
+4. Администратор может взять, согласовать, выдать и принять заявку.
+5. Работает бронь и закрытие 626.
+6. Старшему отвечает `/scorestatus`.
+7. После включения Google команда `/scoresync` отправляет накопленные начисления.
+8. `/digest` отправляет оформленную статистику в канал.
+
+### Если бот не запустился: быстрый откат
+
+Посмотрите имя последней резервной папки:
+
+```bash
+ls -lt /opt/oborudka-backups
+```
+
+Затем подставьте её имя вместо `ИМЯ_КОПИИ`:
+
+```bash
+sudo systemctl stop oborudka
+cd /opt/oborudka
+sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/oborudka.db bot/oborudka.db
+sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/main.py bot/main.py
+sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/requirements.txt bot/requirements.txt
+sudo mv prototype "prototype.failed-$(date +%Y%m%d-%H%M%S)"
+sudo cp -a /opt/oborudka-backups/ИМЯ_КОПИИ/prototype ./prototype
+bot/venv/bin/pip install -r bot/requirements.txt
+sudo systemctl start oborudka
+sudo systemctl status oborudka
+```
+
+После изменения `main.py`, `.env` или зависимостей сервис нужно перезапускать. Если менялись только `prototype/index.html`, `style.css`, `catalog.js`, картинки или шрифты, перезапуск обычно не нужен.
+
 ## Как Mini App подключается к Telegram (коротко)
 
 Mini App — обычный сайт по **HTTPS**, который Telegram открывает внутри чата. Подключение состоит из трёх вещей:
@@ -88,7 +262,7 @@ cd "D:\Media BMSTU\Оборудыш\bot"
 - [ ] сообщения в переписке заявки доходят второй стороне уведомлением
 - [ ] после добавления `prototype/catalog.js` и `prototype/img/` — реальный каталог и фото (файлы просто положить в папку, перезапуск не нужен)
 
-**Обновление уже задеплоенной версии:** заменить `prototype/index.html`, `prototype/style.css`, `prototype/catalog.js` и `bot/main.py`; при изменении `main.py` перезапустить сервис. Новые переменные сверять с `bot/.env.example`. Новых зависимостей нет. База создаётся сама (`bot/oborudka.db`); удалить её = сбросить всех пользователей и заявки.
+**Обновление уже задеплоенной версии:** заменить `prototype/index.html`, `prototype/style.css`, `prototype/catalog.js` и `bot/main.py`; при изменении `main.py` перезапустить сервис. Новые переменные сверять с `bot/.env.example`. Зависимости необходимо обновить командой `bot/venv/bin/pip install -r bot/requirements.txt`. База создаётся сама (`bot/oborudka.db`); удалить её = сбросить всех пользователей и заявки.
 
 ---
 
@@ -219,3 +393,75 @@ sudo nginx -t && sudo nginx -s reload
 ```
 
 Дополнительно приложение само сжимает фото сильнее (до 1024px, качество 0.65), так что после правки Nginx проблема уходит.
+
+---
+
+## Final single-service release procedure
+
+Use one directory `/opt/oborudka`, one systemd unit `oborudka.service`, port `8737`, one bot token, one database and one Google Sheet.
+
+### Isolated Python 3.10+
+
+Do not upgrade or replace the server's system Python. Install a side-by-side interpreter and create a venv used only by Oborudka:
+
+```bash
+sudo apt update
+sudo apt install -y python3.10 python3.10-venv
+cd /opt/oborudka
+python3.10 -m venv bot/venv
+bot/venv/bin/python -m pip install --upgrade pip
+bot/venv/bin/pip install -r bot/requirements.txt
+```
+
+The service must keep `ExecStart=/opt/oborudka/bot/venv/bin/python main.py`. Other bots and `/usr/bin/python3` are untouched.
+
+### Google Sheets
+
+1. In Google Cloud enable Google Sheets API, create a service account and download its JSON key.
+2. Create the spreadsheet and share it with the service-account e-mail as Editor.
+3. Copy the spreadsheet ID from its URL.
+4. Encode the JSON as one Base64 line and put it only in `bot/.env`:
+
+```bash
+base64 -w 0 service-account.json
+```
+
+PowerShell equivalent:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("service-account.json"))
+```
+
+Fill `GOOGLE_SHEET_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON_B64`, leave the two tab names at their defaults, then set `GOOGLE_SHEETS_ENABLED=1`. Never commit the JSON or real `.env`.
+
+### Caddy compression
+
+```caddy
+oborudka.example.ru {
+    encode zstd gzip
+    reverse_proxy localhost:8737
+}
+```
+
+Validate and reload: `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+
+### Safe update and rollback
+
+Always stop and back up before replacing the backend:
+
+```bash
+sudo systemctl stop oborudka
+cd /opt/oborudka
+stamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p backup/releases/$stamp
+cp bot/oborudka.db backup/releases/$stamp/oborudka.db
+cp -a bot/main.py bot/requirements.txt prototype backup/releases/$stamp/
+# copy the new release files here
+bot/venv/bin/pip install -r bot/requirements.txt
+sudo systemctl start oborudka
+sudo systemctl status oborudka
+```
+
+Rollback: stop the service, restore `main.py`, `requirements.txt`, `prototype/` and `oborudka.db` from the selected release backup, reinstall requirements, then start the service.
+
+A `main.py`, dependency or `.env` change requires `sudo systemctl restart oborudka`. Static-only changes do not require a restart. After release check `/scorestatus`, then `/scoresync`, and verify the two sheet tabs.
