@@ -119,6 +119,7 @@ h1.big{font-size:var(--fs-xl);font-weight:700;letter-spacing:-.02em;margin-botto
 .btn-sm.danger{background:color-mix(in srgb,var(--destructive) 12%,transparent);color:var(--destructive)}
 .btn-sm.ok{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
 .btn-sm:disabled{opacity:.4;cursor:default}
+.member-lookup-btn{width:100%;margin-top:10px;padding:13px 16px;font-size:var(--fs-base)}
 /* формы */
 input[type=text],textarea{width:100%;background:var(--card);border:1px solid var(--sep);border-radius:var(--r-sm);padding:12px 13px;font-family:inherit;font-size:var(--fs-md);line-height:1.4;color:var(--text);outline:none}
 input:focus,textarea:focus{border-color:var(--link)}

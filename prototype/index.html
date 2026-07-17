@@ -440,7 +440,7 @@ function agreeRules(){
       navTo("regProfile");
       const messages={
         no_username:"В Telegram не задан username — заполните профиль вручную",
-        not_found:"Ваш Telegram-ник не найден — заполните профиль вручную",
+        not_found:"Не удалось найти вас в таблице пользователей. Заполните свои данные вручную",
         error:"Лист людей временно недоступен — заполните профиль вручную",
         disabled:"Лист людей не подключён — заполните профиль вручную"
       };
@@ -567,7 +567,7 @@ SCREENS.regProfile = (p) => {
    <div class="sec-label">ФИО (обязательно)</div>
    <input type="text" id="reg-name" maxlength="80" placeholder="Оборудов Запарыш Медийщикович" value="${escAttr(reg.name)}" oninput="regNameInput(this)">
    <p class="sub" style="padding:4px 4px 0">Полностью: фамилия, имя и отчество (три слова).</p>
-   ${!edit?`<button class="secondary" style="margin-top:10px;width:100%" onclick="lookupMember()" ${reg._lookupBusy?"disabled":""}>${reg._lookupBusy?"Ищем…":"Найти меня в списке «люди»"}</button>`:""}
+   ${!edit?`<button class="btn-sm primary member-lookup-btn" onclick="lookupMember()" ${reg._lookupBusy?"disabled":""}>${reg._lookupBusy?"Ищем…":"Найти меня в таблице пользователей"}</button>`:""}
    ${reg._member?`<div class="card" style="margin-top:10px"><b>✅ Данные найдены</b><p class="sub" style="margin-top:6px">${reg._member.orgs.join(", ")}${reg._member.deps.length?" · "+reg._member.deps.join(", "):""} · ${reg._member.role}</p></div>`:""}
    <div class="sec-label">Откуда вы</div>
    <div>

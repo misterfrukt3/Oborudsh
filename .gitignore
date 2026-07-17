@@ -23,4 +23,4 @@ directory.csv
 .idea/
 
 # Локальные ключи Google Service Account
-/oborudsh-*.json
+oborudsh-*.json
