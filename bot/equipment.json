@@ -2,302 +2,614 @@
   {
     "cat": "Камеры",
     "subcat_of": {
-      "a6700": "Sony",
-      "а7м4": "Sony",
-      "Маленькая Сонька": "Sony",
-      "R6": "Canon",
-      "R8": "Canon",
-      "Гаш 5": "Panasonic",
-      "Гаш 6": "Panasonic",
-      "BMPCC 4k": "Blackmagic",
-      "Фудж": "FuijiFilm",
-      "ГоПро 12": "GoPro"
+      "A6700 (Sony E)": "Sony",
+      "A7 MK IV (Sony E)": "Sony",
+      "ZV-E10 (Sony E)": "Sony",
+      "R6 (RF)": "Canon",
+      "R8 (RF)": "Canon",
+      "GH5 (MFT)": "Panasonic",
+      "GH6 (MFT)": "Panasonic",
+      "BMPCC 4k (MFT)": "Blackmagic",
+      "X-T4 (X-mount)": "FuijiFilm",
+      "GoPro 12": "GoPro"
     },
     "items": [
       {
-        "short": "a6700",
+        "short": "A6700 (Sony E)",
         "full": "Беззеркальная камера Sony A6700 body",
         "total": 1,
-        "level": "none"
+        "level": "none",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "none"
+          }
+        ]
       },
       {
-        "short": "а7м4",
+        "short": "A7 MK IV (Sony E)",
         "full": "Фотоаппарат Sony Alpha ILCE-7M4 Body",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "акт"
+          }
+        ]
       },
       {
-        "short": "Маленькая Сонька",
+        "short": "ZV-E10 (Sony E)",
         "full": "Камера Sony ZV-E10",
         "total": 2,
         "level": null,
+        "numbers": [
+          3,
+          4
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 3,
             "level": null
           },
           {
-            "n": 2,
+            "n": 4,
             "level": null
           }
         ]
       },
       {
-        "short": "R6",
+        "short": "R6 (RF)",
         "full": "Фотоаппарат Canon EOS R6 body",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
       },
       {
-        "short": "R8",
+        "short": "R8 (RF)",
         "full": "Фотоаппарат Canon EOS R8 body",
         "total": 2,
         "level": null,
+        "numbers": [
+          2,
+          3
+        ],
         "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Гаш 5",
-        "full": "Камера Panasonic Lumix GH5",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Гаш 6",
-        "full": "Беззеркальный фотоаппарат Panasonic Lumix GH6 body",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "BMPCC 4k",
-        "full": "Blackmagic Design Pocket Cinema Camera 4K",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Фудж",
-        "full": "Цифровой фотоаппарат FujiFilm X-T4",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "ГоПро 12",
-        "full": "GoPro HERO 12 Black",
-        "total": 1,
-        "level": "акт"
-      }
-    ]
-  },
-  {
-    "cat": "Объективы",
-    "subcat_of": {
-      "Объектив 16-50 на Sony E": "Sony E",
-      "Объектив 16 на Sony E": "Sony E",
-      "Tamron 24mm Sony E": "Sony E",
-      "50mm Sony E": "Sony E",
-      "18-135 Sony E": "Sony E",
-      "Tamron 17-70 Sony E": "Sony E",
-      "Meike 16мм EF": "Canon EF",
-      "Объектив 24-105 на EF": "Canon EF",
-      "Объектив 70-200 на EF": "Canon EF",
-      "Tamron 24-70 EF": "Canon EF",
-      "Canon 50mm EF": "Canon EF",
-      "Tamron 70-200 EF": "Canon EF",
-      "Canon 24-105 RF": "Canon RF",
-      "Объектив 42.5 на MFT": "Micro 4/3 (MFT)",
-      "Объектив 12-40 на MFT": "Micro 4/3 (MFT)",
-      "12-35 MFT": "Micro 4/3 (MFT)",
-      "25-50 MFT": "Micro 4/3 (MFT)",
-      "Объектив 18-55 на Fuji": "FuijiFilm",
-      "Объектив 50 на Nikon": "Nikon",
-      "Спидбустер": "Спидбустеры/переходники",
-      "Адаптер Canon EF - EOS R": "Спидбустеры/переходники",
-      "JJC RF-EF адаптер": "Спидбустеры/переходники",
-      "K&F 67мм ND CPL": "Фильтры",
-      "HOYA 77mm CPL": "Фильтры",
-      "HOYA 72 mm CPL": "Фильтры",
-      "67mm CPL": "Фильтры",
-      "HOYA 62mm CPL": "Фильтры",
-      "nd 62": "Фильтры",
-      "nd 67": "Фильтры",
-      "nd 72": "Фильтры",
-      "nd 77": "Фильтры",
-      "Звездный фильтр": "Фильтры",
-      "Золо фильтр": "Фильтры",
-      "Аура фильтр": "Фильтры",
-      "Дюн фильтр": "Фильтры"
-    },
-    "items": [
-      {
-        "short": "Объектив 16-50 на Sony E",
-        "full": "Объектив Sony 16-50mm f3,5-5,6",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Объектив 16 на Sony E",
-        "full": "Объектив Sigma 16mm f1.4",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Tamron 24mm Sony E",
-        "full": "Объектив Tamron 24mm F/2.8 Di III OSD",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "50mm Sony E",
-        "full": "Объектив Sony Full Frame SEL-50F18F E-Mount FE 50mm F1.8",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "18-135 Sony E",
-        "full": "Sony E 18-135mm F3.5-5.6 OSS",
-        "total": 1,
-        "level": "none"
-      },
-      {
-        "short": "Tamron 17-70 Sony E",
-        "full": "Объектив Tamron 17-70mm f/2.8 Di III-A VC RXD Sony Е, чёрный",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Meike 16мм EF",
-        "full": "Meike Series 4 * (комплект объектива 16 мм) Комплект кинообъектива для полного кадра, например Canon C700 C500II, Sony VENICE, Sony FX3 FX6, FX9, Z Cam E2-F6, Alexa LF, Mavo LF, Mavo Edge 8K",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Объектив 24-105 на EF",
-        "full": "Объектив Sigma 24-105mm f/4 DG OS HSM Art Canon EF, Черный",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Объектив 70-200 на EF",
-        "full": "Объектив Canon EF 70-200mm f/4L",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Tamron 24-70 EF",
-        "full": "Tamron AF SP 24-70mm F/2.8 DI VC USD G2 Canon EF",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Canon 50mm EF",
-        "full": "Объектив Canon EF 50mm F1.8 STM",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Tamron 70-200 EF",
-        "full": "Объектив Tamron SP AF 70-200mm f/2.8 Di VC USD G2 (A025) Canon EF",
-        "total": 2,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Canon 24-105 RF",
-        "full": "Объектив Canon RF 24-105 f4-7.1 IS STM",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Объектив 42.5 на MFT",
-        "full": "Объектив Lumix 42,5mm f1,7",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Объектив 12-40 на MFT",
-        "full": "Объектив Olympus 12-40mm F2.8",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "12-35 MFT",
-        "full": "Объектив Panasonic 12-35mm f/2.8 II ASPH. O.I.S. Lumix G X Vario",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "25-50 MFT",
-        "full": "Объектив Panasonic Leica DG Vario-Summilux 25-50mm f/1.7 ASPH (H-X2550E)",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Объектив 18-55 на Fuji",
-        "full": "Объектив Fujinon XF 18-55mm F2.8-4 R LM OIS",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Объектив 50 на Nikon",
-        "full": "Объектив Nikon AF Nikkor 50mm f/1.8D",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Спидбустер",
-        "full": "Адаптер Viltrox m4/3-EF",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Адаптер Canon EF - EOS R",
-        "full": "Адаптер Canon Mount Adapter EF-EOS R",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "JJC RF-EF адаптер",
-        "full": "Автофокусный адаптер Canon EF/EF-S на камеры Canon RF с CPL и ND3-500 Drop-In фильтрами",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
           {
             "n": 2,
             "level": null
           },
           {
             "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "GH5 (MFT)",
+        "full": "Камера Panasonic Lumix GH5",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "GH6 (MFT)",
+        "full": "Беззеркальный фотоаппарат Panasonic Lumix GH6 body",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "BMPCC 4k (MFT)",
+        "full": "Blackmagic Design Pocket Cinema Camera 4K",
+        "total": 1,
+        "level": "глава",
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "X-T4 (X-mount)",
+        "full": "Цифровой фотоаппарат FujiFilm X-T4",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "GoPro 12",
+        "full": "GoPro HERO 12 Black",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Объективы",
+    "subcat_of": {
+      "Sony 16-50мм (Sony E)": "Sony E",
+      "Sigma 16мм (Sony E)": "Sony E",
+      "Tamron 24мм (Sony E)": "Sony E",
+      "Sony 50мм (Sony E)": "Sony E",
+      "Sony 18-135мм (Sony E)": "Sony E",
+      "Tamron 17-70мм (Sony E)": "Sony E",
+      "Meike 16мм (EF)": "Canon EF",
+      "Объектив 24-105мм (EF)": "Canon EF",
+      "Объектив 70-200мм (EF)": "Canon EF",
+      "Tamron 24-70мм (EF)": "Canon EF",
+      "Canon 50мм (EF)": "Canon EF",
+      "Tamron 70-200мм(EF)": "Canon EF",
+      "Canon 24-105мм (RF)": "Canon RF",
+      "Leica 25мм (MFT)": "Micro 4/3 (MFT)",
+      "Lumix 15мм (MFT)": "Micro 4/3 (MFT)",
+      "Lumix 42.5мм (MFT)": "Micro 4/3 (MFT)",
+      "Olympus 12-40мм (MFT)": "Micro 4/3 (MFT)",
+      "Lumix 12-35мм (MFT)": "Micro 4/3 (MFT)",
+      "Leica 25-50мм (MFT)": "Micro 4/3 (MFT)",
+      "Комплект Анаморфотов 24/35/50/75мм  (MFT)": "Micro 4/3 (MFT)",
+      "Fujinon 18-55мм (X-mount)": "FuijiFilm (X-mount)",
+      "Nikon 50мм (Nikon F)": "Nikon F",
+      "Переходник (MFT -> EF)": "Спидбустеры/переходники",
+      "Переходник Canon (RF -> EF)": "Спидбустеры/переходники",
+      "Переходник Canon (RF -> EF/EF-S)": "Спидбустеры/переходники",
+      "K&F 67мм ND CPL": "Фильтры",
+      "HOYA 77mm CPL": "Фильтры",
+      "HOYA 72 mm CPL": "Фильтры",
+      "67mm CPL": "Фильтры",
+      "HOYA 62mm CPL": "Фильтры",
+      "ND 62мм": "Фильтры",
+      "ND 67мм": "Фильтры",
+      "ND 72мм": "Фильтры",
+      "ND 77мм": "Фильтры",
+      "Звездный фильтр 82мм": "Фильтры",
+      "Световые линии фильтр 82мм": "Фильтры",
+      "Блики от источников фильтр 82мм": "Фильтры",
+      "Круговой фильтр 82мм": "Фильтры"
+    },
+    "items": [
+      {
+        "short": "Sony 16-50мм (Sony E)",
+        "full": "Объектив Sony 16-50mm f3,5-5,6",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Sigma 16мм (Sony E)",
+        "full": "Объектив Sigma 16mm f1.4",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Tamron 24мм (Sony E)",
+        "full": "Объектив Tamron 24mm F/2.8 Di III OSD",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Sony 50мм (Sony E)",
+        "full": "Объектив Sony Full Frame SEL-50F18F E-Mount FE 50mm F1.8",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Sony 18-135мм (Sony E)",
+        "full": "Sony E 18-135mm F3.5-5.6 OSS",
+        "total": 1,
+        "level": "none",
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": "none"
+          }
+        ]
+      },
+      {
+        "short": "Tamron 17-70мм (Sony E)",
+        "full": "Объектив Tamron 17-70mm f/2.8 Di III-A VC RXD Sony Е, чёрный",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          6
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Meike 16мм (EF)",
+        "full": "Meike Series 4 * (комплект объектива 16 мм) Комплект кинообъектива для полного кадра, например Canon C700 C500II, Sony VENICE, Sony FX3 FX6, FX9, Z Cam E2-F6, Alexa LF, Mavo LF, Mavo Edge 8K",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Объектив 24-105мм (EF)",
+        "full": "Объектив Sigma 24-105mm f/4 DG OS HSM Art Canon EF, Черный",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Объектив 70-200мм (EF)",
+        "full": "Объектив Canon EF 70-200mm f/4L",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Tamron 24-70мм (EF)",
+        "full": "Tamron AF SP 24-70mm F/2.8 DI VC USD G2 Canon EF",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Canon 50мм (EF)",
+        "full": "Объектив Canon EF 50mm F1.8 STM",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Tamron 70-200мм(EF)",
+        "full": "Объектив Tamron SP AF 70-200mm f/2.8 Di VC USD G2 (A025) Canon EF",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          6,
+          7
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          },
+          {
+            "n": 7,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Canon 24-105мм (RF)",
+        "full": "Объектив Canon RF 24-105 f4-7.1 IS STM",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Leica 25мм (MFT)",
+        "full": "Оъектив Leica 25mm f1.4 Micro 4/3",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Lumix 15мм (MFT)",
+        "full": "Panasonic Lumix 15mm f1.7",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Lumix 42.5мм (MFT)",
+        "full": "Объектив Lumix 42,5mm f1,7",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Olympus 12-40мм (MFT)",
+        "full": "Объектив Olympus 12-40mm F2.8",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Lumix 12-35мм (MFT)",
+        "full": "Объектив Panasonic 12-35mm f/2.8 II ASPH. O.I.S. Lumix G X Vario",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Leica 25-50мм (MFT)",
+        "full": "Объектив Panasonic Leica DG Vario-Summilux 25-50mm f/1.7 ASPH (H-X2550E)",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          6
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Комплект Анаморфотов 24/35/50/75мм  (MFT)",
+        "full": "Комплект объективов Sirui Mars (Anamorphic 24/35/50/75mm) Micro 4/3",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          7
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Fujinon 18-55мм (X-mount)",
+        "full": "Объектив Fujinon XF 18-55mm F2.8-4 R LM OIS",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Nikon 50мм (Nikon F)",
+        "full": "Объектив Nikon AF Nikkor 50mm f/1.8D",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Переходник (MFT -> EF)",
+        "full": "Адаптер Viltrox m4/3-EF",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Переходник Canon (RF -> EF)",
+        "full": "Адаптер Canon Mount Adapter EF-EOS R",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Переходник Canon (RF -> EF/EF-S)",
+        "full": "Автофокусный адаптер Canon EF/EF-S на камеры Canon RF с CPL и ND3-500 Drop-In фильтрами",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          2,
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
             "level": null
           }
         ]
@@ -306,491 +618,29 @@
         "short": "K&F 67мм ND CPL",
         "full": "K&F 67мм ND CPL",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
       },
       {
         "short": "HOYA 77mm CPL",
         "full": "HOYA 77mm CPL",
         "total": 4,
         "level": null,
+        "numbers": [
+          2,
+          3,
+          4,
+          5
+        ],
         "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "HOYA 72 mm CPL",
-        "full": "HOYA 72 mm CPL",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "67mm CPL",
-        "full": "67mm CPL",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "HOYA 62mm CPL",
-        "full": "HOYA 62mm CPL",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "nd 62",
-        "full": "nd 62",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "nd 67",
-        "full": "nd 67",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "nd 72",
-        "full": "nd 72",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "nd 77",
-        "full": "nd 77",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Звездный фильтр",
-        "full": "K&F CONCEPT Звездный фильтр 82mm",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Золо фильтр",
-        "full": "Светофильтр ZOLO FILTER 82 мм",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Аура фильтр",
-        "full": "Светофильтр AURORA FILTER 82 мм",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Дюн фильтр",
-        "full": "Светофильтр DUNE FILTER 82 мм",
-        "total": 1,
-        "level": "акт"
-      }
-    ]
-  },
-  {
-    "cat": "Звук",
-    "subcat_of": {
-      "Пушка RODE": "Пушки",
-      "Микрофон на Зум": "Пушки",
-      "Радиопетли RODE": "Петлички/Радиосистемы",
-      "Ларки": "Петлички/Радиосистемы",
-      "Ларки макс": "Петлички/Радиосистемы",
-      "Петля RODE белая": "Петлички/Радиосистемы",
-      "Петля RODE чёрная": "Петлички/Радиосистемы",
-      "Радионоунейм": "Петлички/Радиосистемы",
-      "Зум": "Рекордер"
-    },
-    "items": [
-      {
-        "short": "Пушка RODE",
-        "full": "Пушка RODE VideoMic Rycote",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Микрофон на Зум",
-        "full": "Stereo Shotgun mic capsule SSH-6",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Радиопетли RODE",
-        "full": "Радиосистема RODE Wireless GO II",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Ларки",
-        "full": "Беспроводной петличный микрофон Hollyland Lark M1 DUO",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Ларки макс",
-        "full": "Беспроводной петличный микрофон Hollyland Lark Max Duo",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Петля RODE белая",
-        "full": "Профессиональный петличный микрофон RODE Lavalier GO белый",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Петля RODE чёрная",
-        "full": "Профессиональный петличный микрофон RODE smartLav+ чёрный",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Радионоунейм",
-        "full": "Wireless Microphone NDR-AUDIO SMART 2",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Зум",
-        "full": "Рекордер Zoom H5",
-        "total": 1,
-        "level": null
-      }
-    ]
-  },
-  {
-    "cat": "Свет",
-    "subcat_of": {
-      "Светопалка Янгноу": "Светопалки",
-      "Светопалка Янгноу мал": "Светопалки",
-      "Палки Амаран комплект 2шт": "Светопалки",
-      "Амаран 100": "Постоянники/Студийники",
-      "Плашки 600ватт": "Постоянники/Студийники",
-      "Амаран 300": "Постоянники/Студийники",
-      "Гибкий свет": "Постоянники/Студийники",
-      "Вспышка студийная godox ms200": "Постоянники/Студийники",
-      "Студийная вспышка": "Постоянники/Студийники",
-      "Аппатюрка": "Плашки",
-      "Комплект маленьких плашек": "Плашки",
-      "Светоплашка": "Плашки",
-      "Плашки средние": "Плашки",
-      "Вспышка накамерная": "Накамерные пыхи/Синхра",
-      "Синхронизатор пыхи": "Накамерные пыхи/Синхра",
-      "Софт 120": "Софты/Окты",
-      "Софт 90 расскладной": "Софты/Окты",
-      "Софт для Амарана": "Софты/Окты",
-      "Окта": "Софты/Окты",
-      "Октобокс для вспышки": "Софты/Окты",
-      "Октобокс для вспышек": "Софты/Окты",
-      "Линза френеля": "Насадки/Аксессуары",
-      "Отражатель": "Насадки/Аксессуары",
-      "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой": "Насадки/Аксессуары"
-    },
-    "items": [
-      {
-        "short": "Светопалка Янгноу",
-        "full": "Осветитель YongNuo YN100SOFT",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Светопалка Янгноу мал",
-        "full": "Осветитель YongNuo YN30SOFT",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Палки Амаран комплект 2шт",
-        "full": "Комплект осветителей Aputure Amaran PT4c Production Kit (2шт)",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Амаран 100",
-        "full": "Свет Aputure Amaran AL-100x",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Плашки 600ватт",
-        "full": "Осветитель Aputure Nova P600C Kit + софтбокс",
-        "total": 3,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          },
-          {
-            "n": 3,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Амаран 300",
-        "full": "Осветитель Aputure Amaran 300c",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Гибкий свет",
-        "full": "Amaran F22c",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Вспышка студийная godox ms200",
-        "full": "Вспышка студийная Godox MS200V",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Студийная вспышка",
-        "full": "Вспышка студийная Godox DP1000IIIV Bowens (студийный моноблок)",
-        "total": 2,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Аппатюрка",
-        "full": "Amaran Apature H528W",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Комплект маленьких плашек",
-        "full": "Комплект осветителей Aputure MC Pro (8-Light Kit)",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Светоплашка",
-        "full": "Осветитель YongNuo YN120 RGB",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Плашки средние",
-        "full": "Комплект осветителей Aputure Amaran P60C RGBWW (3шт)",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Вспышка накамерная",
-        "full": "Фотовспышка Godox V1C для Canon",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Синхронизатор пыхи",
-        "full": "Пульт-радиосинхронизатор Godox XproII C для Canon vb_30273 Godox",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Софт 120",
-        "full": "Софтбокс Godox QR-P120 параболический быстроскладной",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Софт 120",
-        "full": "OneCine 0120 120 см для Bowens",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Софт 90 расскладной",
-        "full": "Софтбокс NiceFoto Professional LED-Ø90cm с сотами",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Софт для Амарана",
-        "full": "Насадка на вспышку Fotokvant SB-6070BW 60 СМ",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Окта",
-        "full": "Октобокс Raylab SPG95 с сотами",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Октобокс для вспышки",
-        "full": "Октобокс FST SB-010 для накамерных вспышек 28cm",
-        "total": 6,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
           {
             "n": 2,
             "level": null
@@ -806,7 +656,18 @@
           {
             "n": 5,
             "level": null
-          },
+          }
+        ]
+      },
+      {
+        "short": "HOYA 72 mm CPL",
+        "full": "HOYA 72 mm CPL",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          6
+        ],
+        "units": [
           {
             "n": 6,
             "level": null
@@ -814,44 +675,185 @@
         ]
       },
       {
-        "short": "Октобокс для вспышек",
-        "full": "Складной октобокс Triopo 65 см для вспышек speedlite, V1, AD200",
-        "total": 2,
+        "short": "67mm CPL",
+        "full": "67mm CPL",
+        "total": 1,
         "level": null,
+        "numbers": [
+          7
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 7,
             "level": null
           }
         ]
       },
       {
-        "short": "Линза френеля",
-        "full": "Линза Френеля Aputure Fresnel 2X",
+        "short": "HOYA 62mm CPL",
+        "full": "HOYA 62mm CPL",
         "total": 2,
         "level": null,
+        "numbers": [
+          8,
+          9
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 8,
             "level": null
           },
           {
-            "n": 2,
+            "n": 9,
             "level": null
           }
         ]
       },
       {
-        "short": "Отражатель",
-        "full": "Отражатель FST RD051 150x200 см",
+        "short": "ND 62мм",
+        "full": "nd 62",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          10
+        ],
+        "units": [
+          {
+            "n": 10,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой",
-        "full": "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой",
+        "short": "ND 67мм",
+        "full": "nd 67",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          11
+        ],
+        "units": [
+          {
+            "n": 11,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "ND 72мм",
+        "full": "nd 72",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          12
+        ],
+        "units": [
+          {
+            "n": 12,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "ND 77мм",
+        "full": "nd 77",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          13
+        ],
+        "units": [
+          {
+            "n": 13,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Звездный фильтр 82мм",
+        "full": "K&F CONCEPT Звездный фильтр 82mm",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          14
+        ],
+        "units": [
+          {
+            "n": 14,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Световые линии фильтр 82мм",
+        "full": "Светофильтр ZOLO FILTER 82 мм",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          15
+        ],
+        "units": [
+          {
+            "n": 15,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Блики от источников фильтр 82мм",
+        "full": "Светофильтр AURORA FILTER 82 мм",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          16
+        ],
+        "units": [
+          {
+            "n": 16,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Круговой фильтр 82мм",
+        "full": "Светофильтр DUNE FILTER 82 мм",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          17
+        ],
+        "units": [
+          {
+            "n": 17,
+            "level": "акт"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Звук",
+    "subcat_of": {
+      "Пушка RODE": "Пушки",
+      "Микрофон Shotgun SSH-6": "Пушки",
+      "Петли RODE (квадратные)": "Петлички/Радиосистемы",
+      "Петли Hollyland Lark M1 DUO": "Петлички/Радиосистемы",
+      "Петли Hollyland Lark Max Duo": "Петлички/Радиосистемы",
+      "Петля RODE (с проводом)": "Петлички/Радиосистемы",
+      "Петли NDR-AUDIO SMART 2": "Петлички/Радиосистемы",
+      "ZOOM H5": "Рекордер"
+    },
+    "items": [
+      {
+        "short": "Пушка RODE",
+        "full": "Пушка RODE VideoMic Rycote",
         "total": 3,
         "level": null,
+        "numbers": [
+          1,
+          2,
+          3
+        ],
         "units": [
           {
             "n": 1,
@@ -866,32 +868,468 @@
             "level": null
           }
         ]
+      },
+      {
+        "short": "Микрофон Shotgun SSH-6",
+        "full": "Stereo Shotgun mic capsule SSH-6",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Петли RODE (квадратные)",
+        "full": "Радиосистема RODE Wireless GO II",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Петли Hollyland Lark M1 DUO",
+        "full": "Беспроводной петличный микрофон Hollyland Lark M1 DUO",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Петли Hollyland Lark Max Duo",
+        "full": "Беспроводной петличный микрофон Hollyland Lark Max Duo",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Петля RODE (с проводом)",
+        "full": "Профессиональный петличный микрофон RODE Lavalier GO белый",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          4,
+          5,
+          6,
+          7
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Петли NDR-AUDIO SMART 2",
+        "full": "Wireless Microphone NDR-AUDIO SMART 2",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          8
+        ],
+        "units": [
+          {
+            "n": 8,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "ZOOM H5",
+        "full": "Рекордер Zoom H5",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
       }
     ]
   },
   {
-    "cat": "Стабилизаторы",
+    "cat": "Свет",
     "subcat_of": {
-      "Стаб Ronin RS 3": "DJI",
-      "Ronin RS 3 Pro Combo": "DJI",
-      "Стаб Осмо 6": "DJI",
-      "dji osmo pocket": "DJI",
-      "Moza": "Moza",
-      "Стаб Zhiyun": "Zhiyun",
-      "Стаб Capture 5": "FunSnap"
+      "Светопалка YongNuo (длинная)": "Светопалки",
+      "Светопалка YongNuo (короткая)": "Светопалки",
+      "Палки Amaran комплект 2шт (длинные)": "Светопалки",
+      "Постоянник Amaran 100Вт": "Постоянники/Студийники",
+      "Постоянник Aputure 600Вт (квадраты)": "Постоянники/Студийники",
+      "Постоянник Amaran 300Вт": "Постоянники/Студийники",
+      "Гибкий свет": "Постоянники/Студийники",
+      "Вспышка Godox MS200V": "Постоянники/Студийники",
+      "Вспышка Godox DP1000": "Постоянники/Студийники",
+      "Плашка Amaran  H528W": "Плашки",
+      "Плашка MC Pro": "Плашки",
+      "Плашка YongNuo": "Плашки",
+      "Плашки Amaran P60C": "Плашки",
+      "Вспышка накамерная Godox": "Накамерные пыхи/Синхра",
+      "Синхронизатор вспышки Godox": "Накамерные пыхи/Синхра",
+      "Софт 120см Godox (круг)": "Софты/Окты",
+      "Софт 120см OneCine (круг)": "Софты/Окты",
+      "Софт 90см NiceFoto (круг)": "Софты/Окты",
+      "Софт 60х70см (квадрат)": "Софты/Окты",
+      "Октобокс 95см Raylab  (многоугольник)": "Софты/Окты",
+      "Октобокс накамерный 28см (многоугольник)": "Софты/Окты",
+      "Октобокс накамерный 65см (многоугольник)": "Софты/Окты",
+      "Линза френеля": "Насадки/Аксессуары",
+      "Отражатель 150х200см": "Насадки/Аксессуары",
+      "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой": "Насадки/Аксессуары"
     },
     "items": [
       {
-        "short": "Стаб Ronin RS 3",
-        "full": "Стабилизатор DJI Ronin RS3 Combo",
-        "total": 1,
-        "level": null
+        "short": "Светопалка YongNuo (длинная)",
+        "full": "Осветитель YongNuo YN100SOFT",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "Ronin RS 3 Pro Combo",
-        "full": "Стабилизатор DJI Ronin RS 3 Pro Combo",
+        "short": "Светопалка YongNuo (короткая)",
+        "full": "Осветитель YongNuo YN30SOFT",
+        "total": 4,
+        "level": null,
+        "numbers": [
+          4,
+          5,
+          6,
+          7
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Палки Amaran комплект 2шт (длинные)",
+        "full": "Комплект осветителей Aputure Amaran PT4c Production Kit (2шт)",
+        "total": 4,
+        "level": null,
+        "numbers": [
+          8,
+          9,
+          10,
+          11
+        ],
+        "units": [
+          {
+            "n": 8,
+            "level": null
+          },
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Постоянник Amaran 100Вт",
+        "full": "Свет Aputure Amaran AL-100x",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Постоянник Aputure 600Вт (квадраты)",
+        "full": "Осветитель Aputure Nova P600C Kit + софтбокс",
+        "total": 3,
+        "level": "акт",
+        "numbers": [
+          2,
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
+            "level": "акт"
+          },
+          {
+            "n": 4,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Постоянник Amaran 300Вт",
+        "full": "Осветитель Aputure Amaran 300c",
         "total": 2,
         "level": null,
+        "numbers": [
+          5,
+          6
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Гибкий свет",
+        "full": "Amaran F22c",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          7
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Вспышка Godox MS200V",
+        "full": "Вспышка студийная Godox MS200V",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          8
+        ],
+        "units": [
+          {
+            "n": 8,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Вспышка Godox DP1000",
+        "full": "Вспышка студийная Godox DP1000IIIV Bowens (студийный моноблок)",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          9,
+          10
+        ],
+        "units": [
+          {
+            "n": 9,
+            "level": "акт"
+          },
+          {
+            "n": 10,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Плашка Amaran  H528W",
+        "full": "Amaran Apature H528W",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Плашка MC Pro",
+        "full": "Комплект осветителей Aputure MC Pro (8-Light Kit)",
+        "total": 8,
+        "level": null,
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Плашка YongNuo",
+        "full": "Осветитель YongNuo YN120 RGB",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Плашки Amaran P60C",
+        "full": "Комплект осветителей Aputure Amaran P60C RGBWW (3шт)",
+        "total": 3,
+        "level": "акт",
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Вспышка накамерная Godox",
+        "full": "Фотовспышка Godox V1C для Canon",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Синхронизатор вспышки Godox",
+        "full": "Пульт-радиосинхронизатор Godox XproII C для Canon vb_30273 Godox",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Софт 120см Godox (круг)",
+        "full": "Софтбокс Godox QR-P120 параболический быстроскладной",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          1,
+          2
+        ],
         "units": [
           {
             "n": 1,
@@ -904,34 +1342,303 @@
         ]
       },
       {
-        "short": "Стаб Осмо 6",
-        "full": "DJI Osmo Mobile 6",
+        "short": "Софт 120см OneCine (круг)",
+        "full": "OneCine 0120 120 см для Bowens",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "dji osmo pocket",
+        "short": "Софт 90см NiceFoto (круг)",
+        "full": "Софтбокс NiceFoto Professional LED-Ø90cm с сотами",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Софт 60х70см (квадрат)",
+        "full": "Насадка на вспышку Fotokvant SB-6070BW 60 СМ",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Октобокс 95см Raylab  (многоугольник)",
+        "full": "Октобокс Raylab SPG95 с сотами",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          6
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Октобокс накамерный 28см (многоугольник)",
+        "full": "Октобокс FST SB-010 для накамерных вспышек 28cm",
+        "total": 6,
+        "level": null,
+        "numbers": [
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          },
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
+            "level": null
+          },
+          {
+            "n": 12,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Октобокс накамерный 65см (многоугольник)",
+        "full": "Складной октобокс Triopo 65 см для вспышек speedlite, V1, AD200",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          13
+        ],
+        "units": [
+          {
+            "n": 13,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Линза френеля",
+        "full": "Линза Френеля Aputure Fresnel 2X",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          1,
+          2
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Отражатель 150х200см",
+        "full": "Отражатель FST RD051 150x200 см",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой",
+        "full": "Фотозонт белый 50 см на отражение с держателем вспышки и стойкой",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          4,
+          5,
+          6
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Стабилизаторы",
+    "subcat_of": {
+      "Ronin RS 3": "DJI",
+      "Ronin RS 3 Pro Combo": "DJI",
+      "Osmo Mobile": "DJI",
+      "Osmo Pocket": "DJI",
+      "Moza": "Moza",
+      "Zhiyun": "Zhiyun",
+      "Capture 5": "FunSnap"
+    },
+    "items": [
+      {
+        "short": "Ronin RS 3",
+        "full": "Стабилизатор DJI Ronin RS3 Combo",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Ronin RS 3 Pro Combo",
+        "full": "Стабилизатор DJI Ronin RS 3 Pro Combo",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Osmo Mobile",
+        "full": "DJI Osmo Mobile 6",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Osmo Pocket",
         "full": "Экшн-камера DJI Osmo Pocket 3",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": "акт"
+          }
+        ]
       },
       {
         "short": "Moza",
         "full": "Электронный стабилизатор Moza Air 2S Professional Kit",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          6
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "Стаб Zhiyun",
+        "short": "Zhiyun",
         "full": "Стабилизатор ZHIYUN WEEBILL S",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          7
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "Стаб Capture 5",
+        "short": "Capture 5",
         "full": "Трехосевой складной стабилизатор для смартфона FunSnap Capture 5 Three-axis Gimbal",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          8
+        ],
+        "units": [
+          {
+            "n": 8,
+            "level": null
+          }
+        ]
       }
     ]
   },
@@ -940,12 +1647,13 @@
     "subcat_of": {
       "Стойка Raylab": "Стойки",
       "Стойка-тренога falcon eyes": "Стойки",
-      "Штатив Sirui 1": "Штативы",
-      "Штатив Sirui 2": "Штативы",
+      "Штатив Sirui SH15": "Штативы",
+      "Штатив Sirui SH05": "Штативы",
       "Штатив Manfrotto": "Штативы",
       "Штатив для смартфона": "Штативы",
       "Журавль на колёсах": "Журавли/Систенды",
-      "Систенд": "Журавли/Систенды",
+      "C-Stand GreenBean": "Журавли/Систенды",
+      "C-Stand Avenger": "Журавли/Систенды",
       "Сэндбеги": "Сэндбеги/Перекладины",
       "Перекладина для хромака": "Сэндбеги/Перекладины",
       "Перекладина для фотофонов": "Сэндбеги/Перекладины"
@@ -956,6 +1664,11 @@
         "full": "Стойка Raylab RL-LS190",
         "total": 3,
         "level": null,
+        "numbers": [
+          1,
+          2,
+          3
+        ],
         "units": [
           {
             "n": 1,
@@ -976,19 +1689,18 @@
         "full": "Стойка-тренога Falcon Eyes FEL-2900ST.0",
         "total": 9,
         "level": null,
+        "numbers": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
         "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
           {
             "n": 4,
             "level": null
@@ -1012,14 +1724,30 @@
           {
             "n": 9,
             "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
+            "level": null
+          },
+          {
+            "n": 12,
+            "level": null
           }
         ]
       },
       {
-        "short": "Штатив Sirui 1",
+        "short": "Штатив Sirui SH15",
         "full": "Штатив Sirui SH15",
         "total": 2,
         "level": null,
+        "numbers": [
+          1,
+          2
+        ],
         "units": [
           {
             "n": 1,
@@ -1032,27 +1760,41 @@
         ]
       },
       {
-        "short": "Штатив Sirui 2",
+        "short": "Штатив Sirui SH05",
         "full": "Штатив Sirui SH05",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
       },
       {
         "short": "Штатив Manfrotto",
         "full": "Видеоштатив Manfrotto MVK612TWINFA алюминиевый с двойными ногами, чашей 100/75 и с головой Nitro 612",
         "total": 3,
         "level": "акт",
+        "numbers": [
+          4,
+          5,
+          6
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 4,
             "level": "акт"
           },
           {
-            "n": 2,
+            "n": 5,
             "level": "акт"
           },
           {
-            "n": 3,
+            "n": 6,
             "level": "акт"
           }
         ]
@@ -1061,66 +1803,98 @@
         "short": "Штатив для смартфона",
         "full": "Штатив Miliboo MZA для смартфона Чёрный",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          7
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": null
+          }
+        ]
       },
       {
         "short": "Журавль на колёсах",
         "full": "Kupo 346M стойка-журавль на колесах 183 - 380 см",
         "total": 4,
-        "level": "акт",
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4
+        ],
         "units": [
           {
             "n": 1,
-            "level": "акт"
+            "level": null
           },
           {
             "n": 2,
-            "level": "акт"
+            "level": null
           },
           {
             "n": 3,
-            "level": "акт"
+            "level": null
           },
           {
             "n": 4,
-            "level": "акт"
+            "level": null
           }
         ]
       },
       {
-        "short": "Систенд",
+        "short": "C-Stand GreenBean",
         "full": "Осветительная стойка GreenBean C-Stand 325/11 BR",
         "total": 1,
-        "level": null
-      },
-      {
-        "short": "Систенд",
-        "full": "Грип со стойкой Avenger A2033LKIT C-Stand Kit 33 L",
-        "total": 6,
         "level": null,
+        "numbers": [
+          5
+        ],
         "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          },
           {
             "n": 5,
             "level": null
-          },
+          }
+        ]
+      },
+      {
+        "short": "C-Stand Avenger",
+        "full": "Грип со стойкой Avenger A2033LKIT C-Stand Kit 33 L",
+        "total": 6,
+        "level": null,
+        "numbers": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "units": [
           {
             "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          },
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
             "level": null
           }
         ]
@@ -1130,6 +1904,20 @@
         "full": "Neewer Photography Sandbag",
         "total": 12,
         "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
         "units": [
           {
             "n": 1,
@@ -1185,13 +1973,31 @@
         "short": "Перекладина для хромака",
         "full": "Перекладина FST TB-3M телескопическая",
         "total": 1,
-        "level": null
+        "level": "акт",
+        "numbers": [
+          13
+        ],
+        "units": [
+          {
+            "n": 13,
+            "level": "акт"
+          }
+        ]
       },
       {
         "short": "Перекладина для фотофонов",
         "full": "Перекладина телескопическая Raylab RL- TB300",
         "total": 1,
-        "level": null
+        "level": "акт",
+        "numbers": [
+          14
+        ],
+        "units": [
+          {
+            "n": 14,
+            "level": "акт"
+          }
+        ]
       }
     ]
   },
@@ -1200,8 +2006,8 @@
     "subcat_of": {
       "Сумка коричневая": "Фотосумка/Фоторюкзак",
       "Сумка черная": "Фотосумка/Фоторюкзак",
-      "Футляр для объектива (Тип 1)": "Футляр для объектива",
-      "Футляр для объектива (Тип 2)": "Футляр для объектива",
+      "Футляр для объектива (средний)": "Футляр для объектива",
+      "Футляр для объектива (большой)": "Футляр для объектива",
       "Пояс для фотиков": "Пояс для фотиков/Ремень на руку",
       "Ремень для фотоаппарата на кисть": "Пояс для фотиков/Ремень на руку"
     },
@@ -1211,6 +2017,10 @@
         "full": "Фотосумка Lowepro Nova 180 AW II, беж/пиксель камо",
         "total": 2,
         "level": null,
+        "numbers": [
+          1,
+          2
+        ],
         "units": [
           {
             "n": 1,
@@ -1227,26 +2037,35 @@
         "full": "Сумка - рюкзак K&F Concept Collapsible Camera Bag 2 Way 22L",
         "total": 3,
         "level": null,
+        "numbers": [
+          3,
+          4,
+          5
+        ],
         "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
           {
             "n": 3,
             "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
           }
         ]
       },
       {
-        "short": "Футляр для объектива (Тип 1)",
+        "short": "Футляр для объектива (средний)",
         "full": "Футляр для объектива JJC DLP-3",
         "total": 2,
         "level": null,
+        "numbers": [
+          1,
+          2
+        ],
         "units": [
           {
             "n": 1,
@@ -1259,17 +2078,21 @@
         ]
       },
       {
-        "short": "Футляр для объектива (Тип 2)",
+        "short": "Футляр для объектива (большой)",
         "full": "Футляр для объектива JJC DLP-5",
         "total": 2,
         "level": null,
+        "numbers": [
+          3,
+          4
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 3,
             "level": null
           },
           {
-            "n": 2,
+            "n": 4,
             "level": null
           }
         ]
@@ -1279,13 +2102,17 @@
         "full": "Пояс JJC GB-1 для фотографа",
         "total": 2,
         "level": null,
+        "numbers": [
+          10,
+          11
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 10,
             "level": null
           },
           {
-            "n": 2,
+            "n": 11,
             "level": null
           }
         ]
@@ -1295,21 +2122,27 @@
         "full": "Ремень JJC ST-CP1 кистевой, неопреновый, черный",
         "total": 4,
         "level": null,
+        "numbers": [
+          12,
+          13,
+          14,
+          15
+        ],
         "units": [
           {
-            "n": 1,
+            "n": 12,
             "level": null
           },
           {
-            "n": 2,
+            "n": 13,
             "level": null
           },
           {
-            "n": 3,
+            "n": 14,
             "level": null
           },
           {
-            "n": 4,
+            "n": 15,
             "level": null
           }
         ]
@@ -1323,1141 +2156,189 @@
       "Хромак2": "Хромак",
       "Хромакостюм": "Хромак",
       "Циклорама": "Цикла",
-      "Фон бумажный тип 1": "Бумажный фон",
-      "Фон бумажный тип 12": "Бумажный фон"
+      "Фон бумажный (серый)": "Бумажный фон",
+      "Фон бумажный (зеленый)": "Бумажный фон"
     },
     "items": [
       {
         "short": "Хромак1",
         "full": "Хромакей зеленый  3x6м",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
       },
       {
         "short": "Хромак2",
         "full": "Фон хромакей GreenBean Chromakey Screen L3060BG с каркасом",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "акт"
+          }
+        ]
       },
       {
         "short": "Хромакостюм",
         "full": "Костюм хромакей размер L цвет зеленый",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": "акт"
+          }
+        ]
       },
       {
         "short": "Циклорама",
         "full": "Циклорама мобильная белая 3 м. / 3 м. / 3 м. / 3 м. (угловая)",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": "акт"
+          }
+        ]
       },
       {
-        "short": "Фон бумажный тип 1",
+        "short": "Фон бумажный (серый)",
         "full": "Фон бумажный тип 1  (серый)",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": "акт"
+          }
+        ]
       },
       {
-        "short": "Фон бумажный тип 12",
+        "short": "Фон бумажный (зеленый)",
         "full": "Фон бумажный тип 2 (зеленый)",
         "total": 1,
-        "level": "акт"
+        "level": "акт",
+        "numbers": [
+          6
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          }
+        ]
       }
     ]
   },
   {
     "cat": "Акумы",
     "subcat_of": {
-      "Аккум на Sony 1": "Sony ZV-E10",
-      "Аккум на Sony 2": "Sony ZV-E10",
-      "Аккум на Sony 3": "Sony ZV-E10",
-      "Аккум на Sony 4": "Sony ZV-E10",
-      "Зарядка для Соньки Np-fw50": "Sony ZV-E10",
-      "Аккум z100 красный": "Sony A74/A6700",
-      "Аккум z100 Белый": "Sony A74/A6700",
-      "Sony z100": "Sony A74/A6700",
-      "Обманка Z100": "Sony A74/A6700",
-      "Зарядное устройство z100": "Sony A74/A6700",
-      "Аккум на Гаш 1": "Panasonic",
-      "Аккум на Гаш 2": "Panasonic",
-      "Аккум на Гаш 3": "Panasonic",
-      "Аккум на Гаш 4": "Panasonic",
-      "Аккумулятор blk22 + зарядка": "Panasonic",
-      "Аккум LP-E6 1": "Canon LP-E6",
-      "Аккум LP-E6 2": "Canon LP-E6",
-      "Аккум LP-E6 3": "Canon LP-E6",
-      "Аккум LP-E6 4": "Canon LP-E6",
-      "Аккум LP-E6 5": "Canon LP-E6",
-      "Аккум LP-E6 6": "Canon LP-E6",
-      "Зарядка LP-E6 1": "Canon LP-E6",
-      "Зарядка LP-E6 2": "Canon LP-E6",
-      "зарядка LP-E17 двойная": "Canon LP-E17",
-      "Аккум LP-E17 белый": "Canon LP-E17",
-      "Аккум LP-E17 оригинальный": "Canon LP-E17",
-      "Аккумулятор lp-e17 type-c": "Canon LP-E17",
-      "Аккум на Fujifilm 1": "Fujifilm",
-      "Аккум на Fujifilm 2": "Fujifilm",
-      "Аккум на Fujifilm 3": "Fujifilm",
-      "Зарядка для Фуджа (зарядки)": "Fujifilm",
-      "Кейс Гопро": "GoPro",
-      "НПФка 1": "NP-F970",
-      "НПФка 2": "NP-F970",
-      "NP-Fка 1": "NP-F970",
-      "NP-Fка 2": "NP-F970",
-      "NP-Fка 3": "NP-F970",
-      "NP-Fка 4": "NP-F970",
-      "NP-Fка 5": "NP-F970",
-      "NP-Fка 6": "NP-F970",
-      "2 НПФ + зарядка (зарядки)": "NP-F970",
-      "Зарядка NP-F 1": "NP-F970",
-      "Зарядка NP-F 2": "NP-F970",
-      "Площадка NP-F 1": "NP-F970",
-      "Площадка NP-F 2": "NP-F970",
-      "npf viltrox + зарядка": "NP-F970",
-      "Станция v-mount": "V-mount",
-      "V-mount": "V-mount",
-      "Powerbank Magsafe 1": "Powerbank",
-      "Powerbank Magsafe 2": "Powerbank",
-      "Powerbank Magsafe 3": "Powerbank",
-      "Powerbank Magsafe 4": "Powerbank",
+      "Аккум NP-FW50 (ZV-E10)": "Sony ZV-E10",
+      "Зарядка NP-FW50 (ZV-E10)": "Sony ZV-E10",
+      "Аккум NP-FZ100 (A7/A6700)": "Sony A74/A6700",
+      "Обманка  NP-FZ100 (A7/A6700)": "Sony A74/A6700",
+      "Зарядка NP-FZ100 (A7/A6700)": "Sony A74/A6700",
+      "Аккум DMW-BLK22 (GH5/GH6)": "Panasonic",
+      "Зарядка  DMW-BLK22 (GH5/GH6)": "Panasonic",
+      "Аккум LP-E6 (R6/R6 II)": "Canon LP-E6",
+      "Зарядка двойная LP-E6 (R6/R6 II)": "Canon LP-E6",
+      "Зарядка двойная LP-E17  (R8)": "Canon LP-E17",
+      "Аккум LP-E17  (R8)": "Canon LP-E17",
+      "Аккум NP-W235 (X-T4)": "Fujifilm",
+      "Зарядка NP-W235 (X-T4)": "Fujifilm",
+      "зарядный кейс GoPro + аккумы": "GoPro",
+      "Аккум NP-FW970": "NP-F970",
+      "Площадка NP-FW970": "NP-F970",
+      "Набор NP-FW970": "NP-F970",
+      "Зарядка NP-FW970": "NP-F970",
+      "Станция V-mount": "V-mount",
+      "Аккум V-mount": "V-mount",
+      "Powerbank Magsafe": "Powerbank",
       "Внешний аккумулятор magsafe": "Powerbank"
     },
     "items": [
       {
-        "short": "Аккум на Sony 1",
+        "short": "Аккум NP-FW50 (ZV-E10)",
         "full": "Аккумулятор Sony NP-FW50",
         "total": 4,
         "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4
+        ],
         "units": [
           {
             "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
             "level": null
           }
         ]
       },
       {
-        "short": "Аккум на Sony 2",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум на Sony 3",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум на Sony 4",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Зарядка для Соньки Np-fw50",
+        "short": "Зарядка NP-FW50 (ZV-E10)",
         "full": "Зарядное устройство тип 2",
         "total": 1,
-        "level": null
+        "level": null,
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          }
+        ]
       },
       {
-        "short": "Аккум z100 красный",
+        "short": "Аккум NP-FZ100 (A7/A6700)",
         "full": "Аккум z100 красный",
         "total": 4,
         "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум z100 Белый",
-        "full": "Viltrox z100 type-c белый",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Sony z100",
-        "full": "Sony z100 комплетный с камерой черный",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Обманка Z100",
-        "full": "Адаптер ZGCine аккумулятора Sony NP-FZ100 на D-Tap",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Зарядное устройство z100",
-        "full": "",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум на Гаш 1",
-        "full": "Аккумулятор Panasonic DMW-BLK22",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум на Гаш 2",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум на Гаш 3",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум на Гаш 4",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккумулятор blk22 + зарядка",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум LP-E6 1",
-        "full": "Canon LP-E6",
-        "total": 6,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Аккум LP-E6 2",
-        "full": "Canon LP-E6",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Аккум LP-E6 3",
-        "full": "Canon LP-E6",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Аккум LP-E6 4",
-        "full": "Canon LP-E6",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Аккум LP-E6 5",
-        "full": "Canon LP-E6",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Аккум LP-E6 6",
-        "full": "Canon LP-E6",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Зарядка LP-E6 1",
-        "full": "Двойное зарядное устройство Canon LP-E6/ LP-E6N",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Зарядка LP-E6 2",
-        "full": "Двойное зарядное устройство Canon LP-E6/ LP-E6N",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "зарядка LP-E17 двойная",
-        "full": "зарядка lp-e17  двойная",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "зарядка LP-E17 двойная",
-        "full": "зарядка lp-e17  двойная",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум LP-E17 белый",
-        "full": "Аккумулятор lp-e17 power extra",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум LP-E17 оригинальный",
-        "full": "Аккумулятор lp-e17 Canon",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккумулятор lp-e17 type-c",
-        "full": "Аккумулятор lp-e17 type-c",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум на Fujifilm 1",
-        "full": "Аккумулятор Fujifilm np-w235",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Аккум на Fujifilm 2",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Аккум на Fujifilm 3",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Зарядка для Фуджа (зарядки)",
-        "full": "Зарядное устройство тип 1",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Кейс Гопро",
-        "full": "Зарядный кейс для GoPro HERO",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "НПФка 1",
-        "full": "Аккумулятор Sony NP-FW970",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "НПФка 2",
-        "full": "",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "NP-Fка 1",
-        "full": "Аккумулятор NP-F970",
-        "total": 6,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "NP-Fка 2",
-        "full": "Аккумулятор NP-F970",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "NP-Fка 3",
-        "full": "Аккумулятор NP-F970",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "NP-Fка 4",
-        "full": "Аккумулятор NP-F970",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "NP-Fка 5",
-        "full": "Аккумулятор NP-F970",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "NP-Fка 6",
-        "full": "Аккумулятор NP-F970",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "2 НПФ + зарядка (зарядки)",
-        "full": "Набор 2 аккумуляторов и зарядного устройства",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Зарядка NP-F 1",
-        "full": "Зарядное устройство NP-F",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Зарядка NP-F 2",
-        "full": "Зарядное устройство NP-F",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Площадка NP-F 1",
-        "full": "Адаптер питания NP-F",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Площадка NP-F 2",
-        "full": "Адаптер питания NP-F",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "npf viltrox + зарядка",
-        "full": "NP-F970 Viltrox type-c белые",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Станция v-mount",
-        "full": "ZITAY Dual Channel V-Mount Battery Adapter Converter Power Supply for Video LED Light with Quick Release Set",
-        "total": 3,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          },
-          {
-            "n": 3,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "V-mount",
-        "full": "Аккумулятор ZGCine ZG-X160 V-Mount 100W PD 156Wh",
-        "total": 6,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          },
-          {
-            "n": 3,
-            "level": "акт"
-          },
-          {
-            "n": 4,
-            "level": "акт"
-          },
-          {
-            "n": 5,
-            "level": "акт"
-          },
-          {
-            "n": 6,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Powerbank Magsafe 1",
-        "full": "Powerbank MagSafe PowerBank 5000 мАч",
-        "total": 4,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Powerbank Magsafe 2",
-        "full": "Powerbank MagSafe PowerBank 5000 мАч",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Powerbank Magsafe 3",
-        "full": "Powerbank MagSafe PowerBank 5000 мАч",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Powerbank Magsafe 4",
-        "full": "Powerbank MagSafe PowerBank 5000 мАч",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Внешний аккумулятор magsafe",
-        "full": "Внешний аккумулятор magsafe",
-        "total": 2,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "cat": "Хранение данных",
-    "subcat_of": {
-      "Карта памяти 16 GB": "Карты памяти",
-      "Карта памяти 32 GB": "Карты памяти",
-      "Карта памяти 64 GB 1": "Карты памяти",
-      "Карта памяти 64 GB 2": "Карты памяти",
-      "Карта памяти 128 GB 1": "Карты памяти",
-      "Карта памяти 128 GB 2": "Карты памяти",
-      "Карта памяти 128 GB 3": "Карты памяти",
-      "Карта памяти 128 GB 4": "Карты памяти",
-      "Карта памяти 128 GB 5": "Карты памяти",
-      "Карта памяти 128 GB 6": "Карты памяти",
-      "Карта памяти 128 GB 7": "Карты памяти",
-      "Карта памяти 128 GB 8": "Карты памяти",
-      "Карта памяти MicroSD 128 GB 1": "Карты памяти",
-      "Карта памяти MicroSD 128 GB 2": "Карты памяти",
-      "Карта памяти 128": "Карты памяти",
-      "T7 2ТБ бежевый": "Т7",
-      "T7 1ТБ чёрный": "Т7",
-      "Т7 1тб металл": "Т7",
-      "Провод type-c для т7": "Т7",
-      "Картридер 1 (кабели)": "Ридеры",
-      "Картридер 2 (кабели)": "Ридеры",
-      "Картридер": "Ридеры"
-    },
-    "items": [
-      {
-        "short": "Карта памяти 16 GB",
-        "full": "Transcend 16 GB 90MB/s",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 32 GB",
-        "full": "Transcend 32 GB 90MB/s",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 64 GB 1",
-        "full": "Kingston 64 GB",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Карта памяти 64 GB 2",
-        "full": "",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128 GB 1",
-        "full": "SanDisk Extreme PRO 128 GB",
-        "total": 3,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Карта памяти 128 GB 2",
-        "full": "",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128 GB 3",
-        "full": "",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128 GB 4",
-        "full": "Карта памяти Kingston 128GB",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Карта памяти 128 GB 5",
-        "full": "Карта памяти Kingston 128GB",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128 GB 6",
-        "full": "Карта памяти SanDisk SDXC 128GB",
-        "total": 3,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Карта памяти 128 GB 7",
-        "full": "Карта памяти SanDisk SDXC 128GB",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128 GB 8",
-        "full": "Карта памяти SanDisk SDXC 128GB",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти MicroSD 128 GB 1",
-        "full": "Карта памяти Kingston MicroSDXC 128GB",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Карта памяти MicroSD 128 GB 2",
-        "full": "Карта памяти Kingston MicroSDXC 128GB",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Карта памяти 128",
-        "full": "Карты памяти Kingston Canvas React Plus 128 ГБ",
-        "total": 4,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          },
-          {
-            "n": 3,
-            "level": "глава"
-          },
-          {
-            "n": 4,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "T7 2ТБ бежевый",
-        "full": "Samsung SSD 2Tb T7 Shield",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "T7 1ТБ чёрный",
-        "full": "Samsung SSD T7 Shield 1TB",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Т7 1тб металл",
-        "full": "Внешний диск SSD Samsung T7 MU-PC1T0T/WW, 1ТБ, черный",
-        "total": 3,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          },
-          {
-            "n": 3,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Провод type-c для т7",
-        "full": "Провод USB-C - USB-C Высокоскоростные !!!",
-        "total": 5,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          },
-          {
-            "n": 3,
-            "level": "глава"
-          },
-          {
-            "n": 4,
-            "level": "глава"
-          },
-          {
-            "n": 5,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Картридер 1 (кабели)",
-        "full": "Картридер Transcend",
-        "total": 2,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          }
-        ]
-      },
-      {
-        "short": "Картридер 2 (кабели)",
-        "full": "Картридер Transcend",
-        "total": 1,
-        "level": "глава"
-      },
-      {
-        "short": "Картридер",
-        "full": "Картридер Transcend RDF9 черный (TS-RDF9K2)",
-        "total": 6,
-        "level": "глава",
-        "units": [
-          {
-            "n": 1,
-            "level": "глава"
-          },
-          {
-            "n": 2,
-            "level": "глава"
-          },
-          {
-            "n": 3,
-            "level": "глава"
-          },
-          {
-            "n": 4,
-            "level": "глава"
-          },
-          {
-            "n": 5,
-            "level": "глава"
-          },
-          {
-            "n": 6,
-            "level": "глава"
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "cat": "Грипповка",
-    "subcat_of": {
-      "Накамерный монитор 2": "Накамерные мониторы",
-      "Площадка под суппорта": "Площадка V-mount/\nДержатель SSD",
-      "Площадка v-mount": "Площадка V-mount/\nДержатель SSD",
-      "Крепление Tilta Pocket V-Mount Battery Plate V2 Чёрное": "Площадка V-mount/\nДержатель SSD",
-      "Суппорта": "Площадка V-mount/\nДержатель SSD",
-      "Ручка верхняя 1 (гриповка)": "Обвес",
-      "Ручка верхняя 2 (гриповка)": "Обвес",
-      "Ручка боковая 1 (гриповка)": "Обвес",
-      "Ручка боковая 2 (гриповка)": "Обвес",
-      "НАТОрейл 1 (гриповка)": "Обвес",
-      "НАТОрейл 2 (гриповка)": "Обвес",
-      "НАТОрейл 3 (гриповка)": "Обвес",
-      "НАТОрейл 4 (гриповка)": "Обвес",
-      "Шарнир 1 (гриповка)": "Обвес",
-      "Шарнир 2 (гриповка)": "Обвес",
-      "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B": "Обвес"
-    },
-    "items": [
-      {
-        "short": "Накамерный монитор 2",
-        "full": "Накамерный монитор Feelworld LUT7s PRO 4K HDMI Touch Screen",
-        "total": 2,
-        "level": "акт",
-        "units": [
-          {
-            "n": 1,
-            "level": "акт"
-          },
-          {
-            "n": 2,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Площадка под суппорта",
-        "full": "Площадка SmallRig для трубок 15 мм 1674",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Площадка v-mount",
-        "full": "Площадка питания ZGCine VP2 KIT3 для аккумуляторов V-Mount",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Крепление Tilta Pocket V-Mount Battery Plate V2 Чёрное",
-        "full": "Крепление Tilta Pocket V-Mount Battery Plate V2 Чёрное",
-        "total": 3,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          },
-          {
-            "n": 2,
-            "level": null
-          },
-          {
-            "n": 3,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Суппорта",
-        "full": "Направляющие SmallRig 851 Карбоновые 30 см (комплект из 2х штук)",
-        "total": 1,
-        "level": "акт"
-      },
-      {
-        "short": "Ручка верхняя 1 (гриповка)",
-        "full": "Ручка для камеры верхняя",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Ручка верхняя 2 (гриповка)",
-        "full": "Ручка для камеры верхняя",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Ручка боковая 1 (гриповка)",
-        "full": "Ручка для камеры боковая",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Ручка боковая 2 (гриповка)",
-        "full": "Ручка для камеры боковая",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "НАТОрейл 1 (гриповка)",
-        "full": "Адаптер НАТО",
-        "total": 4,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "НАТОрейл 2 (гриповка)",
-        "full": "Адаптер НАТО",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "НАТОрейл 3 (гриповка)",
-        "full": "Адаптер НАТО",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "НАТОрейл 4 (гриповка)",
-        "full": "Адаптер НАТО",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Шарнир 1 (гриповка)",
-        "full": "Кронштейн для камеры 1",
-        "total": 2,
-        "level": null,
-        "units": [
-          {
-            "n": 1,
-            "level": null
-          }
-        ]
-      },
-      {
-        "short": "Шарнир 2 (гриповка)",
-        "full": "Кронштейн для камеры 2",
-        "total": 1,
-        "level": null
-      },
-      {
-        "short": "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B",
-        "full": "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B",
-        "total": 7,
-        "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
         "units": [
           {
             "n": 1,
@@ -2486,6 +2367,1073 @@
           {
             "n": 7,
             "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Обманка  NP-FZ100 (A7/A6700)",
+        "full": "Адаптер ZGCine аккумулятора Sony NP-FZ100 на D-Tap",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          9,
+          10
+        ],
+        "units": [
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Зарядка NP-FZ100 (A7/A6700)",
+        "full": "Зарядка NP-FZ100 (A7/A6700)",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          11,
+          12
+        ],
+        "units": [
+          {
+            "n": 11,
+            "level": null
+          },
+          {
+            "n": 12,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Аккум DMW-BLK22 (GH5/GH6)",
+        "full": "Аккумулятор Panasonic DMW-BLK22",
+        "total": 4,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Зарядка  DMW-BLK22 (GH5/GH6)",
+        "full": "Зарядка  DMW-BLK22 (GH5/GH6)",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          5
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Аккум LP-E6 (R6/R6 II)",
+        "full": "Canon LP-E6",
+        "total": 6,
+        "level": "акт",
+        "numbers": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
+            "level": "акт"
+          },
+          {
+            "n": 4,
+            "level": "акт"
+          },
+          {
+            "n": 5,
+            "level": "акт"
+          },
+          {
+            "n": 6,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Зарядка двойная LP-E6 (R6/R6 II)",
+        "full": "Двойное зарядное устройство Canon LP-E6/ LP-E6N",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          7,
+          8
+        ],
+        "units": [
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Зарядка двойная LP-E17  (R8)",
+        "full": "зарядка lp-e17  двойная",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          1,
+          2
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Аккум LP-E17  (R8)",
+        "full": "Аккумулятор lp-e17 power extra",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          },
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Аккум NP-W235 (X-T4)",
+        "full": "Аккумулятор Fujifilm np-w235",
+        "total": 3,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Зарядка NP-W235 (X-T4)",
+        "full": "Зарядное устройство тип 1",
+        "total": 1,
+        "level": null,
+        "numbers": [
+          4
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "зарядный кейс GoPro + аккумы",
+        "full": "Зарядный кейс для GoPro HERO",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Аккум NP-FW970",
+        "full": "Аккумулятор Sony NP-FW970",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          },
+          {
+            "n": 9,
+            "level": null
+          },
+          {
+            "n": 10,
+            "level": null
+          },
+          {
+            "n": 11,
+            "level": null
+          },
+          {
+            "n": 12,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Площадка NP-FW970",
+        "full": "Адаптер питания NP-F",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          13,
+          14
+        ],
+        "units": [
+          {
+            "n": 13,
+            "level": null
+          },
+          {
+            "n": 14,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Набор NP-FW970",
+        "full": "Набор 2 аккумуляторов и зарядного устройства",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          15,
+          16
+        ],
+        "units": [
+          {
+            "n": 15,
+            "level": null
+          },
+          {
+            "n": 16,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Зарядка NP-FW970",
+        "full": "Зарядное устройство NP-F",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          17,
+          18
+        ],
+        "units": [
+          {
+            "n": 17,
+            "level": null
+          },
+          {
+            "n": 18,
+            "level": null
+          }
+        ]
+      },
+      {
+        "short": "Станция V-mount",
+        "full": "ZITAY Dual Channel V-Mount Battery Adapter Converter Power Supply for Video LED Light with Quick Release Set",
+        "total": 3,
+        "level": "акт",
+        "numbers": [
+          1,
+          2,
+          3
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Аккум V-mount",
+        "full": "Аккумулятор ZGCine ZG-X160 V-Mount 100W PD 156Wh",
+        "total": 6,
+        "level": "акт",
+        "numbers": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": "акт"
+          },
+          {
+            "n": 5,
+            "level": "акт"
+          },
+          {
+            "n": 6,
+            "level": "акт"
+          },
+          {
+            "n": 7,
+            "level": "акт"
+          },
+          {
+            "n": 8,
+            "level": "акт"
+          },
+          {
+            "n": 9,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Powerbank Magsafe",
+        "full": "Powerbank MagSafe PowerBank 5000 мАч",
+        "total": 4,
+        "level": "акт",
+        "numbers": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
+            "level": "акт"
+          },
+          {
+            "n": 4,
+            "level": "акт"
+          },
+          {
+            "n": 5,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Внешний аккумулятор magsafe",
+        "full": "Внешний аккумулятор magsafe",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          6,
+          7
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          },
+          {
+            "n": 7,
+            "level": "акт"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Хранение данных",
+    "subcat_of": {
+      "Карта памяти SD 16 GB": "Карты памяти",
+      "Карта памяти SD 32 GB": "Карты памяти",
+      "Карта памяти SD 64 GB": "Карты памяти",
+      "Карта памяти SD 128 GB": "Карты памяти",
+      "Карта памяти MicroSD 128 GB": "Карты памяти",
+      "T7 2ТБ": "Т7",
+      "T7 1ТБ": "Т7",
+      "Провод type-c для т7": "Т7",
+      "Картридер": "Ридеры"
+    },
+    "items": [
+      {
+        "short": "Карта памяти SD 16 GB",
+        "full": "Transcend 16 GB 90MB/s",
+        "total": 1,
+        "level": "глава",
+        "numbers": [
+          1
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Карта памяти SD 32 GB",
+        "full": "Transcend 32 GB 90MB/s",
+        "total": 1,
+        "level": "глава",
+        "numbers": [
+          2
+        ],
+        "units": [
+          {
+            "n": 2,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Карта памяти SD 64 GB",
+        "full": "Kingston 64 GB",
+        "total": 2,
+        "level": "глава",
+        "numbers": [
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": "глава"
+          },
+          {
+            "n": 4,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Карта памяти SD 128 GB",
+        "full": "SanDisk Extreme PRO 128 GB",
+        "total": 3,
+        "level": "глава",
+        "numbers": [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        "units": [
+          {
+            "n": 5,
+            "level": "глава"
+          },
+          {
+            "n": 6,
+            "level": "глава"
+          },
+          {
+            "n": 7,
+            "level": "глава"
+          },
+          {
+            "n": 8,
+            "level": "глава"
+          },
+          {
+            "n": 9,
+            "level": "глава"
+          },
+          {
+            "n": 10,
+            "level": "глава"
+          },
+          {
+            "n": 11,
+            "level": "глава"
+          },
+          {
+            "n": 12,
+            "level": "глава"
+          },
+          {
+            "n": 13,
+            "level": "глава"
+          },
+          {
+            "n": 14,
+            "level": "глава"
+          },
+          {
+            "n": 15,
+            "level": "глава"
+          },
+          {
+            "n": 16,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Карта памяти MicroSD 128 GB",
+        "full": "Карта памяти Kingston MicroSDXC 128GB",
+        "total": 2,
+        "level": "глава",
+        "numbers": [
+          17,
+          18
+        ],
+        "units": [
+          {
+            "n": 17,
+            "level": "глава"
+          },
+          {
+            "n": 18,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "T7 2ТБ",
+        "full": "Samsung SSD 2Tb T7 Shield",
+        "total": 2,
+        "level": "глава",
+        "numbers": [
+          1,
+          2
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "глава"
+          },
+          {
+            "n": 2,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "T7 1ТБ",
+        "full": "Samsung SSD T7 Shield 1TB",
+        "total": 2,
+        "level": "глава",
+        "numbers": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": "глава"
+          },
+          {
+            "n": 4,
+            "level": "глава"
+          },
+          {
+            "n": 5,
+            "level": "глава"
+          },
+          {
+            "n": 6,
+            "level": "глава"
+          },
+          {
+            "n": 7,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Провод type-c для т7",
+        "full": "Провод USB-C - USB-C Высокоскоростные !!!",
+        "total": 5,
+        "level": "глава",
+        "numbers": [
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "units": [
+          {
+            "n": 8,
+            "level": "глава"
+          },
+          {
+            "n": 9,
+            "level": "глава"
+          },
+          {
+            "n": 10,
+            "level": "глава"
+          },
+          {
+            "n": 11,
+            "level": "глава"
+          },
+          {
+            "n": 12,
+            "level": "глава"
+          }
+        ]
+      },
+      {
+        "short": "Картридер",
+        "full": "Картридер Transcend",
+        "total": 2,
+        "level": null,
+        "numbers": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
+            "level": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "cat": "Грипповка",
+    "subcat_of": {
+      "Накамерный монитор  Feelworld LUT7s PRO": "Накамерные мониторы",
+      "Площадка под суппорта  SmallRig": "Площадка V-mount/\nДержатель SSD",
+      "Площадка V-mount": "Площадка V-mount/\nДержатель SSD",
+      "Крепление Tilta Pocket V-Mount Battery Plate V2": "Площадка V-mount/\nДержатель SSD",
+      "Суппорта": "Площадка V-mount/\nДержатель SSD",
+      "Ручка верхняя для камеры": "Обвес",
+      "Ручка боковая для камеры": "Обвес",
+      "НАТОрейл": "Обвес",
+      "Шарнир": "Обвес",
+      "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B": "Обвес"
+    },
+    "items": [
+      {
+        "short": "Накамерный монитор  Feelworld LUT7s PRO",
+        "full": "Накамерный монитор Feelworld LUT7s PRO 4K HDMI Touch Screen",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          1,
+          2
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
+          {
+            "n": 2,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Площадка под суппорта  SmallRig",
+        "full": "Площадка SmallRig для трубок 15 мм 1674",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          3
+        ],
+        "units": [
+          {
+            "n": 3,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Площадка V-mount",
+        "full": "Площадка питания ZGCine VP2 KIT3 для аккумуляторов V-Mount",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          4,
+          5
+        ],
+        "units": [
+          {
+            "n": 4,
+            "level": "акт"
+          },
+          {
+            "n": 5,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Крепление Tilta Pocket V-Mount Battery Plate V2",
+        "full": "Крепление Tilta Pocket V-Mount Battery Plate V2 Чёрное",
+        "total": 3,
+        "level": "акт",
+        "numbers": [
+          6,
+          7,
+          8
+        ],
+        "units": [
+          {
+            "n": 6,
+            "level": "акт"
+          },
+          {
+            "n": 7,
+            "level": "акт"
+          },
+          {
+            "n": 8,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Суппорта",
+        "full": "Направляющие SmallRig 851 Карбоновые 30 см (комплект из 2х штук)",
+        "total": 1,
+        "level": "акт",
+        "numbers": [
+          9
+        ],
+        "units": [
+          {
+            "n": 9,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Ручка верхняя для камеры",
+        "full": "Ручка для камеры верхняя",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          10,
+          11
+        ],
+        "units": [
+          {
+            "n": 10,
+            "level": "акт"
+          },
+          {
+            "n": 11,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Ручка боковая для камеры",
+        "full": "Ручка для камеры боковая",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          12,
+          13
+        ],
+        "units": [
+          {
+            "n": 12,
+            "level": "акт"
+          },
+          {
+            "n": 13,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "НАТОрейл",
+        "full": "Адаптер НАТО",
+        "total": 4,
+        "level": "акт",
+        "numbers": [
+          14,
+          15,
+          16,
+          17
+        ],
+        "units": [
+          {
+            "n": 14,
+            "level": "акт"
+          },
+          {
+            "n": 15,
+            "level": "акт"
+          },
+          {
+            "n": 16,
+            "level": "акт"
+          },
+          {
+            "n": 17,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Шарнир",
+        "full": "Кронштейн для камеры 1",
+        "total": 2,
+        "level": "акт",
+        "numbers": [
+          18,
+          19
+        ],
+        "units": [
+          {
+            "n": 18,
+            "level": "акт"
+          },
+          {
+            "n": 19,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B",
+        "full": "Держатель Super Clamp Magic Arm 9.5\" SmallRig 2732B",
+        "total": 7,
+        "level": "акт",
+        "numbers": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26
+        ],
+        "units": [
+          {
+            "n": 20,
+            "level": "акт"
+          },
+          {
+            "n": 21,
+            "level": "акт"
+          },
+          {
+            "n": 22,
+            "level": "акт"
+          },
+          {
+            "n": 23,
+            "level": "акт"
+          },
+          {
+            "n": 24,
+            "level": "акт"
+          },
+          {
+            "n": 25,
+            "level": "акт"
+          },
+          {
+            "n": 26,
+            "level": "акт"
           }
         ]
       }

@@ -151,15 +151,19 @@ class CoreRulesTest(unittest.TestCase):
         short = next(
             name for name, meta in main.CATALOG_META.items() if int(meta["total"]) >= 2
         )
+        allowed = main.ready_numbers(short)
+        first, second = allowed[:2]
         with main.db() as c:
             c.execute(
-                "UPDATE equipment_units SET state='repair' WHERE short=? AND num=1", (short,)
+                "UPDATE equipment_units SET state='repair' WHERE short=? AND num=?",
+                (short, first),
             )
         assigned, error = main.assign_numbers([[short, 1]], "2030-01-01", "2030-01-02")
         self.assertIsNone(error)
-        self.assertEqual(assigned[short], [2])
+        self.assertEqual(assigned[short], [second])
         assigned, error = main.assign_numbers(
-            [[short, 1]], "2030-01-01", "2030-01-02", preferred={short: [1]}
+            [[short, 1]], "2030-01-01", "2030-01-02",
+            preferred={short: [first]},
         )
         self.assertIsNone(assigned)
         self.assertIsNotNone(error)
@@ -225,6 +229,153 @@ class CoreRulesTest(unittest.TestCase):
         for filename in ("main.py", "texts.py"):
             source = (Path(__file__).parent / filename).read_text(encoding="utf-8")
             self.assertNotIn("??", source, filename)
+
+
+    def test_catalog_short_names_and_allowed_numbers_are_valid(self):
+        raw = (main.WEBAPP_DIR / "catalog.js").read_text(encoding="utf-8")
+        data = main.json.loads(raw[raw.index("["):raw.rindex("]") + 1])
+        items = [item for category in data for item in category["items"]]
+        shorts = [item["short"] for item in items]
+        self.assertEqual(len(shorts), len(set(shorts)))
+        self.assertTrue(all(item.get("numbers") for item in items))
+        pooled = next(
+            item for item in items if len(item["numbers"]) > item["total"]
+        )
+        self.assertEqual(
+            main.ready_capacity(pooled["short"]),
+            pooled["total"],
+        )
+        with main.db() as connection:
+            unit_numbers = {
+                row["num"]
+                for row in connection.execute(
+                    "SELECT num FROM equipment_units WHERE short=?",
+                    (pooled["short"],),
+                ).fetchall()
+            }
+        self.assertEqual(unit_numbers, set(pooled["numbers"]))
+
+    def test_people_sheet_username_merges_all_access(self):
+        values = [
+            ["ФИО", "ТГ", "Отделы Media BMSTU", "Роль Media BMSTU", "Организации"],
+            ["Иванов Иван Иванович", "@Ivan", "SMM", "Стажёр", "КвизON"],
+            ["Иванов Иван Иванович", "https://t.me/ivan", "Фото", "Активист", "Art Factory BMSTU"],
+        ]
+        directory = main._build_member_username_directory(values)
+        member = directory["ivan"]
+        self.assertEqual(member["role"], "активист")
+        self.assertEqual(member["deps"], ["СММ", "Фото"])
+        self.assertEqual(
+            member["orgs"],
+            ["Media BMSTU", "КвизON", "Art Factory BMSTU"],
+        )
+        main._apply_sheet_member(1, member)
+        user = main.get_user(1)
+        self.assertEqual(user["verified"], "ok")
+        self.assertEqual(user["agreed"], 1)
+        self.assertEqual(user["name"], "Иванов Иван Иванович")
+        self.assertEqual(main.json.loads(user["orgs"]), member["orgs"])
+        self.assertTrue(
+            main.enqueue_score(
+                "people-test:1", 1, "test", 1, Decimal("0.1"), "people"
+            )
+        )
+        with main.db() as connection:
+            score = connection.execute(
+                "SELECT fio,points FROM score_events WHERE event_id='people-test:1'"
+            ).fetchone()
+        self.assertEqual(score["fio"], "Иванов Иван Иванович")
+        self.assertEqual(score["points"], "0.1")
+
+    def test_agree_endpoint_auto_registers_by_telegram_username(self):
+        member = {
+            "name": "Иванов Иван Иванович",
+            "telegram": "@dev",
+            "orgs": ["Media BMSTU", "КвизON"],
+            "deps": ["Фото"],
+            "role": "активист",
+        }
+
+        class FakeRequest:
+            async def json(self):
+                return {}
+
+        async def fake_lookup(username, force=False):
+            self.assertEqual(username, "dev")
+            return {"status": "found", "member": member}
+
+        old_dev = main.DEV_USER_ID
+        old_lookup = main.lookup_member_by_username
+        main.DEV_USER_ID = 1
+        main.lookup_member_by_username = fake_lookup
+        try:
+            response = asyncio.run(main.api_agree(FakeRequest()))
+        finally:
+            main.DEV_USER_ID = old_dev
+            main.lookup_member_by_username = old_lookup
+        payload = main.json.loads(response.text)
+        self.assertTrue(payload["autoRegistered"])
+        self.assertTrue(payload["registered"])
+        self.assertEqual(payload["verified"], "ok")
+        self.assertEqual(payload["profile"]["orgs"], member["orgs"])
+        self.assertEqual(payload["profile"]["deps"], member["deps"])
+        self.assertEqual(payload["profile"]["status"], "активист")
+
+    def test_legacy_mailing_reads_old_db_without_touching_new_db(self):
+        legacy = Path(self.tmp.name) / "old.sqlite3"
+        source = sqlite3.connect(legacy)
+        source.execute(
+            "CREATE TABLE users(user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT)"
+        )
+        source.execute(
+            "CREATE TABLE checkouts(id INTEGER PRIMARY KEY, user_id INTEGER)"
+        )
+        source.execute(
+            "INSERT INTO users VALUES(55,'legacy_user','Legacy User Name')"
+        )
+        source.execute("INSERT INTO checkouts VALUES(1,55)")
+        source.commit()
+        source.close()
+
+        class FakeBot:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, user_id, text):
+                self.sent.append((user_id, text))
+
+        old_legacy, old_bot = main.LEGACY_DB_PATH, main.bot
+        fake = FakeBot()
+        main.LEGACY_DB_PATH, main.bot = legacy, fake
+        try:
+            preview = main.read_legacy_recipients()
+            result = asyncio.run(main.send_legacy_invites())
+        finally:
+            main.LEGACY_DB_PATH, main.bot = old_legacy, old_bot
+        self.assertEqual(
+            preview,
+            [{"user_id": 55, "username": "legacy_user", "name": "Legacy User Name"}],
+        )
+        self.assertEqual(result, {"source": 1, "sent": 1, "failed": 0})
+        self.assertEqual(fake.sent[0][0], 55)
+        with main.db() as connection:
+            imported = connection.execute(
+                "SELECT COUNT(*) n FROM users WHERE id=55"
+            ).fetchone()["n"]
+            tables = {
+                row["name"]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        self.assertEqual(imported, 0)
+        self.assertNotIn("legacy_invites", tables)
+
+
+    def test_manual_does_not_describe_production_role(self):
+        source = (main.WEBAPP_DIR / "index.html").read_text(encoding="utf-8")
+        manual = source[source.index("SCREENS.manual"):source.index("const SO_ORGS")]
+        self.assertNotIn("production", manual)
 
 
 if __name__ == "__main__":

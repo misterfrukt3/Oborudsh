@@ -172,3 +172,12 @@ def studio_card_message(booking_id, status, author, author_ref, day, slot,
             markdown_v2_bold("Куратор:"), markdown_v2_escape(curator),
         ))
     return "\n".join(lines)
+
+
+# Одноразовое приглашение пользователям старой кнопочной версии.
+LEGACY_MIGRATION_MESSAGE = (
+    "Неважно, в цепях ты или свободен. Главное, что тебе есть куда расти! "
+    "И пришло моё время стать лучшей версией себя. "
+    "Надеюсь, вы не будете скучать.\n\n"
+    "Нажми /start"
+)

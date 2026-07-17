@@ -67,6 +67,20 @@ MB_SHEET_URL = os.getenv("MB_SHEET_URL", "")
 ORG_MEMBERS_FILE = os.getenv("ORG_MEMBERS_FILE", str(BASE / "org_members.csv"))
 # справочник для автозаполнения по username (если файла нет - работает по старому шаблону)
 DIRECTORY_FILE = os.getenv("DIRECTORY_FILE", "")
+# Закрытый справочник участников: точное ФИО -> организации, отделы и роль.
+MEMBERS_SHEET_ID = os.getenv("MEMBERS_SHEET_ID", "").strip()
+MEMBERS_SHEET_TAB = os.getenv("MEMBERS_SHEET_TAB", "люди").strip() or "люди"
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+if GOOGLE_SERVICE_ACCOUNT_FILE:
+    _google_key_path = Path(GOOGLE_SERVICE_ACCOUNT_FILE)
+    GOOGLE_SERVICE_ACCOUNT_FILE = str(
+        _google_key_path if _google_key_path.is_absolute() else BASE / _google_key_path
+    )
+# Одноразовый импорт адресатов из старой кнопочной версии.
+_legacy_path = Path(os.getenv("LEGACY_DB_PATH", "equipment_bot.sqlite3"))
+LEGACY_DB_PATH = _legacy_path if _legacy_path.is_absolute() else BASE / _legacy_path
+LEGACY_MIGRATION_PASSWORD = os.getenv("LEGACY_MIGRATION_PASSWORD", "")
+LEGACY_MIGRATION_WAITING = set()
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -271,53 +285,105 @@ CATALOG_META = {}
 BOOKING_LOCK = asyncio.Lock()
 
 
+def _item_numbers(item: dict) -> list[int]:
+    total = max(1, int(item.get("total") or 1))
+    raw = item.get("numbers")
+    if not isinstance(raw, list):
+        return list(range(1, total + 1))
+    numbers = []
+    for value in raw:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in numbers:
+            numbers.append(number)
+    return sorted(numbers) or list(range(1, total + 1))
+
+
 def load_catalog() -> None:
-    """Загрузить каталог из prototype/catalog.js и дополнений из базы."""
+    """Загрузить каталог, включая допустимые номера экземпляров."""
     global TOTALS, CATALOG_META
     try:
         raw = (WEBAPP_DIR / "catalog.js").read_text(encoding="utf-8")
         data = json.loads(raw[raw.index("["):raw.rindex("]") + 1])
-        TOTALS = {i["short"]: int(i.get("total") or 1) for c in data for i in c["items"]}
-        CATALOG_META = {i["short"]: {"cat": c["cat"], "total": int(i.get("total") or 1), "level": i.get("level") or ""} for c in data for i in c["items"]}
-    except Exception as e:
+        items = [(c, i) for c in data for i in c["items"]]
+        shorts = [item["short"] for _, item in items]
+        if len(shorts) != len(set(shorts)):
+            raise ValueError("короткие имена позиций должны быть уникальны")
+        TOTALS = {
+            item["short"]: int(item.get("total") or 1) for _, item in items
+        }
+        CATALOG_META = {
+            item["short"]: {
+                "cat": cat["cat"],
+                "total": int(item.get("total") or 1),
+                "level": item.get("level") or "",
+                "numbers": _item_numbers(item),
+            }
+            for cat, item in items
+        }
+    except Exception as exc:
         TOTALS, CATALOG_META = {}, {}
-        log.warning("prototype/catalog.js не прочитан (%s) — проверка наличия ограничена", e)
+        log.warning(
+            "prototype/catalog.js не прочитан (%s) — проверка наличия ограничена",
+            exc,
+        )
     try:
-        with db() as c:
-            for r in c.execute("SELECT cat, short, total, level FROM extra_items").fetchall():
-                TOTALS[r["short"]] = int(r["total"] or 1)
-                CATALOG_META[r["short"]] = {"cat": r["cat"], "total": int(r["total"] or 1), "level": r["level"] or ""}
-            for r in c.execute("SELECT short FROM removed_items").fetchall():
-                TOTALS.pop(r["short"], None); CATALOG_META.pop(r["short"], None)
-    except Exception as e:
-        log.warning("extra_items/removed_items не прочитаны: %s", e)
+        with db() as connection:
+            for row in connection.execute(
+                "SELECT cat, short, total, level FROM extra_items"
+            ).fetchall():
+                total = int(row["total"] or 1)
+                TOTALS[row["short"]] = total
+                CATALOG_META[row["short"]] = {
+                    "cat": row["cat"],
+                    "total": total,
+                    "level": row["level"] or "",
+                    "numbers": list(range(1, total + 1)),
+                }
+            for row in connection.execute(
+                "SELECT short FROM removed_items"
+            ).fetchall():
+                TOTALS.pop(row["short"], None)
+                CATALOG_META.pop(row["short"], None)
+    except Exception as exc:
+        log.warning("extra_items/removed_items не прочитаны: %s", exc)
     log.info("Каталог: %s позиций", len(TOTALS))
 
 
 def sync_equipment_units() -> None:
-    """Создать недостающие паспорта, не удаляя заполненные и исторические записи."""
+    """Создать паспорта для всех допустимых номеров, не удаляя историю."""
     stamp = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
-    with db() as c:
+    with db() as connection:
         for short, meta in CATALOG_META.items():
-            for num in range(1, int(meta.get("total") or 1) + 1):
-                c.execute(
-                    "INSERT OR IGNORE INTO equipment_units(short, num, updated_at) VALUES(?,?,?)",
-                    (short, num, stamp),
+            for number in meta.get("numbers") or []:
+                connection.execute(
+                    "INSERT OR IGNORE INTO equipment_units(short, num, updated_at) "
+                    "VALUES(?,?,?)",
+                    (short, number, stamp),
                 )
 
 
-def ready_numbers(short: str) -> list:
-    """Номера исправных экземпляров, существующих в текущем каталоге."""
-    total = int((CATALOG_META.get(short) or {}).get("total") or 0)
-    if total < 1:
+def ready_numbers(short: str) -> list[int]:
+    """Исправные номера из допустимого для позиции пула."""
+    meta = CATALOG_META.get(short) or {}
+    allowed = set(meta.get("numbers") or [])
+    if not allowed:
         return []
-    with db() as c:
-        rows = c.execute(
+    with db() as connection:
+        rows = connection.execute(
             "SELECT num FROM equipment_units "
-            "WHERE short=? AND num<=? AND state='ready' ORDER BY num",
-            (short, total),
+            "WHERE short=? AND state='ready' ORDER BY num",
+            (short,),
         ).fetchall()
-    return [row["num"] for row in rows]
+    return [row["num"] for row in rows if row["num"] in allowed]
+
+
+def ready_capacity(short: str) -> int:
+    """Фактическая ёмкость не превышает общее количество из таблицы."""
+    meta = CATALOG_META.get(short) or {}
+    return min(int(meta.get("total") or 0), len(ready_numbers(short)))
 
 
 # ---- автосверка Media BMSTU по опубликованной таблице (лист 'список ребят') ----
@@ -430,6 +496,208 @@ def directory() -> dict:
     return data
 
 
+_MEMBERS_CACHE = {
+    "ts": 0.0,
+    "by_name": None,
+    "by_username": None,
+    "error": "",
+}
+
+
+def _split_sheet_values(value: str) -> list[str]:
+    return [
+        part.strip()
+        for part in str(value or "").split(",")
+        if part.strip() and part.strip() != "-"
+    ]
+
+
+def _norm_username(value: str) -> str:
+    value = str(value or "").strip()
+    if "t.me/" in value.casefold():
+        value = value.rstrip("/").rsplit("/", 1)[-1]
+    return value.lstrip("@").strip().casefold()
+
+
+def _member_rows(values: list[list]) -> list[dict]:
+    if not values:
+        return []
+    headers = {str(value).strip(): index for index, value in enumerate(values[0])}
+    required = {
+        "ФИО", "ТГ", "Отделы Media BMSTU", "Роль Media BMSTU", "Организации"
+    }
+    missing = required - set(headers)
+    if missing:
+        raise RuntimeError(
+            "В листе люди нет колонок: " + ", ".join(sorted(missing))
+        )
+    department_map = {"SMM": "СММ"}
+    members = []
+    for source in values[1:]:
+        row = list(source) + [""] * len(headers)
+        name = str(row[headers["ФИО"]]).strip()
+        if not name:
+            continue
+        deps = [
+            department_map.get(value, value)
+            for value in _split_sheet_values(
+                row[headers["Отделы Media BMSTU"]]
+            )
+        ]
+        external_orgs = _split_sheet_values(row[headers["Организации"]])
+        orgs = (["Media BMSTU"] if deps else []) + external_orgs
+        role_label = str(
+            row[headers["Роль Media BMSTU"]]
+        ).strip().casefold()
+        if role_label == "активист":
+            role = "активист"
+        elif role_label in ("стажёр", "стажер"):
+            role = "стажёр"
+        elif external_orgs:
+            role = "СО/ССФ"
+        else:
+            role = ""
+        members.append({
+            "name": name,
+            "telegram": str(row[headers["ТГ"]]).strip(),
+            "orgs": list(dict.fromkeys(orgs)),
+            "deps": list(dict.fromkeys(deps)),
+            "role": role,
+        })
+    return members
+
+
+def _build_member_directory(values: list[list]) -> dict[str, list[dict]]:
+    by_name: dict[str, list[dict]] = {}
+    for member in _member_rows(values):
+        by_name.setdefault(_norm_name(member["name"]), []).append(member)
+    return by_name
+
+
+def _merge_members(matches: list[dict]) -> dict:
+    role_order = {"": 0, "СО/ССФ": 1, "стажёр": 2, "активист": 3}
+    merged = {
+        "name": matches[0]["name"],
+        "telegram": matches[0]["telegram"],
+        "orgs": [],
+        "deps": [],
+        "role": "",
+    }
+    for member in matches:
+        for key in ("orgs", "deps"):
+            for value in member[key]:
+                if value not in merged[key]:
+                    merged[key].append(value)
+        if role_order.get(member["role"], 0) > role_order.get(merged["role"], 0):
+            merged["role"] = member["role"]
+    if not merged["role"]:
+        merged["role"] = (
+            "активист" if "Media BMSTU" in merged["orgs"] else "СО/ССФ"
+        )
+    return merged
+
+
+def _build_member_username_directory(values: list[list]) -> dict[str, dict]:
+    grouped: dict[str, list[dict]] = {}
+    for member in _member_rows(values):
+        username = _norm_username(member["telegram"])
+        if username:
+            grouped.setdefault(username, []).append(member)
+    return {
+        username: _merge_members(matches)
+        for username, matches in grouped.items()
+    }
+
+
+def _members_snapshot(force: bool = False) -> dict[str, list[dict]]:
+    if not MEMBERS_SHEET_ID:
+        return {}
+    if (
+        not force
+        and _MEMBERS_CACHE["by_name"] is not None
+        and time.time() - _MEMBERS_CACHE["ts"] < 600
+    ):
+        return _MEMBERS_CACHE["by_name"]
+    try:
+        service = _google_service(readonly=True)
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=MEMBERS_SHEET_ID,
+                range=_score_tab_range(MEMBERS_SHEET_TAB, "A:E"),
+            )
+            .execute()
+        )
+        values = result.get("values", [])
+        by_name = _build_member_directory(values)
+        by_username = _build_member_username_directory(values)
+        _MEMBERS_CACHE.update({
+            "ts": time.time(),
+            "by_name": by_name,
+            "by_username": by_username,
+            "error": "",
+        })
+        log.info(
+            "Лист люди: %s ФИО, %s Telegram-ников",
+            len(by_name),
+            len(by_username),
+        )
+        return by_name
+    except Exception as exc:
+        _MEMBERS_CACHE["error"] = str(exc)
+        if _MEMBERS_CACHE["by_name"] is not None:
+            log.warning(
+                "Лист люди временно недоступен, используется кэш: %s", exc
+            )
+            return _MEMBERS_CACHE["by_name"]
+        raise
+
+
+def _lookup_member_sync(name: str, force: bool = False) -> dict:
+    if not MEMBERS_SHEET_ID:
+        return {"status": "disabled", "member": None}
+    try:
+        matches = _members_snapshot(force).get(_norm_name(name), [])
+    except Exception as exc:
+        return {"status": "error", "member": None, "error": str(exc)}
+    if not matches:
+        return {"status": "not_found", "member": None}
+    if len(matches) != 1:
+        return {"status": "duplicate", "member": None}
+    return {"status": "found", "member": matches[0]}
+
+
+def _lookup_member_by_username_sync(
+    username: str, force: bool = False
+) -> dict:
+    if not MEMBERS_SHEET_ID:
+        return {"status": "disabled", "member": None}
+    normalized = _norm_username(username)
+    if not normalized:
+        return {"status": "no_username", "member": None}
+    try:
+        _members_snapshot(force)
+        member = (_MEMBERS_CACHE["by_username"] or {}).get(normalized)
+    except Exception as exc:
+        return {"status": "error", "member": None, "error": str(exc)}
+    if not member:
+        return {"status": "not_found", "member": None}
+    return {"status": "found", "member": member}
+
+
+async def lookup_member(name: str, force: bool = False) -> dict:
+    return await asyncio.to_thread(_lookup_member_sync, name, force)
+
+
+async def lookup_member_by_username(
+    username: str, force: bool = False
+) -> dict:
+    return await asyncio.to_thread(
+        _lookup_member_by_username_sync, username, force
+    )
+
+
 ACTIVE_STS = ("new", "curator", "approved", "issued", "ret")
 
 
@@ -455,7 +723,7 @@ def check_availability(items, d1, d2, exclude_rid=0):
         return None
     busy = busy_map(d1, d2, exclude_rid)
     bad = [s for s, q in items
-           if s in CATALOG_META and busy.get(s, 0) + int(q) > len(ready_numbers(s))]
+           if s in CATALOG_META and busy.get(s, 0) + int(q) > ready_capacity(s)]
     if bad:
         return "На выбранные даты не хватает исправных экземпляров: " + ", ".join(bad) + ". Уберите позиции или смените даты."
     return None
@@ -504,6 +772,8 @@ def validate_items(uid, raw_items, media=False, allow_restricted=False):
         meta = CATALOG_META[short]
         if qty < 1 or qty > meta["total"]: return None, "Количество экземпляров превышает доступное в каталоге."
         if meta["cat"] in blocks: return None, "Категория «%s» временно недоступна." % meta["cat"]
+        if meta["level"] == "none":
+            return None, "Эта позиция сейчас не выдаётся."
         if not allow_restricted:
             if meta["level"] == "глава" and not is_senior(uid): return None, "Эта позиция доступна только старшим администраторам."
             if meta["level"] == "акт" and role not in ("активист", "production") and not media: return None, "Эта позиция доступна активистам или ответственному за медиа."
@@ -776,7 +1046,9 @@ def unit_summary() -> list:
         "short": row["short"], "num": row["num"], "serial": row["serial"],
         "note": row["note"], "state": row["state"], "updatedAt": row["updated_at"],
         "updatedBy": _disp_user(row["updated_by"]) if row["updated_by"] else "система",
-    } for row in rows if row["short"] in CATALOG_META and row["num"] <= CATALOG_META[row["short"]]["total"]]
+    } for row in rows
+      if row["short"] in CATALOG_META
+      and row["num"] in CATALOG_META[row["short"]].get("numbers", [])]
 
 
 def unit_passport(short: str, num: int):
@@ -787,7 +1059,8 @@ def unit_passport(short: str, num: int):
         reqs = c.execute(
             "SELECT * FROM requests WHERE nums<>'{}' ORDER BY id DESC"
         ).fetchall()
-    if not unit or short not in CATALOG_META or num > CATALOG_META[short]["total"]:
+    if (not unit or short not in CATALOG_META
+            or num not in CATALOG_META[short].get("numbers", [])):
         return None
     history = []
     for row in reqs:
@@ -1103,56 +1376,153 @@ async def api_events(request: web.Request):
     return response
 
 
+def _apply_sheet_member(uid: int, member: dict) -> None:
+    with db() as connection:
+        connection.execute(
+            "UPDATE users SET name=?, orgs=?, deps=?, agreed=1, "
+            "verified='ok', role=? WHERE id=?",
+            (
+                member["name"],
+                json.dumps(member["orgs"], ensure_ascii=False),
+                json.dumps(member["deps"], ensure_ascii=False),
+                member["role"],
+                uid,
+            ),
+        )
+
+
+@auth
+async def api_agree(request, body, uid):
+    user = get_user(uid)
+    result = await lookup_member_by_username(
+        user["username"] if user else ""
+    )
+    if result["status"] == "found":
+        _apply_sheet_member(uid, result["member"])
+        payload = boot_payload(uid)
+        payload["autoRegistered"] = True
+        payload["memberStatus"] = "found"
+        return web.json_response(payload)
+    payload = boot_payload(uid)
+    payload["autoRegistered"] = False
+    payload["memberStatus"] = result["status"]
+    return web.json_response(payload)
+
+
+@auth
+async def api_member_lookup(request, body, uid):
+    name = clean_text(body.get("name"), 80)
+    if len(name.split()) < 3:
+        return jerr("Введите ФИО полностью — фамилия, имя и отчество.")
+    result = await lookup_member(name)
+    messages = {
+        "found": "Нашли вас в списке. Данные заполнятся автоматически.",
+        "not_found": "ФИО не найдено. Заполните данные вручную.",
+        "duplicate": "Найдено несколько одинаковых ФИО. Нужна ручная проверка.",
+        "disabled": "Лист людей не подключён. Заполните данные вручную.",
+        "error": "Лист людей временно недоступен. Заполните данные вручную.",
+    }
+    return web.json_response({
+        "ok": True,
+        "status": result["status"],
+        "found": result["status"] == "found",
+        "member": result.get("member"),
+        "message": messages[result["status"]],
+    })
+
+
 @auth
 async def api_register(request, body, uid):
     name = clean_text(body.get("name"), 80)
-    orgs = [clean_text(o, 100) for o in (body.get("orgs") or [])]
-    deps = body.get("deps") or []
     if not name:
-        return jerr("Укажите ФИО - без него регистрация невозможна.")
+        return jerr("Укажите ФИО — без него регистрация невозможна.")
     if len(name.split()) < 3:
-        return jerr("Введите ФИО полностью - фамилия, имя и отчество (три слова).")
-    if not orgs:
-        return jerr("Выберите организацию.")
-    mb = "Media BMSTU" in orgs
-    if mb and not deps:
-        return jerr("Выберите хотя бы один отдел Media BMSTU.")
-    # желаемая роль (пользователь выбирает при регистрации; старший подтвердит при верификации)
-    ALLOWED_ROLES = ("активист", "стажёр", "СО/ССФ") + (("production",) if ENABLE_PRODUCTION_ROLE else ())
-    want_role = (body.get("role") or "").strip()
-    if want_role not in ALLOWED_ROLES:
-        want_role = ""
-    u = get_user(uid)
-    verified = u["verified"]
-    role = u["role"]
-    name_changed = _norm_name(name) != _norm_name(u["name"] or "")
-    # автозаполнение по username из справочника (DIRECTORY_FILE)
-    dir_info = directory().get(u["username"] or "") if u and u["username"] else None
-    if dir_info:
-        if dir_info.get("role") and dir_info["role"] in ALLOWED_ROLES:
-            role = dir_info["role"]
-        if mb and dir_info.get("deps"):
-            deps = dir_info["deps"]
-    # автопроверка при первой регистрации ИЛИ при смене имени: MB - по Google-таблице, организации - по файлу
-    if verified != "ok" or name_changed:
-        found = (await mb_ok(name)) if mb else org_ok(name)
-        verified = "ok" if found else "pending"
-        role = want_role or role or ("активист" if mb else "СО/ССФ")
-    elif want_role:
+        return jerr(
+            "Введите ФИО полностью — фамилия, имя и отчество (три слова)."
+        )
+
+    member_result = await lookup_member(name)
+    member = member_result.get("member")
+    if member:
+        name = member["name"]
+        orgs = member["orgs"]
+        deps = member["deps"]
+        want_role = member["role"]
+    else:
+        orgs = [clean_text(value, 100) for value in (body.get("orgs") or [])]
+        deps = [clean_text(value, 40) for value in (body.get("deps") or [])]
+        if not orgs:
+            return jerr("Выберите организацию.")
+        if "Media BMSTU" in orgs and not deps:
+            return jerr("Выберите хотя бы один отдел Media BMSTU.")
+        want_role = str(body.get("role") or "").strip()
+
+    allowed_roles = ("активист", "стажёр", "СО/ССФ")
+    if want_role not in allowed_roles:
+        want_role = "активист" if "Media BMSTU" in orgs else "СО/ССФ"
+
+    user = get_user(uid)
+    verified = user["verified"]
+    role = user["role"]
+    name_changed = _norm_name(name) != _norm_name(user["name"] or "")
+
+    if member:
+        verified = "ok"
         role = want_role
-    with db() as c:
-        c.execute("UPDATE users SET name=?, orgs=?, deps=?, agreed=1, verified=?, role=? WHERE id=?",
-                  (name, json.dumps(orgs, ensure_ascii=False),
-                   json.dumps(deps if mb else [], ensure_ascii=False), verified, role, uid))
+    else:
+        dir_info = (
+            directory().get(user["username"] or "")
+            if user and user["username"]
+            else None
+        )
+        if dir_info:
+            if dir_info.get("role") in allowed_roles:
+                role = dir_info["role"]
+            if "Media BMSTU" in orgs and dir_info.get("deps"):
+                deps = dir_info["deps"]
+        if verified != "ok" or name_changed:
+            if MEMBERS_SHEET_ID and member_result["status"] in (
+                "not_found", "duplicate"
+            ):
+                found = False
+            else:
+                found = (
+                    await mb_ok(name)
+                    if "Media BMSTU" in orgs
+                    else org_ok(name)
+                )
+            verified = "ok" if found else "pending"
+            role = want_role or role
+        elif want_role:
+            role = want_role
+
+    with db() as connection:
+        connection.execute(
+            "UPDATE users SET name=?, orgs=?, deps=?, agreed=1, "
+            "verified=?, role=? WHERE id=?",
+            (
+                name,
+                json.dumps(orgs, ensure_ascii=False),
+                json.dumps(deps if "Media BMSTU" in orgs else [], ensure_ascii=False),
+                verified,
+                role,
+                uid,
+            ),
+        )
     if verified == "pending":
-        why = " · не найден в таблице Media BMSTU" if mb else ""
-        text = (f"⏳ Заявка на верификацию: {name} ({_disp_user(uid)}), "
-                f"орг.: {', '.join(orgs)}{why}. Решение - в приложении.")
+        reason = {
+            "not_found": "ФИО не найдено в листе люди",
+            "duplicate": "в листе люди несколько одинаковых ФИО",
+        }.get(member_result["status"], "нужна ручная проверка")
+        text = (
+            f"⏳ Заявка на верификацию: {name} ({_disp_user(uid)}), "
+            f"орг.: {', '.join(orgs)} · {reason}. Решение — в приложении."
+        )
         if ADMIN_CHAT_ID and bot is not None:
             try:
                 await bot.send_message(ADMIN_CHAT_ID, text)
-            except Exception as e:
-                log.warning("verif card failed: %s", e)
+            except Exception as exc:
+                log.warning("verif card failed: %s", exc)
                 await notify_seniors(text)
         else:
             await notify_seniors(text)
@@ -1239,6 +1609,9 @@ async def api_availability(request, body, uid):
     return web.json_response({
         "ok": True,
         "busy": busy_map(d1, d2, exclude),
+        "capacity": {
+            short: ready_capacity(short) for short in CATALOG_META
+        },
         "freeNums": free_nums,
     })
 
@@ -1357,19 +1730,45 @@ def score_status() -> dict:
     }
 
 
-def _google_service():
-    if not GOOGLE_SHEET_ID or not GOOGLE_SERVICE_ACCOUNT_JSON_B64:
-        raise RuntimeError("Не заполнены GOOGLE_SHEET_ID или GOOGLE_SERVICE_ACCOUNT_JSON_B64")
+def _google_credentials(scopes: list[str]):
     try:
-        raw = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64).decode("utf-8")
-        info = json.loads(raw)
         from google.oauth2.service_account import Credentials
-        from googleapiclient.discovery import build
+    except Exception as exc:
+        raise RuntimeError("Не установлены Google API зависимости: %s" % exc) from exc
+    try:
+        if GOOGLE_SERVICE_ACCOUNT_JSON_B64:
+            raw = base64.b64decode(GOOGLE_SERVICE_ACCOUNT_JSON_B64).decode("utf-8")
+            return Credentials.from_service_account_info(
+                json.loads(raw), scopes=scopes
+            )
+        if GOOGLE_SERVICE_ACCOUNT_FILE:
+            return Credentials.from_service_account_file(
+                GOOGLE_SERVICE_ACCOUNT_FILE, scopes=scopes
+            )
     except Exception as exc:
         raise RuntimeError("Не удалось прочитать ключ Google: %s" % exc) from exc
-    credentials = Credentials.from_service_account_info(
-        info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+    raise RuntimeError(
+        "Не заполнены GOOGLE_SERVICE_ACCOUNT_JSON_B64 "
+        "или GOOGLE_SERVICE_ACCOUNT_FILE"
+    )
+
+
+def _google_service(readonly: bool = False):
+    try:
+        from googleapiclient.discovery import build
+    except Exception as exc:
+        raise RuntimeError("Не установлены Google API зависимости: %s" % exc) from exc
+    scope = (
+        "https://www.googleapis.com/auth/spreadsheets.readonly"
+        if readonly
+        else "https://www.googleapis.com/auth/spreadsheets"
+    )
+    return build(
+        "sheets",
+        "v4",
+        credentials=_google_credentials([scope]),
+        cache_discovery=False,
+    )
 
 
 def _ensure_google_tabs(service) -> None:
@@ -2720,6 +3119,60 @@ async def serve_static(request: web.Request):
 
 # ================= Бот =================
 
+
+
+def read_legacy_recipients() -> list[dict]:
+    """Read recipients without changing either database."""
+    if not LEGACY_DB_PATH.is_file():
+        raise RuntimeError(f"Старая база не найдена: {LEGACY_DB_PATH}")
+    source = sqlite3.connect(
+        "file:%s?mode=ro" % LEGACY_DB_PATH.resolve(), uri=True
+    )
+    source.row_factory = sqlite3.Row
+    try:
+        columns = {
+            row["name"] for row in source.execute("PRAGMA table_info(users)")
+        }
+        required = {"user_id", "username", "full_name"}
+        if not required.issubset(columns):
+            raise RuntimeError("В старой базе таблица users имеет другой формат")
+        rows = source.execute(
+            "SELECT user_id, username, full_name FROM users "
+            "WHERE user_id IS NOT NULL ORDER BY user_id"
+        ).fetchall()
+    finally:
+        source.close()
+    return [
+        {
+            "user_id": int(row["user_id"]),
+            "username": str(row["username"] or "").lstrip("@"),
+            "name": str(row["full_name"] or "").strip(),
+        }
+        for row in rows
+    ]
+
+
+async def send_legacy_invites() -> dict:
+    """Send directly from the old read-only DB without touching the new DB."""
+    if bot is None:
+        raise RuntimeError("Telegram-бот не запущен")
+    rows = read_legacy_recipients()
+    sent = 0
+    failed = 0
+    for row in rows:
+        try:
+            await bot.send_message(row["user_id"], tx.LEGACY_MIGRATION_MESSAGE)
+        except Exception as exc:
+            failed += 1
+            log.warning(
+                "legacy invite to %s failed: %s", row["user_id"], exc
+            )
+        else:
+            sent += 1
+        await asyncio.sleep(0.06)
+    return {"source": len(rows), "sent": sent, "failed": failed}
+
+
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
@@ -2859,8 +3312,84 @@ async def cmd_admins(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
+@dp.message(Command("migrateold_preview"))
+async def cmd_migrateold_preview(message: Message) -> None:
+    if not is_senior(message.from_user.id):
+        return
+    try:
+        recipients = read_legacy_recipients()
+    except Exception as exc:
+        await message.answer(f"Не удалось прочитать старую базу: {exc}")
+        return
+    lines = [
+        "Получатели миграционной рассылки",
+        "Всего: %s" % len(recipients),
+        "",
+    ]
+    for index, recipient in enumerate(recipients, start=1):
+        username = (
+            "@" + recipient["username"] if recipient["username"] else "без username"
+        )
+        name = recipient["name"] or "без ФИО"
+        lines.append(
+            f"{index}. {name} — {username} — ID {recipient['user_id']}"
+        )
+    document = "\n".join(lines)
+    await message.answer_document(
+        BufferedInputFile(
+            document.encode("utf-8"),
+            "legacy-migration-recipients.txt",
+        ),
+        caption=(
+            f"Проверка завершена: рассылка пойдёт {len(recipients)} людям. "
+            "Ничего не импортировано и не отправлено."
+        ),
+    )
+
+
+@dp.message(Command("migrateold"))
+async def cmd_migrateold(message: Message) -> None:
+    if not is_senior(message.from_user.id):
+        return
+    if not LEGACY_MIGRATION_PASSWORD:
+        await message.answer(
+            "Сначала задайте LEGACY_MIGRATION_PASSWORD в bot/.env и перезапустите бота."
+        )
+        return
+    LEGACY_MIGRATION_WAITING.add(message.from_user.id)
+    await message.answer(
+        "Введите пароль миграции отдельным сообщением. Сообщение с паролем "
+        "будет удалено после проверки."
+    )
+
+
 @dp.message(F.chat.type == "private")
 async def any_private(message: Message) -> None:
+    user_id = message.from_user.id
+    if user_id in LEGACY_MIGRATION_WAITING:
+        LEGACY_MIGRATION_WAITING.discard(user_id)
+        password = message.text or ""
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if not hmac.compare_digest(password, LEGACY_MIGRATION_PASSWORD):
+            await message.answer("Неверный пароль. Миграция не запущена.")
+            return
+        await message.answer(
+            "Пароль принят. Начинаю рассылку напрямую по старой базе."
+        )
+        try:
+            result = await send_legacy_invites()
+        except Exception as exc:
+            await message.answer(f"Миграция остановлена: {exc}")
+            return
+        await message.answer(
+            "Готово. Адресатов в старой базе: {source}; "
+            "отправлено: {sent}; ошибок: {failed}. "
+            "Новая база не изменялась.".format(**result)
+        )
+        return
     # переслали пост из канала - подсказываем его id для ADMIN_CHAT_ID
     fo = getattr(message, "forward_origin", None)
     fchat = getattr(fo, "chat", None) if fo else None
@@ -2898,6 +3427,8 @@ async def main() -> None:
     app.router.add_post("/api/me", api_me)
     app.router.add_post("/api/revision", api_revision)
     app.router.add_post("/api/register", api_register)
+    app.router.add_post("/api/agree", api_agree)
+    app.router.add_post("/api/member/lookup", api_member_lookup)
     app.router.add_post("/api/request/create", api_req_create)
     app.router.add_post("/api/request/update", api_req_update)
     app.router.add_post("/api/request/action", api_req_action)

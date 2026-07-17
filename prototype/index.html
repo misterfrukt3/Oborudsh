@@ -425,6 +425,32 @@ function itemsTitle(items){
 }
 
 /* ================= ОНБОРДИНГ (первый экран) ================= */
+function agreeRules(){
+  if(!SRV){ navTo("regProfile"); return; }
+  if(_busy) return;
+  _busy=true;
+  api("agree",{}).then(d=>{
+    _busy=false;
+    applyBoot(d);
+    if(d.autoRegistered){
+      reg=null;
+      resetTo("home");
+      toast("✅ Профиль заполнен по Telegram-нику");
+    }else{
+      navTo("regProfile");
+      const messages={
+        no_username:"В Telegram не задан username — заполните профиль вручную",
+        not_found:"Ваш Telegram-ник не найден — заполните профиль вручную",
+        error:"Лист людей временно недоступен — заполните профиль вручную",
+        disabled:"Лист людей не подключён — заполните профиль вручную"
+      };
+      toast(messages[d.memberStatus]||"Заполните профиль вручную");
+    }
+  }).catch(e=>{
+    _busy=false;
+    toast("⚠️ "+e.message);
+  });
+}
 SCREENS.rules = (p) => ({
   body:`
    <div class="card rules">
@@ -438,7 +464,7 @@ SCREENS.rules = (p) => ({
     <p><b>●</b> Команда может отменить заявку при некорректном заполнении; за нарушения — временная блокировка. Студию 626 согласуют старшие админы.</p>
    </div>
    <div class="list-item" style="border-radius:14px" onclick="navTo('manual')"><div class="emoji-badge">${uic("book",19)}</div><div class="grow">Методичка пользователя<div class="sub">как всё устроено</div></div><span class="chev">›</span></div>`,
-  mainbtn: p.readonly ? "" : mainBtn("Согласен с регламентом","navTo('regProfile')")
+  mainbtn: p.readonly ? "" : mainBtn("Согласен с регламентом","agreeRules()")
 });
 SCREENS.manual = () => ({
   body:`
@@ -453,7 +479,7 @@ SCREENS.manual = () => ({
    </div>
    <div class="card rules">
     <div class="sec-label" style="margin-top:0">📖 Подробно</div>
-    <p><b>Роли:</b> СО/ССФ, стажёр, активист, production. Часть техники — только активистам/production (или «ответственный за медиа»), отдельные позиции — только старшим.</p>
+    <p><b>Роли:</b> СО/ССФ, стажёр и активист. Часть техники — только активистам (или «ответственный за медиа»), отдельные позиции — только старшим.</p>
     <p><b>Статусы:</b> Новая → Назначен куратор → Согласована → Выдана → Возврат на проверке → Закрыта. До согласования заявку можно редактировать и отменять.</p>
     <p><b>Повтор и наборы:</b> завершённую заявку можно повторить одной кнопкой; частые комплекты — сохранить в «Мои наборы».</p>
     <p><b>Переписка:</b> в карточке заявки есть чат с куратором, у сообщений видна подпись (кто пишет); сообщения старшего — красным. Непрочитанные подсвечиваются счётчиком.</p>
@@ -468,8 +494,8 @@ const SO_ORGS = ["Студсовет СМ","Студсовет ФН","Студс
 let reg = null;
 function initReg(edit){
   reg = edit
-    ? {name:profile.name, mb:profile.orgs.includes("Media BMSTU"), so:profile.orgs.some(o=>o!=="Media BMSTU"), sorgs:new Set(), other:"", deps:new Set(profile.deps), role:profile.status||""}
-    : {name:"", mb:false, so:false, sorgs:new Set(), other:"", deps:new Set(), role:""};
+    ? {name:profile.name, mb:profile.orgs.includes("Media BMSTU"), so:profile.orgs.some(o=>o!=="Media BMSTU"), sorgs:new Set(), other:"", deps:new Set(profile.deps), role:profile.status||"", _manual:true, _member:null, _lookupBusy:false}
+    : {name:"", mb:false, so:false, sorgs:new Set(), other:"", deps:new Set(), role:"", _manual:false, _member:null, _lookupBusy:false};
   if(edit) for(const o of profile.orgs){
     if(o==="Media BMSTU") continue;
     if(SO_ORGS.includes(o)) reg.sorgs.add(o);
@@ -479,7 +505,8 @@ function initReg(edit){
 function toggleSorg(o){ reg.sorgs.has(o) ? reg.sorgs.delete(o) : reg.sorgs.add(o); render(); }
 /* регистрация валидна: ФИО обязательно; MB — минимум один отдел; СО/ССФ — минимум одна организация */
 function regValid(){
-  if(reg.name.trim().split(/\s+/).filter(Boolean).length < 3) return false; // ФИО — 3 слова
+  if(reg.name.trim().split(/\s+/).filter(Boolean).length < 3) return false;
+  if(reg._member) return true; // ФИО — 3 слова
   if(!(reg.mb || reg.so)) return false;
   if(reg.mb && !reg.deps.size) return false;
   if(reg.so && (!reg.sorgs.size || (reg.sorgs.has("Другое") && !reg.other.trim()))) return false;
@@ -487,8 +514,48 @@ function regValid(){
 }
 function regNameInput(el){
   reg.name = el.value;
+  reg._member = null;
   const b = document.querySelector(".mainbtn");
   if(b) b.disabled = !regValid();
+}
+function lookupMember(){
+  if(!SRV){ reg._manual=true; render(); return; }
+  if(reg.name.trim().split(/\s+/).filter(Boolean).length<3){
+    toast("Укажите ФИО полностью"); return;
+  }
+  if(reg._lookupBusy) return;
+  reg._lookupBusy=true;
+  api("member/lookup",{name:reg.name.trim()}).then(d=>{
+    reg._lookupBusy=false;
+    if(d.found && d.member){
+      const m=d.member;
+      reg.name=m.name;
+      reg._member=m;
+      reg._manual=false;
+      reg.mb=m.orgs.includes("Media BMSTU");
+      reg.so=m.orgs.some(o=>o!=="Media BMSTU");
+      reg.deps=new Set(m.deps||[]);
+      reg.role=m.role||"";
+      reg.sorgs=new Set();
+      reg.other="";
+      for(const o of m.orgs){
+        if(o==="Media BMSTU") continue;
+        if(SO_ORGS.includes(o)) reg.sorgs.add(o);
+        else if(!reg.other){ reg.sorgs.add("Другое"); reg.other=o; }
+      }
+      toast("✅ "+d.message);
+    }else{
+      reg._member=null;
+      reg._manual=true;
+      toast(d.message||"Заполните данные вручную");
+    }
+    render();
+  }).catch(e=>{
+    reg._lookupBusy=false;
+    reg._manual=true;
+    toast("⚠️ "+e.message);
+    render();
+  });
 }
 SCREENS.regProfile = (p) => {
   const edit = !!p.edit;
@@ -500,6 +567,8 @@ SCREENS.regProfile = (p) => {
    <div class="sec-label">ФИО (обязательно)</div>
    <input type="text" id="reg-name" maxlength="80" placeholder="Оборудов Запарыш Медийщикович" value="${escAttr(reg.name)}" oninput="regNameInput(this)">
    <p class="sub" style="padding:4px 4px 0">Полностью: фамилия, имя и отчество (три слова).</p>
+   ${!edit?`<button class="secondary" style="margin-top:10px;width:100%" onclick="lookupMember()" ${reg._lookupBusy?"disabled":""}>${reg._lookupBusy?"Ищем…":"Найти меня в списке «люди»"}</button>`:""}
+   ${reg._member?`<div class="card" style="margin-top:10px"><b>✅ Данные найдены</b><p class="sub" style="margin-top:6px">${reg._member.orgs.join(", ")}${reg._member.deps.length?" · "+reg._member.deps.join(", "):""} · ${reg._member.role}</p></div>`:""}
    <div class="sec-label">Откуда вы</div>
    <div>
      <div class="check-row ${reg.mb?"on":""}" ${chkA(reg.mb)} onclick="reg.mb=!reg.mb;render()"><span class="checkbox">✓</span><span class="grow">Media BMSTU</span></div>
@@ -745,7 +814,7 @@ function calHtml(cfg){
 
 /* ================= МАСТЕР ЗАЯВКИ ================= */
 function startWizard(){
-  wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart:{}, event:"", comment:"", media:false, search:"", catFilter:"Все", busy:{}, editId:0};
+  wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart:{}, event:"", comment:"", media:false, search:"", catFilter:"Все", busy:{}, capacity:{}, editId:0};
   navTo("wizard");
 }
 function itemOf(short){ for(const c of CATALOG){ const it=c.items.find(i=>i.short===short); if(it) return it; } return null; }
@@ -754,6 +823,7 @@ function canAct(){ return profile.status==="активист" || profile.status=
 function isSeniorNow(){ return SRV ? !!SRV.isSenior : role==="senior"; }
 function itemLocked(it){
   if(!it.level) return false;
+  if(it.level==="none") return true;
   if(it.level==="глава") return !isSeniorNow();
   return !canAct();
 }
@@ -821,8 +891,13 @@ function openTimeSheet(key){
 }
 /* --- каталог --- */
 function freeOf(it){
-  const total = it.total||1;
-  if(SRV){ const busy=(wiz&&wiz.busy)||{}; return Math.max(0, total - (busy[it.short]||0)); }
+  let total = it.total||1;
+  if(SRV){
+    const busy=(wiz&&wiz.busy)||{};
+    const capacity=(wiz&&wiz.capacity)||{};
+    if(Object.prototype.hasOwnProperty.call(capacity,it.short)) total=capacity[it.short];
+    return Math.max(0, total - (busy[it.short]||0));
+  }
   const busyMap = {"R6m2":1,"Ronin RS 3":1,"Радиопетли RODE":1,"Амаран 300":1};
   return Math.max(0, total - (busyMap[it.short]||0));
 }
@@ -832,7 +907,7 @@ function wizToCatalog(){
     const btn = document.querySelector(".mainbtn");
     if(btn){ btn.disabled = true; btn.textContent = "Проверяем занятость…"; }
     api("availability",{d1:wiz.d1, d2:wiz.d2, exclude:wiz.editId||0})
-      .then(d=>{ wiz.busy = d.busy||{}; wiz.step=2; render(); })
+      .then(d=>{ wiz.busy=d.busy||{}; wiz.capacity=d.capacity||{}; wiz.step=2; render(); })
       .catch(e=>{ render(); toast("⚠️ "+e.message); });
     return;
   }
@@ -906,7 +981,9 @@ function wizCatalog(){
               : '<span style="color:var(--hint)">· недоступна</span>')
             : it.level==="глава"
               ? (isSeniorNow() ? '<span style="color:var(--violet)">· только старшие</span>' : '<span style="color:var(--hint)">· только старшие</span>')
-              : ""}
+              : it.level==="none"
+                ? '<span style="color:var(--hint)">· не выдаётся</span>'
+                : ""}
           </div>
         </div>
         <div class="stepper">
@@ -964,7 +1041,7 @@ function wizCatalog(){
 function chQty(short, d){
   const it = itemOf(short);
   if(d>0 && it && itemLocked(it)){
-    toast(it.level==="глава" ? "Эту позицию берут только старшие админы" : "Позиция доступна только активистам");
+    toast(it.level==="none" ? "Эта позиция сейчас не выдаётся" : (it.level==="глава" ? "Эту позицию берут только старшие админы" : "Позиция доступна только активистам"));
     return;
   }
   if(d>0 && it){

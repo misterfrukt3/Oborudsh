@@ -465,3 +465,38 @@ sudo systemctl status oborudka
 Rollback: stop the service, restore `main.py`, `requirements.txt`, `prototype/` and `oborudka.db` from the selected release backup, reinstall requirements, then start the service.
 
 A `main.py`, dependency or `.env` change requires `sudo systemctl restart oborudka`. Static-only changes do not require a restart. After release check `/scorestatus`, then `/scoresync`, and verify the two sheet tabs.
+
+
+### Закрытый лист «люди»
+
+В `bot/.env` заполнить:
+
+```env
+MEMBERS_SHEET_ID=1caWlBJbzYHt0-SK744UD9rU7VS28cNAJY7jxoXosqCs
+MEMBERS_SHEET_TAB=люди
+GOOGLE_SERVICE_ACCOUNT_JSON_B64=
+```
+
+Service Account должен иметь доступ «Читатель». Локально вместо Base64 можно
+указать `GOOGLE_SERVICE_ACCOUNT_FILE`, но на сервере ключ хранится только в
+`bot/.env`. При регистрации одна точная строка ФИО заполняет организации,
+отделы и роль автоматически; отсутствие или дубль отправляются на ручную
+проверку.
+
+### Одноразовая миграционная рассылка
+
+1. Положить старую базу как `bot/equipment_bot.sqlite3`.
+2. Задать `LEGACY_MIGRATION_PASSWORD` в `bot/.env`.
+3. Перезапустить бот.
+4. Сначала выполнить `/migrateold_preview`: бот пришлёт количество и TXT со всеми адресатами, ничего не меняя.
+5. Затем написать `/migrateold` и отправить пароль отдельным сообщением.
+
+Старая таблица `users` используется только как список адресатов. В новую базу ничего
+не импортируется. `/migrateold_preview` безопасно показывает список, а `/migrateold`
+делает рассылку напрямую по старой SQLite.
+
+
+Таблица баллов текущего релиза:
+`1a6F6lnQbiAQEKka-0oU2c8Kmy9Mvq6i1QvQwhRnVRHU`.
+Service Account имеет права редактора. После заполнения `GOOGLE_SHEET_ID` и
+`GOOGLE_SHEETS_ENABLED=1` проверить `/scorestatus`, затем `/scoresync`.
