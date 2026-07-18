@@ -35,11 +35,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -50,16 +50,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           },
           {
-            "n": 4,
+            "n": 2,
             "level": null
           }
         ]
@@ -85,16 +85,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           },
           {
-            "n": 3,
+            "n": 2,
             "level": null
           }
         ]
@@ -120,16 +120,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           },
           {
-            "n": 3,
+            "n": 2,
             "level": null
           }
         ]
@@ -140,11 +140,11 @@
         "total": 1,
         "level": "глава",
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": "глава"
           }
         ]
@@ -245,11 +245,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           }
         ]
@@ -260,11 +260,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -275,11 +275,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -290,11 +290,11 @@
         "total": 1,
         "level": "none",
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": "none"
           }
         ]
@@ -305,11 +305,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -335,11 +335,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -350,11 +350,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -365,11 +365,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -380,11 +380,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
@@ -395,16 +395,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          6,
-          7
+          1,
+          2
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 7,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -445,11 +445,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           }
         ]
@@ -460,11 +460,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -475,11 +475,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -490,11 +490,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
@@ -505,11 +505,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -520,11 +520,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          7
+          1
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -595,21 +595,21 @@
         "total": 3,
         "level": null,
         "numbers": [
+          1,
           2,
-          3,
-          4
+          3
         ],
         "units": [
+          {
+            "n": 1,
+            "level": null
+          },
           {
             "n": 2,
             "level": null
           },
           {
             "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
             "level": null
           }
         ]
@@ -635,12 +635,16 @@
         "total": 4,
         "level": null,
         "numbers": [
+          1,
           2,
           3,
-          4,
-          5
+          4
         ],
         "units": [
+          {
+            "n": 1,
+            "level": null
+          },
           {
             "n": 2,
             "level": null
@@ -652,10 +656,6 @@
           {
             "n": 4,
             "level": null
-          },
-          {
-            "n": 5,
-            "level": null
           }
         ]
       },
@@ -665,11 +665,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": null
           }
         ]
@@ -680,11 +680,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": null
           }
         ]
@@ -695,16 +695,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          8,
-          9
+          1,
+          2
         ],
         "units": [
           {
-            "n": 8,
+            "n": 1,
             "level": null
           },
           {
-            "n": 9,
+            "n": 2,
             "level": null
           }
         ]
@@ -715,11 +715,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          10
+          1
         ],
         "units": [
           {
-            "n": 10,
+            "n": 1,
             "level": null
           }
         ]
@@ -730,11 +730,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          11
+          1
         ],
         "units": [
           {
-            "n": 11,
+            "n": 1,
             "level": null
           }
         ]
@@ -745,11 +745,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          12
+          1
         ],
         "units": [
           {
-            "n": 12,
+            "n": 1,
             "level": null
           }
         ]
@@ -760,11 +760,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          13
+          1
         ],
         "units": [
           {
-            "n": 13,
+            "n": 1,
             "level": null
           }
         ]
@@ -775,11 +775,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          14
+          1
         ],
         "units": [
           {
-            "n": 14,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -790,11 +790,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          15
+          1
         ],
         "units": [
           {
-            "n": 15,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -805,11 +805,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          16
+          1
         ],
         "units": [
           {
-            "n": 16,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -820,11 +820,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          17
+          1
         ],
         "units": [
           {
-            "n": 17,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -875,11 +875,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -905,11 +905,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           }
         ]
@@ -920,11 +920,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -935,26 +935,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6,
-          7
+          1,
+          2
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           },
           {
-            "n": 5,
-            "level": null
-          },
-          {
-            "n": 6,
-            "level": null
-          },
-          {
-            "n": 7,
+            "n": 2,
             "level": null
           }
         ]
@@ -965,11 +955,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          8
+          1
         ],
         "units": [
           {
-            "n": 8,
+            "n": 1,
             "level": null
           }
         ]
@@ -1052,26 +1042,26 @@
         "total": 4,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6,
-          7
+          1,
+          2,
+          3,
+          4
         ],
         "units": [
           {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
             "n": 4,
-            "level": null
-          },
-          {
-            "n": 5,
-            "level": null
-          },
-          {
-            "n": 6,
-            "level": null
-          },
-          {
-            "n": 7,
             "level": null
           }
         ]
@@ -1082,26 +1072,26 @@
         "total": 4,
         "level": null,
         "numbers": [
-          8,
-          9,
-          10,
-          11
+          1,
+          2,
+          3,
+          4
         ],
         "units": [
           {
-            "n": 8,
+            "n": 1,
             "level": null
           },
           {
-            "n": 9,
+            "n": 2,
             "level": null
           },
           {
-            "n": 10,
+            "n": 3,
             "level": null
           },
           {
-            "n": 11,
+            "n": 4,
             "level": null
           }
         ]
@@ -1127,21 +1117,21 @@
         "total": 3,
         "level": "акт",
         "numbers": [
+          1,
           2,
-          3,
-          4
+          3
         ],
         "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
           {
             "n": 2,
             "level": "акт"
           },
           {
             "n": 3,
-            "level": "акт"
-          },
-          {
-            "n": 4,
             "level": "акт"
           }
         ]
@@ -1152,16 +1142,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          5,
-          6
+          1,
+          2
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           },
           {
-            "n": 6,
+            "n": 2,
             "level": null
           }
         ]
@@ -1172,11 +1162,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          7
+          1
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -1187,11 +1177,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          8
+          1
         ],
         "units": [
           {
-            "n": 8,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -1202,16 +1192,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          9,
-          10
+          1,
+          2
         ],
         "units": [
           {
-            "n": 9,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 10,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -1233,15 +1223,50 @@
       },
       {
         "short": "Плашка MC Pro",
-        "full": "Комплект осветителей Aputure MC Pro (8-Light Kit)",
+        "full": "плашка из комплекта осветителей Aputure MC Pro (8-Light Kit)",
         "total": 8,
         "level": null,
         "numbers": [
-          2
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
         ],
         "units": [
           {
+            "n": 1,
+            "level": null
+          },
+          {
             "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
+            "n": 6,
+            "level": null
+          },
+          {
+            "n": 7,
+            "level": null
+          },
+          {
+            "n": 8,
             "level": null
           }
         ]
@@ -1252,31 +1277,41 @@
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           },
           {
-            "n": 4,
+            "n": 2,
             "level": null
           }
         ]
       },
       {
         "short": "Плашки Amaran P60C",
-        "full": "Комплект осветителей Aputure Amaran P60C RGBWW (3шт)",
+        "full": "плашка из комплект осветителей Aputure Amaran P60C RGBWW",
         "total": 3,
         "level": "акт",
         "numbers": [
-          5
+          1,
+          2,
+          3
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
+            "level": "акт"
+          },
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
             "level": "акт"
           }
         ]
@@ -1312,11 +1347,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -1347,11 +1382,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -1362,11 +1397,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -1377,11 +1412,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
@@ -1392,11 +1427,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": null
           }
         ]
@@ -1407,36 +1442,36 @@
         "total": 6,
         "level": null,
         "numbers": [
-          7,
-          8,
-          9,
-          10,
-          11,
-          12
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": null
           },
           {
-            "n": 8,
+            "n": 2,
             "level": null
           },
           {
-            "n": 9,
+            "n": 3,
             "level": null
           },
           {
-            "n": 10,
+            "n": 4,
             "level": null
           },
           {
-            "n": 11,
+            "n": 5,
             "level": null
           },
           {
-            "n": 12,
+            "n": 6,
             "level": null
           }
         ]
@@ -1447,11 +1482,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          13
+          1,
+          2
         ],
         "units": [
           {
-            "n": 13,
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
             "level": null
           }
         ]
@@ -1482,11 +1522,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -1497,21 +1537,21 @@
         "total": 3,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6
+          1,
+          2,
+          3
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           },
           {
-            "n": 5,
+            "n": 2,
             "level": null
           },
           {
-            "n": 6,
+            "n": 3,
             "level": null
           }
         ]
@@ -1551,16 +1591,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": null
           },
           {
-            "n": 3,
+            "n": 2,
             "level": null
           }
         ]
@@ -1571,11 +1611,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": null
           }
         ]
@@ -1586,11 +1626,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -1601,11 +1641,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": null
           }
         ]
@@ -1616,11 +1656,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": null
           }
         ]
@@ -1631,11 +1671,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          8
+          1
         ],
         "units": [
           {
-            "n": 8,
+            "n": 1,
             "level": null
           }
         ]
@@ -1690,17 +1730,29 @@
         "total": 9,
         "level": null,
         "numbers": [
+          1,
+          2,
+          3,
           4,
           5,
           6,
           7,
           8,
-          9,
-          10,
-          11,
-          12
+          9
         ],
         "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
           {
             "n": 4,
             "level": null
@@ -1723,18 +1775,6 @@
           },
           {
             "n": 9,
-            "level": null
-          },
-          {
-            "n": 10,
-            "level": null
-          },
-          {
-            "n": 11,
-            "level": null
-          },
-          {
-            "n": 12,
             "level": null
           }
         ]
@@ -1765,11 +1805,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           }
         ]
@@ -1780,21 +1820,21 @@
         "total": 3,
         "level": "акт",
         "numbers": [
-          4,
-          5,
-          6
+          1,
+          2,
+          3
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 5,
+            "n": 2,
             "level": "акт"
           },
           {
-            "n": 6,
+            "n": 3,
             "level": "акт"
           }
         ]
@@ -1805,11 +1845,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": null
           }
         ]
@@ -1850,11 +1890,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
@@ -1865,36 +1905,36 @@
         "total": 6,
         "level": null,
         "numbers": [
-          6,
-          7,
-          8,
-          9,
-          10,
-          11
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
         ],
         "units": [
           {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
+            "n": 3,
+            "level": null
+          },
+          {
+            "n": 4,
+            "level": null
+          },
+          {
+            "n": 5,
+            "level": null
+          },
+          {
             "n": 6,
-            "level": null
-          },
-          {
-            "n": 7,
-            "level": null
-          },
-          {
-            "n": 8,
-            "level": null
-          },
-          {
-            "n": 9,
-            "level": null
-          },
-          {
-            "n": 10,
-            "level": null
-          },
-          {
-            "n": 11,
             "level": null
           }
         ]
@@ -1975,11 +2015,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          13
+          1
         ],
         "units": [
           {
-            "n": 13,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -1990,11 +2030,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          14
+          1
         ],
         "units": [
           {
-            "n": 14,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2038,21 +2078,21 @@
         "total": 3,
         "level": null,
         "numbers": [
-          3,
-          4,
-          5
+          1,
+          2,
+          3
         ],
         "units": [
           {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
+          {
             "n": 3,
-            "level": null
-          },
-          {
-            "n": 4,
-            "level": null
-          },
-          {
-            "n": 5,
             "level": null
           }
         ]
@@ -2083,16 +2123,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": null
           },
           {
-            "n": 4,
+            "n": 2,
             "level": null
           }
         ]
@@ -2103,16 +2143,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          10,
-          11
+          1,
+          2
         ],
         "units": [
           {
-            "n": 10,
+            "n": 1,
             "level": null
           },
           {
-            "n": 11,
+            "n": 2,
             "level": null
           }
         ]
@@ -2123,26 +2163,26 @@
         "total": 4,
         "level": null,
         "numbers": [
-          12,
-          13,
-          14,
-          15
+          1,
+          2,
+          3,
+          4
         ],
         "units": [
           {
-            "n": 12,
+            "n": 1,
             "level": null
           },
           {
-            "n": 13,
+            "n": 2,
             "level": null
           },
           {
-            "n": 14,
+            "n": 3,
             "level": null
           },
           {
-            "n": 15,
+            "n": 4,
             "level": null
           }
         ]
@@ -2181,11 +2221,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ],
         "units": [
           {
-            "n": 2,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2196,11 +2236,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2211,11 +2251,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          4
+          1
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2226,11 +2266,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2241,11 +2281,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -2282,13 +2322,12 @@
       {
         "short": "Аккум NP-FW50 (ZV-E10)",
         "full": "Аккумулятор Sony NP-FW50",
-        "total": 4,
+        "total": 3,
         "level": null,
         "numbers": [
           1,
           2,
-          3,
-          4
+          3
         ],
         "units": [
           {
@@ -2302,10 +2341,6 @@
           {
             "n": 3,
             "level": null
-          },
-          {
-            "n": 4,
-            "level": null
           }
         ]
       },
@@ -2315,19 +2350,19 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
       },
       {
         "short": "Аккум NP-FZ100 (A7/A6700)",
-        "full": "Аккум z100 красный",
-        "total": 4,
+        "full": "аккумулятор z100 для камер Sony",
+        "total": 6,
         "level": null,
         "numbers": [
           1,
@@ -2335,9 +2370,7 @@
           3,
           4,
           5,
-          6,
-          7,
-          8
+          6
         ],
         "units": [
           {
@@ -2363,14 +2396,6 @@
           {
             "n": 6,
             "level": null
-          },
-          {
-            "n": 7,
-            "level": null
-          },
-          {
-            "n": 8,
-            "level": null
           }
         ]
       },
@@ -2380,16 +2405,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          9,
-          10
+          1,
+          2
         ],
         "units": [
           {
-            "n": 9,
+            "n": 1,
             "level": null
           },
           {
-            "n": 10,
+            "n": 2,
             "level": null
           }
         ]
@@ -2400,16 +2425,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          11,
-          12
+          1,
+          2
         ],
         "units": [
           {
-            "n": 11,
+            "n": 1,
             "level": null
           },
           {
-            "n": 12,
+            "n": 2,
             "level": null
           }
         ]
@@ -2450,11 +2475,11 @@
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ],
         "units": [
           {
-            "n": 5,
+            "n": 1,
             "level": null
           }
         ]
@@ -2505,16 +2530,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          7,
-          8
+          1,
+          2
         ],
         "units": [
           {
-            "n": 7,
+            "n": 1,
             "level": null
           },
           {
-            "n": 8,
+            "n": 2,
             "level": null
           }
         ]
@@ -2541,21 +2566,28 @@
       },
       {
         "short": "Аккум LP-E17  (R8)",
-        "full": "Аккумулятор lp-e17 power extra",
-        "total": 3,
+        "full": "Аккумулятор lp-e17 для камер Canon",
+        "total": 8,
         "level": null,
         "numbers": [
+          1,
+          2,
           3,
           4,
           5,
           6,
           7,
-          8,
-          9,
-          10,
-          11
+          8
         ],
         "units": [
+          {
+            "n": 1,
+            "level": null
+          },
+          {
+            "n": 2,
+            "level": null
+          },
           {
             "n": 3,
             "level": null
@@ -2578,18 +2610,6 @@
           },
           {
             "n": 8,
-            "level": null
-          },
-          {
-            "n": 9,
-            "level": null
-          },
-          {
-            "n": 10,
-            "level": null
-          },
-          {
-            "n": 11,
             "level": null
           }
         ]
@@ -2652,7 +2672,7 @@
       {
         "short": "Аккум NP-FW970",
         "full": "Аккумулятор Sony NP-FW970",
-        "total": 2,
+        "total": 12,
         "level": null,
         "numbers": [
           1,
@@ -2725,16 +2745,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          13,
-          14
+          1,
+          2
         ],
         "units": [
           {
-            "n": 13,
+            "n": 1,
             "level": null
           },
           {
-            "n": 14,
+            "n": 2,
             "level": null
           }
         ]
@@ -2745,16 +2765,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          15,
-          16
+          1,
+          2
         ],
         "units": [
           {
-            "n": 15,
+            "n": 1,
             "level": null
           },
           {
-            "n": 16,
+            "n": 2,
             "level": null
           }
         ]
@@ -2765,16 +2785,16 @@
         "total": 2,
         "level": null,
         "numbers": [
-          17,
-          18
+          1,
+          2
         ],
         "units": [
           {
-            "n": 17,
+            "n": 1,
             "level": null
           },
           {
-            "n": 18,
+            "n": 2,
             "level": null
           }
         ]
@@ -2810,52 +2830,18 @@
         "total": 6,
         "level": "акт",
         "numbers": [
-          4,
-          5,
-          6,
-          7,
-          8,
-          9
-        ],
-        "units": [
-          {
-            "n": 4,
-            "level": "акт"
-          },
-          {
-            "n": 5,
-            "level": "акт"
-          },
-          {
-            "n": 6,
-            "level": "акт"
-          },
-          {
-            "n": 7,
-            "level": "акт"
-          },
-          {
-            "n": 8,
-            "level": "акт"
-          },
-          {
-            "n": 9,
-            "level": "акт"
-          }
-        ]
-      },
-      {
-        "short": "Powerbank Magsafe",
-        "full": "Powerbank MagSafe PowerBank 5000 мАч",
-        "total": 4,
-        "level": "акт",
-        "numbers": [
+          1,
           2,
           3,
           4,
-          5
+          5,
+          6
         ],
         "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
           {
             "n": 2,
             "level": "акт"
@@ -2871,6 +2857,40 @@
           {
             "n": 5,
             "level": "акт"
+          },
+          {
+            "n": 6,
+            "level": "акт"
+          }
+        ]
+      },
+      {
+        "short": "Powerbank Magsafe",
+        "full": "Powerbank MagSafe PowerBank 5000 мАч",
+        "total": 4,
+        "level": "акт",
+        "numbers": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "units": [
+          {
+            "n": 1,
+            "level": "акт"
+          },
+          {
+            "n": 2,
+            "level": "акт"
+          },
+          {
+            "n": 3,
+            "level": "акт"
+          },
+          {
+            "n": 4,
+            "level": "акт"
           }
         ]
       },
@@ -2880,16 +2900,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          6,
-          7
+          1,
+          2
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 7,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -3151,9 +3171,7 @@
           3,
           4,
           5,
-          6,
-          7,
-          8
+          6
         ],
         "units": [
           {
@@ -3178,14 +3196,6 @@
           },
           {
             "n": 6,
-            "level": null
-          },
-          {
-            "n": 7,
-            "level": null
-          },
-          {
-            "n": 8,
             "level": null
           }
         ]
@@ -3233,11 +3243,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ],
         "units": [
           {
-            "n": 3,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -3248,16 +3258,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          4,
-          5
+          1,
+          2
         ],
         "units": [
           {
-            "n": 4,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 5,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -3268,21 +3278,21 @@
         "total": 3,
         "level": "акт",
         "numbers": [
-          6,
-          7,
-          8
+          1,
+          2,
+          3
         ],
         "units": [
           {
-            "n": 6,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 7,
+            "n": 2,
             "level": "акт"
           },
           {
-            "n": 8,
+            "n": 3,
             "level": "акт"
           }
         ]
@@ -3293,11 +3303,11 @@
         "total": 1,
         "level": "акт",
         "numbers": [
-          9
+          1
         ],
         "units": [
           {
-            "n": 9,
+            "n": 1,
             "level": "акт"
           }
         ]
@@ -3308,16 +3318,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          10,
-          11
+          1,
+          2
         ],
         "units": [
           {
-            "n": 10,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 11,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -3328,16 +3338,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          12,
-          13
+          1,
+          2
         ],
         "units": [
           {
-            "n": 12,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 13,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -3348,26 +3358,26 @@
         "total": 4,
         "level": "акт",
         "numbers": [
-          14,
-          15,
-          16,
-          17
+          1,
+          2,
+          3,
+          4
         ],
         "units": [
           {
-            "n": 14,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 15,
+            "n": 2,
             "level": "акт"
           },
           {
-            "n": 16,
+            "n": 3,
             "level": "акт"
           },
           {
-            "n": 17,
+            "n": 4,
             "level": "акт"
           }
         ]
@@ -3378,16 +3388,16 @@
         "total": 2,
         "level": "акт",
         "numbers": [
-          18,
-          19
+          1,
+          2
         ],
         "units": [
           {
-            "n": 18,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 19,
+            "n": 2,
             "level": "акт"
           }
         ]
@@ -3398,41 +3408,41 @@
         "total": 7,
         "level": "акт",
         "numbers": [
-          20,
-          21,
-          22,
-          23,
-          24,
-          25,
-          26
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
         ],
         "units": [
           {
-            "n": 20,
+            "n": 1,
             "level": "акт"
           },
           {
-            "n": 21,
+            "n": 2,
             "level": "акт"
           },
           {
-            "n": 22,
+            "n": 3,
             "level": "акт"
           },
           {
-            "n": 23,
+            "n": 4,
             "level": "акт"
           },
           {
-            "n": 24,
+            "n": 5,
             "level": "акт"
           },
           {
-            "n": 25,
+            "n": 6,
             "level": "акт"
           },
           {
-            "n": 26,
+            "n": 7,
             "level": "акт"
           }
         ]

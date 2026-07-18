@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20260716">
+<link rel="stylesheet" href="style.css?v=20260717b">
 </head>
 <body>
 
@@ -28,8 +28,8 @@
   <div id="overlay"></div>
 </div>
 
-<script src="catalog.js?v=20260716"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
-<script src="texts.js?v=20260716"></script>
+<script src="catalog.js?v=20260717b"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script src="texts.js?v=20260717b"></script>
 <script>
 "use strict";
 /* запрет масштабирования интерфейса: жест «щипок» и двойной тап */
@@ -44,17 +44,35 @@ document.addEventListener("touchend", e=>{
 document.addEventListener("touchmove", e=>{ if(e.touches && e.touches.length>1) e.preventDefault(); }, {passive:false});
 /* ================= TELEGRAM ================= */
 const TG = window.Telegram && window.Telegram.WebApp;
-const IN_TG = !!(TG && TG.platform && TG.platform !== "unknown");
+const TG_HASH = new URLSearchParams(location.hash.replace(/^#/, ""));
+const TG_QUERY = new URLSearchParams(location.search);
+function tgLaunchParam(name){ return TG_HASH.get(name) || TG_QUERY.get(name) || ""; }
+const TG_INIT_DATA = (TG && TG.initData) || tgLaunchParam("tgWebAppData");
+const IN_TG = !!(
+  TG_INIT_DATA ||
+  tgLaunchParam("tgWebAppPlatform") ||
+  (TG && TG.platform && TG.platform !== "unknown")
+);
 
 /* ================= API (бэкенд) =================
    SRV = ответ бэкенда (роли, данные). null — демо-режим на моках (браузер / бэкенд недоступен). */
 let SRV = null;
-async function api(path, body){
-  const res = await fetch("/api/"+path, {method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify(Object.assign({initData: TG ? TG.initData : ""}, body||{}))});
-  const d = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(d.error || ("HTTP "+res.status));
-  return d;
+async function api(path, body, timeoutMs){
+  const controller = timeoutMs && window.AbortController ? new AbortController() : null;
+  const timer = controller ? setTimeout(()=>controller.abort(), timeoutMs) : null;
+  try{
+    const res = await fetch("/api/"+path, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(Object.assign({initData: TG_INIT_DATA}, body||{})),
+      signal: controller ? controller.signal : undefined});
+    const d = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(d.error || ("HTTP "+res.status));
+    return d;
+  }catch(e){
+    if(e && e.name==="AbortError") throw new Error("Сервер долго не отвечает");
+    throw e;
+  }finally{
+    if(timer) clearTimeout(timer);
+  }
 }
 let _busy = false; // защита от двойных нажатий: пока запрос в полёте, повтор игнорим
 function srvDo(path, body, after){
@@ -391,7 +409,7 @@ function render(){
   const out = SCREENS[s.name](s.params);
   const isNested = stack.length>1 || (s.name==="wizard" && wiz && wiz.step>1);
   $("tgleft").textContent = isNested ? "‹ Назад" : "Закрыть";
-  if(IN_TG){ if(isNested) TG.BackButton.show(); else TG.BackButton.hide(); }
+  if(IN_TG && TG && TG.BackButton){ if(isNested) TG.BackButton.show(); else TG.BackButton.hide(); }
   /* тот же экран/шаг — сохраняем позицию скролла (выбор даты/слотов/чекбоксы не прыгают) */
   const scr = $("screen");
   const key = s.name+"|"+stack.length+"|"+(s.name==="wizard"&&wiz?wiz.step:"");
@@ -644,6 +662,10 @@ SCREENS.regWait = () => ({
   mainbtn: SRV ? mainBtn("Проверить статус","bootApp()","secondary") : mainBtn("На главный (демо)","resetTo('home')","secondary")
 });
 SCREENS.boot = () => ({ body:'<div class="card empty-state"><div class="ico pulse">📦</div><h1 class="big">Оборудыш</h1><p class="sub" style="margin-top:6px">Загрузка…</p></div>' });
+SCREENS.bootError = (p) => ({
+  body:`<div class="card empty-state"><div class="ico">!</div><h1 class="big">Не удалось загрузить приложение</h1><p class="sub" style="margin-top:6px">Проверьте интернет и попробуйте ещё раз.</p>${p.error?`<p class="sub" style="margin-top:10px">${escHtml(p.error)}</p>`:""}</div>`,
+  mainbtn: mainBtn("Повторить","bootApp()")
+});
 SCREENS.blocked = () => ({
   body:`<div class="card empty-state">
     <div class="ico">🚫</div>
@@ -2382,7 +2404,7 @@ function confirmModal(title, text, fn){
 /* ================= TELEGRAM INIT ================= */
 function applyTgTheme(){
   const sv = savedTheme();
-  const dark = sv ? sv==="dark" : TG.colorScheme === "dark";
+  const dark = sv ? sv==="dark" : !!(TG && TG.colorScheme === "dark");
   $("phone").classList.toggle("dark", dark);
   const tb = $("themebtn"); if(tb) tb.textContent = dark ? "☀️ Тема" : "🌙 Тема";
   try{
@@ -2391,8 +2413,9 @@ function applyTgTheme(){
   }catch(e){}
 }
 async function bootApp(){
+  resetTo("boot", {});
   try{
-    const d = await api("me");
+    const d = await api("me", {}, 20000);
     applyBoot(d);
     initCalSRV();
     if(d.verified==="blocked") resetTo("blocked");
@@ -2403,6 +2426,10 @@ async function bootApp(){
     startRealtime();
   }catch(e){
     SRV = null;
+    if(IN_TG){
+      resetTo("bootError", {error:(e && e.message) || "Неизвестная ошибка"});
+      return;
+    }
     let agreed = false; try{ agreed = !!localStorage.getItem("obor_agreed"); }catch(_e){}
     resetTo(agreed ? "home" : "rules");
     toast("Демо-режим: бэкенд недоступен");
@@ -2439,7 +2466,7 @@ function startRealtime(){
   startPolling();
   if(!window.EventSource)return;
   if(_events)_events.close();
-  _events=new EventSource("/api/events?initData="+encodeURIComponent(TG?TG.initData:""));
+  _events=new EventSource("/api/events?initData="+encodeURIComponent(TG_INIT_DATA));
   _events.addEventListener("ready",()=>{_sseOpen=true;stopPolling();});
   _events.addEventListener("change",()=>refreshLive());
   _events.onerror=()=>{_sseOpen=false;startPolling();};
@@ -2451,17 +2478,16 @@ document.addEventListener("visibilitychange",()=>{
 window.addEventListener("beforeunload",stopRealtime);
 if(IN_TG){
   document.body.classList.add("in-tg");
-  TG.ready(); TG.expand();
+  if(TG){ TG.ready(); TG.expand(); }
   applyTgTheme();
-  TG.onEvent("themeChanged", applyTgTheme);
-  TG.BackButton.onClick(tgLeft);
+  if(TG){ TG.onEvent("themeChanged", applyTgTheme); TG.BackButton.onClick(tgLeft); }
   /* высота строго по вьюпорту Telegram — контент не залезает под шапку/клавиатуру */
-  const setVH = ()=>{ $("phone").style.height = (TG.viewportStableHeight || window.innerHeight) + "px"; };
-  TG.onEvent("viewportChanged", setVH);
+  const setVH = ()=>{ $("phone").style.height = ((TG && TG.viewportStableHeight) || window.innerHeight) + "px"; };
+  if(TG) TG.onEvent("viewportChanged", setVH);
   setVH();
   /* в Telegram моки не показываем: имя — только то, что ввели при регистрации */
   profile = {name:"", short:"", tg:"", orgs:[], deps:[], status:"—"};
-  const u = TG.initDataUnsafe && TG.initDataUnsafe.user;
+  const u = TG && TG.initDataUnsafe && TG.initDataUnsafe.user;
   if(u){
     if(u.username) profile.tg = "@"+u.username;
     profile.short = [u.first_name,u.last_name].filter(Boolean).join(" ");

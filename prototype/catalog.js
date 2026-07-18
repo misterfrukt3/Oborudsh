@@ -17,7 +17,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -26,8 +26,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ]
       },
       {
@@ -45,8 +45,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ]
       },
       {
@@ -64,8 +64,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ]
       },
       {
@@ -74,7 +74,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "глава",
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -115,7 +115,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -124,7 +124,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -133,7 +133,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -142,7 +142,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "none",
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -151,7 +151,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ]
       },
       {
@@ -169,7 +169,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -178,7 +178,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -187,7 +187,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -196,7 +196,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -205,8 +205,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          6,
-          7
+          1,
+          2
         ]
       },
       {
@@ -233,7 +233,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -242,7 +242,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -251,7 +251,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -260,7 +260,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -269,7 +269,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ]
       },
       {
@@ -278,7 +278,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          7
+          1
         ]
       },
       {
@@ -323,9 +323,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": null,
         "numbers": [
+          1,
           2,
-          3,
-          4
+          3
         ]
       },
       {
@@ -343,10 +343,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": null,
         "numbers": [
+          1,
           2,
           3,
-          4,
-          5
+          4
         ]
       },
       {
@@ -355,7 +355,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ]
       },
       {
@@ -364,7 +364,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ]
       },
       {
@@ -373,8 +373,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          8,
-          9
+          1,
+          2
         ]
       },
       {
@@ -383,7 +383,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          10
+          1
         ]
       },
       {
@@ -392,7 +392,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          11
+          1
         ]
       },
       {
@@ -401,7 +401,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          12
+          1
         ]
       },
       {
@@ -410,7 +410,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          13
+          1
         ]
       },
       {
@@ -419,7 +419,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          14
+          1
         ]
       },
       {
@@ -428,7 +428,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          15
+          1
         ]
       },
       {
@@ -437,7 +437,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          16
+          1
         ]
       },
       {
@@ -446,7 +446,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          17
+          1
         ]
       }
     ]
@@ -471,7 +471,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -489,7 +489,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -498,7 +498,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -507,10 +507,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6,
-          7
+          1,
+          2
         ]
       },
       {
@@ -519,7 +517,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          8
+          1
         ]
       },
       {
@@ -553,10 +551,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6,
-          7
+          1,
+          2,
+          3,
+          4
         ]
       },
       {
@@ -565,10 +563,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": null,
         "numbers": [
-          8,
-          9,
-          10,
-          11
+          1,
+          2,
+          3,
+          4
         ]
       },
       {
@@ -586,9 +584,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": "акт",
         "numbers": [
+          1,
           2,
-          3,
-          4
+          3
         ]
       },
       {
@@ -597,8 +595,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          5,
-          6
+          1,
+          2
         ]
       },
       {
@@ -607,7 +605,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          7
+          1
         ]
       },
       {
@@ -616,7 +614,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          8
+          1
         ]
       },
       {
@@ -625,8 +623,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          9,
-          10
+          1,
+          2
         ]
       },
       {
@@ -640,11 +638,18 @@ window.OBORUDKA_CATALOG = [
       },
       {
         "short": "Плашка MC Pro",
-        "full": "Комплект осветителей Aputure MC Pro (8-Light Kit)",
+        "full": "плашка из комплекта осветителей Aputure MC Pro (8-Light Kit)",
         "total": 8,
         "level": null,
         "numbers": [
-          2
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
         ]
       },
       {
@@ -653,17 +658,19 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ]
       },
       {
         "short": "Плашки Amaran P60C",
-        "full": "Комплект осветителей Aputure Amaran P60C RGBWW (3шт)",
+        "full": "плашка из комплект осветителей Aputure Amaran P60C RGBWW",
         "total": 3,
         "level": "акт",
         "numbers": [
-          5
+          1,
+          2,
+          3
         ]
       },
       {
@@ -683,7 +690,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -702,7 +709,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -711,7 +718,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -720,7 +727,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -729,7 +736,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ]
       },
       {
@@ -738,12 +745,12 @@ window.OBORUDKA_CATALOG = [
         "total": 6,
         "level": null,
         "numbers": [
-          7,
-          8,
-          9,
-          10,
-          11,
-          12
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
         ]
       },
       {
@@ -752,7 +759,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          13
+          1,
+          2
         ]
       },
       {
@@ -771,7 +779,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -780,9 +788,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": null,
         "numbers": [
-          4,
-          5,
-          6
+          1,
+          2,
+          3
         ]
       }
     ]
@@ -805,8 +813,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          2,
-          3
+          1,
+          2
         ]
       },
       {
@@ -815,7 +823,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -824,7 +832,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -833,7 +841,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          6
+          1
         ]
       },
       {
@@ -842,7 +850,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ]
       },
       {
@@ -851,7 +859,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          8
+          1
         ]
       }
     ]
@@ -876,15 +884,15 @@ window.OBORUDKA_CATALOG = [
         "total": 9,
         "level": null,
         "numbers": [
+          1,
+          2,
+          3,
           4,
           5,
           6,
           7,
           8,
-          9,
-          10,
-          11,
-          12
+          9
         ]
       },
       {
@@ -903,7 +911,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -912,9 +920,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": "акт",
         "numbers": [
-          4,
-          5,
-          6
+          1,
+          2,
+          3
         ]
       },
       {
@@ -923,7 +931,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          7
+          1
         ]
       },
       {
@@ -944,7 +952,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -953,12 +961,12 @@ window.OBORUDKA_CATALOG = [
         "total": 6,
         "level": null,
         "numbers": [
-          6,
-          7,
-          8,
-          9,
-          10,
-          11
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
         ]
       },
       {
@@ -987,7 +995,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          13
+          1
         ]
       },
       {
@@ -996,7 +1004,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          14
+          1
         ]
       }
     ]
@@ -1020,9 +1028,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": null,
         "numbers": [
-          3,
-          4,
-          5
+          1,
+          2,
+          3
         ]
       },
       {
@@ -1041,8 +1049,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          3,
-          4
+          1,
+          2
         ]
       },
       {
@@ -1051,8 +1059,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          10,
-          11
+          1,
+          2
         ]
       },
       {
@@ -1061,10 +1069,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": null,
         "numbers": [
-          12,
-          13,
-          14,
-          15
+          1,
+          2,
+          3,
+          4
         ]
       }
     ]
@@ -1087,7 +1095,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          2
+          1
         ]
       },
       {
@@ -1096,7 +1104,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -1105,7 +1113,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          4
+          1
         ]
       },
       {
@@ -1114,7 +1122,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -1123,7 +1131,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          6
+          1
         ]
       }
     ]
@@ -1134,13 +1142,12 @@ window.OBORUDKA_CATALOG = [
       {
         "short": "Аккум NP-FW50 (ZV-E10)",
         "full": "Аккумулятор Sony NP-FW50",
-        "total": 4,
+        "total": 3,
         "level": null,
         "numbers": [
           1,
           2,
-          3,
-          4
+          3
         ]
       },
       {
@@ -1149,13 +1156,13 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
         "short": "Аккум NP-FZ100 (A7/A6700)",
-        "full": "Аккум z100 красный",
-        "total": 4,
+        "full": "аккумулятор z100 для камер Sony",
+        "total": 6,
         "level": null,
         "numbers": [
           1,
@@ -1163,9 +1170,7 @@ window.OBORUDKA_CATALOG = [
           3,
           4,
           5,
-          6,
-          7,
-          8
+          6
         ]
       },
       {
@@ -1174,8 +1179,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          9,
-          10
+          1,
+          2
         ]
       },
       {
@@ -1184,8 +1189,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          11,
-          12
+          1,
+          2
         ]
       },
       {
@@ -1206,7 +1211,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": null,
         "numbers": [
-          5
+          1
         ]
       },
       {
@@ -1229,8 +1234,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          7,
-          8
+          1,
+          2
         ]
       },
       {
@@ -1245,19 +1250,18 @@ window.OBORUDKA_CATALOG = [
       },
       {
         "short": "Аккум LP-E17  (R8)",
-        "full": "Аккумулятор lp-e17 power extra",
-        "total": 3,
+        "full": "Аккумулятор lp-e17 для камер Canon",
+        "total": 8,
         "level": null,
         "numbers": [
+          1,
+          2,
           3,
           4,
           5,
           6,
           7,
-          8,
-          9,
-          10,
-          11
+          8
         ]
       },
       {
@@ -1292,7 +1296,7 @@ window.OBORUDKA_CATALOG = [
       {
         "short": "Аккум NP-FW970",
         "full": "Аккумулятор Sony NP-FW970",
-        "total": 2,
+        "total": 12,
         "level": null,
         "numbers": [
           1,
@@ -1315,8 +1319,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          13,
-          14
+          1,
+          2
         ]
       },
       {
@@ -1325,8 +1329,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          15,
-          16
+          1,
+          2
         ]
       },
       {
@@ -1335,8 +1339,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": null,
         "numbers": [
-          17,
-          18
+          1,
+          2
         ]
       },
       {
@@ -1356,12 +1360,12 @@ window.OBORUDKA_CATALOG = [
         "total": 6,
         "level": "акт",
         "numbers": [
+          1,
+          2,
+          3,
           4,
           5,
-          6,
-          7,
-          8,
-          9
+          6
         ]
       },
       {
@@ -1370,10 +1374,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": "акт",
         "numbers": [
+          1,
           2,
           3,
-          4,
-          5
+          4
         ]
       },
       {
@@ -1382,8 +1386,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          6,
-          7
+          1,
+          2
         ]
       }
     ]
@@ -1496,9 +1500,7 @@ window.OBORUDKA_CATALOG = [
           3,
           4,
           5,
-          6,
-          7,
-          8
+          6
         ]
       }
     ]
@@ -1522,7 +1524,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          3
+          1
         ]
       },
       {
@@ -1531,8 +1533,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          4,
-          5
+          1,
+          2
         ]
       },
       {
@@ -1541,9 +1543,9 @@ window.OBORUDKA_CATALOG = [
         "total": 3,
         "level": "акт",
         "numbers": [
-          6,
-          7,
-          8
+          1,
+          2,
+          3
         ]
       },
       {
@@ -1552,7 +1554,7 @@ window.OBORUDKA_CATALOG = [
         "total": 1,
         "level": "акт",
         "numbers": [
-          9
+          1
         ]
       },
       {
@@ -1561,8 +1563,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          10,
-          11
+          1,
+          2
         ]
       },
       {
@@ -1571,8 +1573,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          12,
-          13
+          1,
+          2
         ]
       },
       {
@@ -1581,10 +1583,10 @@ window.OBORUDKA_CATALOG = [
         "total": 4,
         "level": "акт",
         "numbers": [
-          14,
-          15,
-          16,
-          17
+          1,
+          2,
+          3,
+          4
         ]
       },
       {
@@ -1593,8 +1595,8 @@ window.OBORUDKA_CATALOG = [
         "total": 2,
         "level": "акт",
         "numbers": [
-          18,
-          19
+          1,
+          2
         ]
       },
       {
@@ -1603,13 +1605,13 @@ window.OBORUDKA_CATALOG = [
         "total": 7,
         "level": "акт",
         "numbers": [
-          20,
-          21,
-          22,
-          23,
-          24,
-          25,
-          26
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
         ]
       }
     ]

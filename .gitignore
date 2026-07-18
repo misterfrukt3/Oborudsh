@@ -24,3 +24,4 @@ directory.csv
 
 # Локальные ключи Google Service Account
 oborudsh-*.json
+bot/bot_fixed.py

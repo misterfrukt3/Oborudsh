@@ -38,6 +38,7 @@ from aiogram.types import (
     InputRichMessage,
     MenuButtonWebApp,
     Message,
+    ReplyKeyboardRemove,
     WebAppInfo,
 )
 import aiohttp
@@ -3175,11 +3176,23 @@ async def send_legacy_invites() -> dict:
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    await message.answer(
-        "Привет! Это 'Оборудыш' - бронирование съёмочного оборудования и студии 626 Media BMSTU.\n\n"
-        "Всё происходит в приложении - открывай:",
-        reply_markup=app_button(),
+    welcome = (
+        "Привет! Это «Оборудыш» — бронирование съёмочного оборудования "
+        "и студии 626 Media BMSTU.\n\n"
+        "Всё происходит в приложении — открывай:"
     )
+    start_message = await message.answer(
+        "Открываю обновлённый Оборудыш…",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    try:
+        await start_message.edit_text(welcome, reply_markup=app_button())
+    except Exception:
+        try:
+            await start_message.delete()
+        except Exception:
+            pass
+        await message.answer(welcome, reply_markup=app_button())
 
 
 @dp.message(Command("chatid"))
