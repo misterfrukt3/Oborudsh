@@ -3422,11 +3422,50 @@ async def cmd_deladmin(message: Message) -> None:
 async def cmd_admins(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
-    lines = [
-        "Старшие (.env): " + (", ".join(map(str, sorted(SENIOR_ADMIN_IDS))) or "—"),
-        "Админы (.env): " + (", ".join(map(str, sorted(ADMIN_IDS))) or "—"),
-        "Админы (добавлены /addadmin): " + (", ".join(map(str, sorted(EXTRA_ADMIN_IDS))) or "—"),
-    ]
+
+    admin_ids = sorted(SENIOR_ADMIN_IDS | ADMIN_IDS | EXTRA_ADMIN_IDS)
+    if not admin_ids:
+        await message.answer("Администраторы не настроены.")
+        return
+
+    placeholders = ",".join("?" for _ in admin_ids)
+    with db() as c:
+        saved_users = {
+            row["id"]: row
+            for row in c.execute(
+                f"SELECT id, name, username FROM users WHERE id IN ({placeholders})",
+                admin_ids,
+            )
+        }
+
+    lines = [f"Все администраторы — {len(admin_ids)}:"]
+    for uid in admin_ids:
+        saved = saved_users.get(uid)
+        username = (saved["username"] if saved else "") or ""
+        short_name = ""
+        if bot:
+            try:
+                chat = await bot.get_chat(uid)
+                username = chat.username or username
+                short_name = chat.first_name or ""
+            except Exception:
+                pass
+        if not short_name and saved:
+            short_name = saved["name"] or ""
+
+        sources = []
+        if uid in SENIOR_ADMIN_IDS:
+            sources.append("старший из .env")
+        if uid in ADMIN_IDS:
+            sources.append("админ из .env")
+        if uid in EXTRA_ADMIN_IDS:
+            sources.append("добавлен через /addadmin")
+
+        tg_name = f"@{username}" if username else "без @username"
+        if short_name:
+            tg_name += f" ({short_name})"
+        lines.append(f"\n{tg_name}\nID: {uid}\n{', '.join(sources)}")
+
     await message.answer("\n".join(lines))
 
 

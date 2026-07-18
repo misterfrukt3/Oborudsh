@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20260717b">
+<link rel="stylesheet" href="style.css?v=20260718-time3">
 </head>
 <body>
 
@@ -168,8 +168,65 @@ const UICONS = {
  done: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-5"/></svg>',
  doc: SVG_OPEN+'<path d="M6 4h9.5L19 7.5l-2 2.5M6 4v16h14V9.5"/><path d="M9 9.5V4.5"/></svg>',
  refresh: SVG_OPEN+'<path d="M17 12a5 5 0 1 0-10 0"/><path d="M7 12h5"/><path d="M7 9l-3 3 3 3"/></svg>',
+ clock: SVG_OPEN+'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/></svg>',
+ arrowRight: SVG_OPEN+'<path d="M5 12h13M14 8l4 4-4 4"/></svg>',
 };
 function uic(name, sz){ return '<span class="svg-ic" style="width:'+(sz||20)+'px;height:'+(sz||20)+'px">'+(UICONS[name]||"")+'</span>'; }
+function timePickerHtml({title="Время",fromId,fromLabel,fromValue,fromTarget,toId,toLabel,toValue,toTarget}){
+  const field=(id,label,value,target)=>{
+    const parts=validTimeValue(value)?value.split(":"):["",""];
+    return `<div class="time-field" id="${id}" role="group" aria-label="${label}">
+    <span class="lbl">${label}</span>
+    <span class="time-parts">
+      <input class="time-part" data-part="hour" type="text" inputmode="numeric" maxlength="2"
+        aria-label="${label}: часы" placeholder="00" value="${parts[0]}"
+        oninput="setTimePart('${target}',this)" onblur="timePartBlur()">
+      <span class="time-colon">:</span>
+      <input class="time-part" data-part="minute" type="text" inputmode="numeric" maxlength="2"
+        aria-label="${label}: минуты" placeholder="00" value="${parts[1]}"
+        oninput="setTimePart('${target}',this)" onblur="timePartBlur()">
+    </span>
+  </div>`;
+  };
+  return `<div class="time-picker">
+    <div class="time-picker-head">
+      ${uic("clock",19)}
+      <span class="time-picker-title">${title}</span>
+    </div>
+    <div class="time-fields">
+      ${field(fromId,fromLabel,fromValue,fromTarget)}
+      <span class="time-arrow" aria-hidden="true">${uic("arrowRight",17)}</span>
+      ${field(toId,toLabel,toValue,toTarget)}
+    </div>
+  </div>`;
+}
+function setTimeTarget(target,value){
+  if(target==="wiz.t1") wiz.t1=value;
+  else if(target==="wiz.t2") wiz.t2=value;
+  else if(target==="wiz626.from") wiz626.from=value;
+  else if(target==="wiz626.to") wiz626.to=value;
+}
+function setTimePart(target,input){
+  input.value=input.value.replace(/\D/g,"").slice(0,2);
+  const max=input.dataset.part==="hour"?23:59;
+  input.classList.toggle("invalid",input.value!==""&&Number(input.value)>max);
+  const host=input.closest(".time-parts");
+  const hour=host.querySelector('[data-part="hour"]').value;
+  const minute=host.querySelector('[data-part="minute"]').value;
+  const valid=hour!==""&&minute!==""&&Number(hour)<=23&&Number(minute)<=59;
+  setTimeTarget(target,valid?hour.padStart(2,"0")+":"+minute.padStart(2,"0"):"");
+  const button=document.querySelector(".mainbtn");
+  if(button){
+    button.disabled=target.startsWith("wiz626")
+      ?!(wiz626.day&&wiz626.from&&wiz626.to&&wiz626.goal.trim()&&!studioTimeError()&&!studioBusyConflict())
+      :!(wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!dateBlock());
+  }
+}
+function timePartBlur(){
+  setTimeout(()=>{
+    if(!document.activeElement||!document.activeElement.classList.contains("time-part")) render();
+  },0);
+}
 /* фото оборудования: локальный файл prototype/img/<Короткое имя>.avif (точно как в каталоге).
    Нет файла — остаётся SVG-иконка категории. */
 function lockOf(s){ let n=0; for(const c of s) n=(n*31+c.charCodeAt(0))%997; return n; }
@@ -877,7 +934,7 @@ function wizPick(iso){
   render();
 }
 function pointWarnings(iso,time,label){
-  if(!iso||!time) return [];
+  if(!iso||!validTimeValue(time)) return [];
   const warnings=[], day=new Date(iso+"T12:00:00");
   if(iso===isoPlus(0)) warnings.push(label+" сегодня");
   else if(iso===isoPlus(1)) warnings.push(label+" завтра");
@@ -886,8 +943,12 @@ function pointWarnings(iso,time,label){
   if(time<"09:00"||time>"21:30") warnings.push(label+" вне обычного времени 09:00–21:30");
   return warnings;
 }
+function validTimeValue(value){
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value||"");
+}
 function dateBlock(){
   if(!wiz.d1||!wiz.d2||!wiz.t1||!wiz.t2) return null;
+  if(!validTimeValue(wiz.t1)||!validTimeValue(wiz.t2)) return "Укажите корректное время в формате ЧЧ:ММ.";
   if(wiz.d2<wiz.d1||(wiz.d1===wiz.d2&&wiz.t2<=wiz.t1)) return "Возврат должен быть позже получения.";
   if(wiz.d1===isoPlus(0)){
     const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
@@ -909,17 +970,13 @@ function wizDates(){
       <p class="sub" style="margin-bottom:12px">Первый тап — дата взятия, второй — возврата. Можно через месяц: листайте стрелками. Точка — загруженность дня.</p>
       ${calHtml({month:wiz.month, sel1:wiz.d1, sel2:wiz.d2, pickFn:"wizPick", navFn:"wizNavMonth"})}
       ${crossMonth?'<div class="card" style="margin-top:10px"><p class="sub">📅 Бронь через месяц: '+fmtIso(wiz.d1)+' → '+fmtIso(wiz.d2)+'. Занятость проверяется на весь период.</p></div>':""}
-      <div class="sec-label">Время</div>
-      <div class="time-fields">
-        <label class="time-field">
-          <div class="lbl">Взять в</div>
-          <input type="time" id="wiz-t1" step="60" value="${wiz.t1||""}" onchange="wiz.t1=this.value;render()">
-        </label>
-        <label class="time-field">
-          <div class="lbl">Вернуть до</div>
-          <input type="time" id="wiz-t2" step="60" value="${wiz.t2||""}" onchange="wiz.t2=this.value;render()">
-        </label>
-      </div>
+      ${timePickerHtml({
+        title:"Время бронирования",
+        fromId:"wiz-t1", fromLabel:"Получение", fromValue:wiz.t1,
+        fromTarget:"wiz.t1",
+        toId:"wiz-t2", toLabel:"Возврат", toValue:wiz.t2,
+        toTarget:"wiz.t2"
+      })}
       ${block?'<div class="kit-warn"><b>⚠️ '+block+'</b></div>':""}
       ${soft.map(w=>'<div class="kit-warn"><b>⚠️ '+w+' — команда может отказать</b></div>').join("")}
       <div class="sec-label">Опции</div>
@@ -1404,6 +1461,7 @@ function s626NavMonth(d){ const i=MONTHS.findIndex(x=>x.y===wiz626.month.y&&x.m=
 function s626Pick(iso){ wiz626.day=iso; wiz626.from=null; wiz626.to=null; render(); }
 function studioTimeError(){
   if(!wiz626.day||!wiz626.from||!wiz626.to) return null;
+  if(!validTimeValue(wiz626.from)||!validTimeValue(wiz626.to)) return "Укажите корректное время в формате ЧЧ:ММ.";
   if(wiz626.to<=wiz626.from) return "Окончание должно быть позже начала.";
   if(wiz626.day===isoPlus(0)){
     const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
@@ -1433,14 +1491,13 @@ SCREENS.studioForm = () => {
       ${calHtml({month:wiz626.month, sel1:wiz626.day, sel2:null, pickFn:"s626Pick", navFn:"s626NavMonth", busyDots:false})}
       ${wiz626.day?`
       <div class="sec-label">Время · ${fmtIso(wiz626.day)}${busy.length?" · занято: "+busy.map(x=>x.from+"–"+x.to).join(", "):" · весь день свободен"}</div>
-      <div class="time-fields">
-        <label class="time-field"><div class="lbl">Начало</div>
-          <input type="time" id="studio-from" step="60" value="${wiz626.from||""}" onchange="wiz626.from=this.value;render()">
-        </label>
-        <label class="time-field"><div class="lbl">Окончание</div>
-          <input type="time" id="studio-to" step="60" value="${wiz626.to||""}" onchange="wiz626.to=this.value;render()">
-        </label>
-      </div>`:""}
+      ${timePickerHtml({
+        title:"Интервал бронирования",
+        fromId:"studio-from", fromLabel:"Начало", fromValue:wiz626.from,
+        fromTarget:"wiz626.from",
+        toId:"studio-to", toLabel:"Окончание", toValue:wiz626.to,
+        toTarget:"wiz626.to"
+      })}`:""}
       ${timeError?'<div class="kit-warn"><b>⚠️ '+timeError+'</b></div>':""}
       ${busyConflict?'<div class="kit-warn"><b>⚠️ Этот интервал уже занят.</b></div>':""}
       ${warnings.map(w=>'<div class="kit-warn"><b>⚠️ '+w+' — команда может отказать</b></div>').join("")}
