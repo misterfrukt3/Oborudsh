@@ -148,7 +148,7 @@ def request_card_message(request_id, status, author, author_ref, date_from, date
 
 
 def studio_card_message(booking_id, status, author, author_ref, day, slot,
-                        goal, needs, curator="") -> str:
+                        goal, needs, curator="", late_note="") -> str:
     lines = [
         "%s  %s" % (
             markdown_v2_bold("🏛 Бронь 626 · %s" % STATUS_LABELS.get(status, status)),
@@ -167,6 +167,11 @@ def studio_card_message(booking_id, status, author, author_ref, day, slot,
             markdown_v2_escape(", ".join(needs) if needs else "без допов"),
         ),
     ]
+    if late_note:
+        lines.append("%s %s" % (
+            markdown_v2_bold("⚠️ Внимание:"),
+            markdown_v2_escape(late_note + " — команда может отказать"),
+        ))
     if curator:
         lines.append("%s %s" % (
             markdown_v2_bold("Куратор:"), markdown_v2_escape(curator),

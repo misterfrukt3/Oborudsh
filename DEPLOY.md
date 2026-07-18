@@ -113,6 +113,8 @@ GOOGLE_SHEET_ID=
 GOOGLE_SERVICE_ACCOUNT_JSON_B64=
 GOOGLE_SHEET_EVENTS_TAB=Начисления
 GOOGLE_SHEET_SUMMARY_TAB=Админы
+GOOGLE_SHEET_REQUESTS_TAB=Заявки
+GOOGLE_SHEET_626_TAB=626
 
 SCORE_DAILY_ADMIN=0.1
 SCORE_REQUEST=0.01
@@ -147,6 +149,7 @@ sudo journalctl -u oborudka -n 100 --no-pager
 5. Работает бронь и закрытие 626.
 6. Старшему отвечает `/scorestatus`.
 7. После включения Google команда `/scoresync` отправляет накопленные начисления.
+   Она же создаёт листы `Заявки` и `626` и переносит туда все завершённые, отклонённые и отменённые записи.
 8. `/digest` отправляет оформленную статистику в канал.
 
 ### Если бот не запустился: быстрый откат

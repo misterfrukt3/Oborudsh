@@ -130,10 +130,9 @@ function applyBoot(d){
 function myCur(x){ return SRV ? !!x.curMe : x.curator==="@you"; }
 function isoPlus(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 /* ================= ДАННЫЕ ================= */
-const TODAY_ISO = "2026-07-02";
+const TODAY_ISO = isoPlus(0);
 let MONTHS = [{y:2026,m:6},{y:2026,m:7},{y:2026,m:8}]; // демо: июль—сентябрь 2026; при SRV пересчитывается (initCalSRV)
 const MONTH_NAMES = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
-const SLOTS = (()=>{const a=[];for(let h=9;h<=21;h++){a.push(String(h).padStart(2,"0")+":00");a.push(String(h).padStart(2,"0")+":30");}return a;})();
 const fmtIso = iso => iso.slice(8,10)+"."+iso.slice(5,7);
 
 /* SVG-иконки категорий (line-art, наследуют цвет) */
@@ -317,7 +316,7 @@ function loadOf(iso){
   if(SRV){ return (SRV.dayload && SRV.dayload[iso]) || 0; }
   let s=0; for(const ch of iso) s+=ch.charCodeAt(0); return [0,1,1,2,3,4,5,7,8][(s*7)%9];
 }
-let BUSY626 = {"2026-07-05":["14:00","14:30","15:00","15:30","16:00","16:30"],"2026-07-03":["18:00","18:30","19:00"],"2026-07-08":["12:00","12:30","13:00","13:30","14:00","14:30"]};
+let BUSY626 = {"2026-07-20":[{from:"14:00",to:"16:30"}],"2026-07-21":[{from:"18:00",to:"19:30"}]};
 /* SRV: календарь от реальной даты — текущий месяц + 2 следующих, с корректным переходом через Новый год */
 function initCalSRV(){
   const now = new Date();
@@ -333,6 +332,7 @@ let stack = [];
 let wiz = null, wiz626 = null, issueCheck = null, adminTab = "queue", userQ = "";
 let favSets = []; // избранные наборы оборудки (свои)
 let equipmentUnits = [], unitPassport = null, unitQ = "", adminWeek = 0, issueFreeNums = {};
+let profileRolesExpanded = false;
 const $ = id => document.getElementById(id);
 
 /* ================= НАВИГАЦИЯ ================= */
@@ -430,6 +430,20 @@ function render(){
   scr.scrollTop = keep;
   _scrKey = key;
   if(out.after) out.after();
+  requestAnimationFrame(syncProfileRolesOverflow);
+}
+function toggleProfileRoles(){
+  profileRolesExpanded = !profileRolesExpanded;
+  render();
+}
+function syncProfileRolesOverflow(){
+  const box = $("profile-roles"), btn = $("profile-roles-toggle");
+  if(!box || !btn) return;
+  const expanded = box.classList.contains("expanded");
+  if(expanded) box.classList.remove("expanded");
+  const overflowing = box.scrollHeight > box.clientHeight + 1;
+  if(expanded) box.classList.add("expanded");
+  btn.hidden = !overflowing;
 }
 function mainBtn(label, fn, cls, disabled){
   return '<div class="mainbtn-wrap"><button class="mainbtn '+(cls||"")+'" onclick="'+fn+'" '+(disabled?"disabled":"")+'>'+label+'</button></div>';
@@ -475,8 +489,8 @@ SCREENS.rules = (p) => ({
     <h1 class="big">📘 Регламент</h1>
     ${p.readonly?"":'<p class="sub" style="margin-bottom:12px">Шаг 1 из 2 — прочитайте и согласитесь. Перед регистрацией загляните в методичку ниже.</p>'}
     <p style="margin-top:10px"><b>●</b> Заявки оформляются только через приложение; профиль должен быть корректным (ФИО полностью, организация/отдел).</p>
-    <p><b>●</b> Оборудование — заявка минимум за 2 дня до получения. Карты памяти и SSD — отдельной заявкой.</p>
-    <p><b>●</b> Получение в воскресенье невозможно, возврат в воскресенье — тоже. Возврат в субботу после 18:00 возможен, но команда может отказать в приёме.</p>
+    <p><b>●</b> Оборудование можно запросить начиная с сегодняшнего дня. Карты памяти и SSD — отдельной заявкой.</p>
+    <p><b>●</b> Воскресенье и любое время доступны, но срочную или нестандартную заявку команда может отклонить.</p>
     <p><b>●</b> При сдаче оборудования и студии 626 обязательны фотографии.</p>
     <p><b>●</b> Возвращайте технику в том же виде: «сломал — починил, потерял — купил». Сломалось — сразу сообщайте.</p>
     <p><b>●</b> Команда может отменить заявку при некорректном заполнении; за нарушения — временная блокировка. Студию 626 согласуют старшие админы.</p>
@@ -491,8 +505,8 @@ SCREENS.manual = () => ({
    <div class="card rules">
     <div class="sec-label" style="margin-top:0">⭐ Важное</div>
     <p><b>Регистрация:</b> ФИО полностью (три слова), организация(и), для Media BMSTU — отдел, и твоя роль. Участников Media BMSTU и студсоветов бот сверяет со списками; кого нет — проверит старший вручную. Отклонили — увидишь причину и подашь заново.</p>
-    <p><b>Взять оборудование:</b> даты → время (09:00–21:30, шаг 30 мин) → каталог → корзина → мероприятие → отправить.</p>
-    <p><b>Правила:</b> заявка за 2 дня; карты/SSD отдельной заявкой; в воскресенье не берут и не возвращают; возврат сб после 18:00 — по согласию команды.</p>
+    <p><b>Взять оборудование:</b> даты → любое время с точностью до минуты → каталог → корзина → мероприятие → отправить.</p>
+    <p><b>Правила:</b> можно подать заявку на сегодня и воскресенье; карты/SSD — отдельной заявкой; необычное время команда согласует отдельно.</p>
     <p><b>Сдача:</b> обязательно приложи фото комплекта (можно несколько, минимум одно).</p>
    </div>
    <div class="card rules">
@@ -689,10 +703,11 @@ SCREENS.home = () => {
   const active = requests.filter(r=>r.me && !["closed","rejected","canceled"].includes(r.status));
   const past = requests.filter(r=>r.me && ["closed","rejected","canceled"].includes(r.status));
   const my626 = bookings626.filter(b=>b.me && !["closed","rejected","canceled"].includes(b.status));
+  const externalOrgs = profile.orgs.filter(o=>o!=="Media BMSTU");
   const roleChips =
-    profile.orgs.map(o=>'<span class="role-chip">'+o+'</span>').join("")+
-    profile.deps.map(d=>'<span class="role-chip">'+d+'</span>').join("")+
-    '<span class="role-chip hl">'+profile.status+'</span>'+
+    profile.deps.map(d=>'<span class="role-chip">'+escHtml(d)+'</span>').join("")+
+    externalOrgs.map(o=>'<span class="role-chip">'+escHtml(o)+'</span>').join("")+
+    '<span class="role-chip hl">'+escHtml(profile.status)+'</span>'+
     (role!=="user"?'<span class="role-chip hl">'+(role==="senior"?"старший админ":"админ")+'</span>':"");
   return {
     body:`
@@ -707,7 +722,10 @@ SCREENS.home = () => {
         <button class="theme-tgl" title="Тема" aria-label="Переключить тему" aria-pressed="${$("phone").classList.contains("dark")}" onclick="userToggleTheme()"><i>${$("phone").classList.contains("dark")?"🌙":"☀️"}</i></button>
         <button class="btn-sm" title="Изменить данные" onclick="navTo('regProfile',{edit:true})">⚙️</button>
       </div>
-      <div style="margin-bottom:12px">${roleChips}</div>
+      <div class="profile-roles-wrap">
+        <div id="profile-roles" class="profile-roles ${profileRolesExpanded?"expanded":""}">${roleChips}</div>
+        <button id="profile-roles-toggle" class="profile-roles-toggle" aria-expanded="${profileRolesExpanded}" onclick="toggleProfileRoles()" hidden>${profileRolesExpanded?"Скрыть":"Показать ещё"}</button>
+      </div>
 
       <div class="action-big" onclick="startWizard()">
         <span class="ic">${uic("box",24)}</span>
@@ -798,7 +816,7 @@ function calHtml(cfg){
   const first = new Date(y,m,1);
   let wd = first.getDay(); wd = wd===0?6:wd-1; // пн=0
   const dim = new Date(y,m+1,0).getDate();
-  const minIso = cfg.minIso!==undefined ? cfg.minIso : (SRV ? isoPlus(2) : "2026-07-04"); // сегодня + 2 дня (по умолч.)
+  const minIso = cfg.minIso!==undefined ? cfg.minIso : isoPlus(0);
   const monthsList = cfg.monthsList || MONTHS;
   let cells = [];
   for(let i=0;i<wd;i++) cells.push("<span></span>");
@@ -858,23 +876,31 @@ function wizPick(iso){
   else if(iso>=wiz.d1){ wiz.d2=iso; } else { wiz.d1=iso; }
   render();
 }
-/* жёсткий запрет: получение и возврат в воскресенье */
+function pointWarnings(iso,time,label){
+  if(!iso||!time) return [];
+  const warnings=[], day=new Date(iso+"T12:00:00");
+  if(iso===isoPlus(0)) warnings.push(label+" сегодня");
+  else if(iso===isoPlus(1)) warnings.push(label+" завтра");
+  if(day.getDay()===0) warnings.push(label+" в воскресенье");
+  if(day.getDay()===6&&time>="18:00") warnings.push(label+" в субботу после 18:00");
+  if(time<"09:00"||time>"21:30") warnings.push(label+" вне обычного времени 09:00–21:30");
+  return warnings;
+}
 function dateBlock(){
-  if(wiz.d1 && new Date(wiz.d1).getDay()===0) return "Получение в воскресенье невозможно — выберите другой день.";
-  if(wiz.d2 && new Date(wiz.d2).getDay()===0) return "Возврат в воскресенье невозможен — выберите будний день или субботу.";
+  if(!wiz.d1||!wiz.d2||!wiz.t1||!wiz.t2) return null;
+  if(wiz.d2<wiz.d1||(wiz.d1===wiz.d2&&wiz.t2<=wiz.t1)) return "Возврат должен быть позже получения.";
+  if(wiz.d1===isoPlus(0)){
+    const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+    if(wiz.t1<hm) return "Нельзя поставить получение на прошедшее время.";
+  }
   return null;
 }
-/* мягкое предупреждение: сб после 18:00 (можно, но команда может отказать) */
-function dateSoftWarn(){
-  if(wiz.d2 && wiz.t2 && new Date(wiz.d2).getDay()===6 && wiz.t2>="18:00")
-    return "Возврат в субботу после 18:00 — команда Оборудыша может отказать в приёме в это время.";
-  if(wiz.d1 && wiz.t1 && new Date(wiz.d1).getDay()===6 && wiz.t1>="18:00")
-    return "Выдача в субботу после 18:00 — команда Оборудыша может отказать в выдаче в это время.";
-  return null;
+function dateSoftWarnings(){
+  return [...pointWarnings(wiz.d1,wiz.t1,"Выдача"),...pointWarnings(wiz.d2,wiz.t2,"Приём")];
 }
 function wizDates(){
   const block = dateBlock();
-  const soft = dateSoftWarn();
+  const soft = dateSoftWarnings();
   const crossMonth = wiz.d1&&wiz.d2&&wiz.d1.slice(5,7)!==wiz.d2.slice(5,7);
   const ready = wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!block;
   return {
@@ -885,17 +911,17 @@ function wizDates(){
       ${crossMonth?'<div class="card" style="margin-top:10px"><p class="sub">📅 Бронь через месяц: '+fmtIso(wiz.d1)+' → '+fmtIso(wiz.d2)+'. Занятость проверяется на весь период.</p></div>':""}
       <div class="sec-label">Время</div>
       <div class="time-fields">
-        <div class="time-field" onclick="openTimeSheet('t1')">
+        <label class="time-field">
           <div class="lbl">Взять в</div>
-          <div class="val ${wiz.t1?"":"empty"}">${wiz.t1||"выбрать"}</div>
-        </div>
-        <div class="time-field" onclick="openTimeSheet('t2')">
+          <input type="time" id="wiz-t1" step="60" value="${wiz.t1||""}" onchange="wiz.t1=this.value;render()">
+        </label>
+        <label class="time-field">
           <div class="lbl">Вернуть до</div>
-          <div class="val ${wiz.t2?"":"empty"}">${wiz.t2||"выбрать"}</div>
-        </div>
+          <input type="time" id="wiz-t2" step="60" value="${wiz.t2||""}" onchange="wiz.t2=this.value;render()">
+        </label>
       </div>
       ${block?'<div class="kit-warn"><b>⚠️ '+block+'</b></div>':""}
-      ${soft?'<div class="kit-warn"><b>⚠️ '+soft+'</b></div>':""}
+      ${soft.map(w=>'<div class="kit-warn"><b>⚠️ '+w+' — команда может отказать</b></div>').join("")}
       <div class="sec-label">Опции</div>
       <div class="check-row ${wiz.media?"on":""}" ${chkA(wiz.media)} style="border-radius:14px" onclick="wiz.media=!wiz.media;render()">
         <span class="checkbox">✓</span>
@@ -903,13 +929,6 @@ function wizDates(){
       </div>`,
     mainbtn: mainBtn("Далее — выбор оборудования","wizToCatalog()","",!ready)
   };
-}
-function openTimeSheet(key){
-  $("overlay").innerHTML = `
-    <div class="sheet-veil" onclick="closeSheet()"></div>
-    <div class="sheet"><div class="grab"></div><h3>${key==="t1"?"Взять в":"Вернуть до"} · слоты по 30 мин</h3>
-      <div class="slots">${SLOTS.map(t=>'<button class="slot '+(wiz[key]===t?"sel":"")+'" onclick="wiz.'+key+'=\''+t+'\';closeSheet()">'+t+'</button>').join("")}</div>
-    </div>`;
 }
 /* --- каталог --- */
 function freeOf(it){
@@ -928,7 +947,7 @@ function wizToCatalog(){
   if(SRV){
     const btn = document.querySelector(".mainbtn");
     if(btn){ btn.disabled = true; btn.textContent = "Проверяем занятость…"; }
-    api("availability",{d1:wiz.d1, d2:wiz.d2, exclude:wiz.editId||0})
+    api("availability",{d1:wiz.d1, d2:wiz.d2, t1:wiz.t1, t2:wiz.t2, exclude:wiz.editId||0})
       .then(d=>{ wiz.busy=d.busy||{}; wiz.capacity=d.capacity||{}; wiz.step=2; render(); })
       .catch(e=>{ render(); toast("⚠️ "+e.message); });
     return;
@@ -1116,6 +1135,7 @@ function wizDetails(){
   };
 }
 function wizConfirm(){
+  const soft=dateSoftWarnings();
   return {
     body: wizSteps()+`
       <h1 class="big">Всё верно?</h1>
@@ -1133,6 +1153,7 @@ function wizConfirm(){
         ${wiz.media?'<div class="check-row on" style="border-radius:14px;margin-top:8px"><span class="checkbox">✓</span><div class="grow">Ответственный за медиа</div></div>':""}
         ${wiz.comment?'<p class="sub" style="margin-top:8px">💬 '+wiz.comment+'</p>':""}
       </div>
+      ${soft.map(w=>'<div class="kit-warn"><b>⚠️ '+w+' — команда может отказать</b></div>').join("")}
       <p class="sub" style="padding:0 4px">После отправки позиции резервируются в календаре. До согласования заявку можно менять и удалять.</p>`,
     mainbtn: mainBtn(wiz.editId?"Сохранить изменения":"Отправить заявку","submitWizard()")
   };
@@ -1345,7 +1366,7 @@ SCREENS.studio = () => {
     body:`
       <div class="card" style="background:linear-gradient(135deg,var(--card),color-mix(in srgb,var(--violet) 12%,var(--card)))">
         <h1 class="big">🏛 Аудитория 626</h1>
-        <p class="sub" style="margin-top:4px">Съёмочный павильон: хромакей, циклорама, студийный свет. Слоты 09:00–21:30. Согласуют старшие админы, ведёт куратор.</p>
+        <p class="sub" style="margin-top:4px">Съёмочный павильон: хромакей, циклорама, студийный свет. Можно выбрать любое время с точностью до минуты. Согласуют старшие админы, ведёт куратор.</p>
       </div>
       <div class="sec-label">Мои брони</div>
       ${(()=>{
@@ -1369,7 +1390,7 @@ SCREENS.studio = () => {
       <div class="card">
         ${(SRV?[0,1,2,3,4,5,6].map(n=>isoPlus(n)):["2026-07-03","2026-07-04","2026-07-05","2026-07-08"]).map(d=>{
           const busy = BUSY626[d]||[];
-          return '<div class="row" style="padding:7px 0;border-bottom:1px solid var(--sep)"><b style="font:600 13px var(--mono);width:52px">'+fmtIso(d)+'</b><div class="grow sub">'+(busy.length? "занято "+busy[0]+"–"+busy[busy.length-1] : "весь день свободно")+'</div><span class="dot" style="background:'+(busy.length?"var(--warn)":"var(--ok)")+'"></span></div>';
+          return '<div class="row" style="padding:7px 0;border-bottom:1px solid var(--sep)"><b style="font:600 13px var(--mono);width:52px">'+fmtIso(d)+'</b><div class="grow sub">'+(busy.length? "занято "+busy.map(x=>x.from+"–"+x.to).join(", ") : "весь день свободно")+'</div><span class="dot" style="background:'+(busy.length?"var(--warn)":"var(--ok)")+'"></span></div>';
         }).join("")}
       </div>`,
     mainbtn: mainBtn("Забронировать 626","start626()")
@@ -1381,31 +1402,50 @@ function start626(){
 }
 function s626NavMonth(d){ const i=MONTHS.findIndex(x=>x.y===wiz626.month.y&&x.m===wiz626.month.m); if(MONTHS[i+d]){ wiz626.month=MONTHS[i+d]; render(); } }
 function s626Pick(iso){ wiz626.day=iso; wiz626.from=null; wiz626.to=null; render(); }
-function s626Slot(t){
-  if(!wiz626.from||(wiz626.from&&wiz626.to)){ wiz626.from=t; wiz626.to=null; }
-  else if(t>wiz626.from){ wiz626.to=t; } else { wiz626.from=t; }
-  render();
+function studioTimeError(){
+  if(!wiz626.day||!wiz626.from||!wiz626.to) return null;
+  if(wiz626.to<=wiz626.from) return "Окончание должно быть позже начала.";
+  if(wiz626.day===isoPlus(0)){
+    const now=new Date(), hm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
+    if(wiz626.from<hm) return "Нельзя поставить бронь на прошедшее время.";
+  }
+  return null;
+}
+function studioBusyConflict(){
+  if(!wiz626.day||!wiz626.from||!wiz626.to) return false;
+  return (BUSY626[wiz626.day]||[]).some(x=>wiz626.from<x.to&&wiz626.to>x.from);
+}
+function studioWarnings(){
+  const warnings=pointWarnings(wiz626.day,wiz626.from,"Бронь");
+  const day=wiz626.day?new Date(wiz626.day+"T12:00:00"):null;
+  if(day&&day.getDay()===6&&wiz626.to>="18:00") warnings.push("Окончание брони в субботу после 18:00");
+  if(wiz626.to&&(wiz626.to<"09:00"||wiz626.to>"21:30")) warnings.push("Окончание брони вне обычного времени 09:00–21:30");
+  return [...new Set(warnings)];
 }
 SCREENS.studioForm = () => {
   const busy = wiz626.day ? (BUSY626[wiz626.day]||[]) : [];
-  const ready = wiz626.day&&wiz626.from&&wiz626.to&&wiz626.goal.trim();
+  const timeError=studioTimeError(), busyConflict=studioBusyConflict(), warnings=studioWarnings();
+  const ready = wiz626.day&&wiz626.from&&wiz626.to&&wiz626.goal.trim()&&!timeError&&!busyConflict;
   return {
     body:`
       <h1 class="big">Заявка на 626</h1>
       <div class="sec-label">Дата</div>
       ${calHtml({month:wiz626.month, sel1:wiz626.day, sel2:null, pickFn:"s626Pick", navFn:"s626NavMonth", busyDots:false})}
       ${wiz626.day?`
-      <div class="sec-label">Время · ${fmtIso(wiz626.day)} · 🟢 свободно${busy.length?" · 🔴 занято":""}</div>
-      <div class="slots">
-        ${SLOTS.map(t=>{
-          const b = busy.includes(t);
-          const sel = wiz626.from===t||wiz626.to===t;
-          const inR = wiz626.from&&wiz626.to&&t>wiz626.from&&t<wiz626.to;
-          return '<button class="slot '+(b?"busy":"")+(sel||inR?" sel":"")+'" '+(b?"disabled":"")+' onclick="s626Slot(\''+t+'\')">'+t+'</button>';
-        }).join("")}
+      <div class="sec-label">Время · ${fmtIso(wiz626.day)}${busy.length?" · занято: "+busy.map(x=>x.from+"–"+x.to).join(", "):" · весь день свободен"}</div>
+      <div class="time-fields">
+        <label class="time-field"><div class="lbl">Начало</div>
+          <input type="time" id="studio-from" step="60" value="${wiz626.from||""}" onchange="wiz626.from=this.value;render()">
+        </label>
+        <label class="time-field"><div class="lbl">Окончание</div>
+          <input type="time" id="studio-to" step="60" value="${wiz626.to||""}" onchange="wiz626.to=this.value;render()">
+        </label>
       </div>`:""}
+      ${timeError?'<div class="kit-warn"><b>⚠️ '+timeError+'</b></div>':""}
+      ${busyConflict?'<div class="kit-warn"><b>⚠️ Этот интервал уже занят.</b></div>':""}
+      ${warnings.map(w=>'<div class="kit-warn"><b>⚠️ '+w+' — команда может отказать</b></div>').join("")}
       <div class="sec-label">Цель съёмки / записи</div>
-      <input type="text" maxlength="100" placeholder="Например: запись подкаста" value="${escAttr(wiz626.goal)}" oninput="wiz626.goal=this.value;document.querySelector('.mainbtn').disabled=!(this.value.trim()&&wiz626.day&&wiz626.from&&wiz626.to)">
+      <input type="text" maxlength="100" placeholder="Например: запись подкаста" value="${escAttr(wiz626.goal)}" oninput="wiz626.goal=this.value;document.querySelector('.mainbtn').disabled=!(this.value.trim()&&wiz626.day&&wiz626.from&&wiz626.to&&!studioTimeError()&&!studioBusyConflict())">
       <div class="sec-label">Что понадобится</div>
       <div>
         ${["хромакей","циклорама","чёрная ткань","помощь Media Tech"].map(n=>
@@ -1463,6 +1503,7 @@ SCREENS.studioDetail = ({id}) => {
           ${statusPill(b.status,ST626)}
         </div>
         <div class="hud">${fmtIso(b.when)}.${b.when.slice(0,4)} · <b>${b.slot}</b></div>
+        ${b.lateNote?'<div class="kit-warn" style="margin-top:10px"><b>⚠️ '+b.lateNote+'</b> — команда может отказать.</div>':""}
         <div style="margin-top:10px">${b.needs.map(n=>'<span class="chip">'+n+'</span>').join("")||'<span class="sub">без допов</span>'}</div>
         ${b.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+b.curator+'</b></div>':""}
       </div>
@@ -2031,19 +2072,9 @@ SCREENS.stats = () => {
     ${best.issuer?`<div class="sub">🏆 Лучший по выдачам: ${best.issuer}</div>`:''}
     ${best.returner?`<div class="sub">🏆 Лучший по возвратам: ${best.returner}</div>`:''}
     ${topRejList?`<div class="sec-label">Топ по отказам</div><div class="card" style="padding:0 12px">${topRejList}</div>`:''}
-    <div class="sec-label">Экспорт в файл</div>
-    <div class="btnrow">
-      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('requests')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>Заявки</button>
-      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('626')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>626</button>
-      <button class="btn-sm grow" style="padding:12px" onclick="exportMd('admins')"><span class="ic" style="margin-right:5px">${uic("doc",18)}</span>Админы</button>
-    </div>
     <button class="mainbtn secondary" style="margin-top:10px" onclick="navTo('seniorHub')">‹ Назад</button>`
   };
 };
-function exportMd(kind){
-  if(SRV){ if(_busy) return; _busy=true; api("export",{kind}).then(()=>{ _busy=false; toast("📄 Файл отправлен в чат с ботом"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
-  toast("Демо: бот прислал бы MD в личку");
-}
 /* ---- переписки заявок (старший, только просмотр) ---- */
 SCREENS.reqChats = () => ({
   body:`
