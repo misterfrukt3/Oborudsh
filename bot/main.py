@@ -94,6 +94,8 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
 GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "").strip()
 GOOGLE_SHEET_EVENTS_TAB = os.getenv("GOOGLE_SHEET_EVENTS_TAB", "Начисления").strip() or "Начисления"
 GOOGLE_SHEET_SUMMARY_TAB = os.getenv("GOOGLE_SHEET_SUMMARY_TAB", "Админы").strip() or "Админы"
+GOOGLE_SHEET_REQUESTS_TAB = os.getenv("GOOGLE_SHEET_REQUESTS_TAB", "Заявки").strip() or "Заявки"
+GOOGLE_SHEET_626_TAB = os.getenv("GOOGLE_SHEET_626_TAB", "626").strip() or "626"
 
 
 def env_decimal(name: str, default: str) -> Decimal:
@@ -702,27 +704,44 @@ async def lookup_member_by_username(
 ACTIVE_STS = ("new", "curator", "approved", "issued", "ret")
 
 
-def busy_map(d1: str, d2: str, exclude_rid: int = 0) -> dict:
-    """Сколько единиц каждой позиции занято на пересечении с [d1, d2] (ISO-даты)."""
+def _intervals_overlap(start_a, end_a, start_b, end_b) -> bool:
+    """Полуоткрытые интервалы: соседние брони не конфликтуют."""
+    return bool(start_a and end_a and start_b and end_b and start_a < end_b and end_a > start_b)
+
+
+def _request_interval(d1: str, d2: str, t1: str, t2: str):
+    return parse_dt(d1, t1 or "00:00"), parse_dt(d2, t2 or "23:59")
+
+
+def busy_map(d1: str, d2: str, t1: str = "00:00", t2: str = "23:59",
+             exclude_rid: int = 0) -> dict:
+    """Сколько единиц занято на точном пересечении дат и времени."""
     out = {}
-    if not d1 or not d2:
+    wanted_start, wanted_end = _request_interval(d1, d2, t1, t2)
+    if not wanted_start or not wanted_end:
         return out
     with db() as c:
         rows = c.execute(
-            "SELECT id, items FROM requests WHERE status IN (%s) AND dfrom_iso<>'' "
+            "SELECT id, items, dfrom_iso, dto_iso, tfrom, tto FROM requests "
+            "WHERE status IN (%s) AND dfrom_iso<>'' "
             "AND dfrom_iso<=? AND dto_iso>=? AND id<>?" % ",".join("?" * len(ACTIVE_STS)),
             (*ACTIVE_STS, d2, d1, exclude_rid)).fetchall()
     for r in rows:
+        start, end = _request_interval(
+            r["dfrom_iso"], r["dto_iso"], r["tfrom"], r["tto"]
+        )
+        if not _intervals_overlap(start, end, wanted_start, wanted_end):
+            continue
         for s, q in json.loads(r["items"]):
             out[s] = out.get(s, 0) + int(q)
     return out
 
 
-def check_availability(items, d1, d2, exclude_rid=0):
+def check_availability(items, d1, d2, t1="00:00", t2="23:59", exclude_rid=0):
     """None, если всё свободно; иначе текст ошибки."""
     if not TOTALS or not d1 or not d2:
         return None
-    busy = busy_map(d1, d2, exclude_rid)
+    busy = busy_map(d1, d2, t1, t2, exclude_rid)
     bad = [s for s, q in items
            if s in CATALOG_META and busy.get(s, 0) + int(q) > ready_capacity(s)]
     if bad:
@@ -735,19 +754,25 @@ def _parse_iso_day(value):
     except (TypeError, ValueError): return None
 
 
-def _valid_slot(value):
-    try: parsed = datetime.strptime(value or "", "%H:%M")
-    except (TypeError, ValueError): return False
-    return parsed.minute in (0, 30) and 9 <= parsed.hour <= 21
+def _valid_time(value):
+    try:
+        datetime.strptime(value or "", "%H:%M")
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def validate_request_window(d1, d2, t1, t2):
     first, last = _parse_iso_day(d1), _parse_iso_day(d2)
-    if not first or not last or not _valid_slot(t1) or not _valid_slot(t2): return "Укажите корректные даты и время с шагом 30 минут (09:00–21:30)."
-    if last < first or (last == first and t2 <= t1): return "Дата возврата должна быть позже даты получения."
+    start, end = _request_interval(d1, d2, t1, t2)
+    if not first or not last or not _valid_time(t1) or not _valid_time(t2):
+        return "Укажите корректные даты и время."
+    if not start or not end or end <= start:
+        return "Дата возврата должна быть позже даты получения."
     if (last - first).days > 61: return "Максимальный срок бронирования — 62 дня."
-    if first < datetime.now(MSK).date() + timedelta(days=2): return "Оборудование можно забронировать минимум за 2 дня до получения."
-    if first.weekday() == 6 or last.weekday() == 6: return "Получение и возврат в воскресенье запрещены."
+    current_minute = datetime.now(MSK).replace(second=0, microsecond=0)
+    if start < current_minute:
+        return "Нельзя поставить получение на прошедшее время."
     return None
 
 
@@ -758,7 +783,6 @@ def _active_cat_blocks():
 
 def validate_items(uid, raw_items, media=False, allow_restricted=False):
     if not isinstance(raw_items, list) or not raw_items: return None, "Добавьте хотя бы одну позицию в заявку."
-    if len(raw_items) > 50: return None, "В одной заявке может быть не больше 50 позиций."
     blocks, user, out, seen = _active_cat_blocks(), get_user(uid), [], set()
     role = user["role"] if user else ""
     for pair in raw_items:
@@ -785,14 +809,19 @@ def validate_items(uid, raw_items, media=False, allow_restricted=False):
 def _slot_bounds(slot):
     try:
         a, b = (slot or "").replace("–", "-").replace("—", "-").split("-", 1); a, b = a.strip(), b.strip()
-        return (a, b) if _valid_slot(a) and _valid_slot(b) and b > a else None
+        return (a, b) if _valid_time(a) and _valid_time(b) and b > a else None
     except (AttributeError, ValueError): return None
 
 
 def validate_626_window(day, slot):
     date, bounds = _parse_iso_day(day), _slot_bounds(slot)
-    if not date or not bounds: return None, "Укажите корректную дату и время для 626 (09:00–21:30, шаг 30 минут)."
-    if date < datetime.now(MSK).date() + timedelta(days=2): return None, "Аудиторию 626 можно забронировать минимум за 2 дня."
+    if not date or not bounds:
+        return None, "Укажите корректную дату и время для 626."
+    start, end = parse_dt(day, bounds[0]), parse_dt(day, bounds[1])
+    if not start or not end or end <= start:
+        return None, "Время окончания должно быть позже времени начала."
+    if start < datetime.now(MSK).replace(second=0, microsecond=0):
+        return None, "Нельзя поставить бронь 626 на прошедшее время."
     return bounds[0] + "–" + bounds[1], None
 
 
@@ -804,22 +833,34 @@ def _numbers_from_value(value):
     return out
 
 
-def used_numbers(short, d1, d2, exclude_rid=0):
+def used_numbers(short, d1, d2, t1="00:00", t2="23:59", exclude_rid=0):
     used = set()
+    wanted_start, wanted_end = _request_interval(d1, d2, t1, t2)
     with db() as c:
-        rows = c.execute("SELECT nums FROM requests WHERE status IN (%s) AND dfrom_iso<>'' AND dfrom_iso<=? AND dto_iso>=? AND id<>?" % ",".join("?" * len(ACTIVE_STS)), (*ACTIVE_STS, d2, d1, exclude_rid)).fetchall()
+        rows = c.execute(
+            "SELECT nums,dfrom_iso,dto_iso,tfrom,tto FROM requests "
+            "WHERE status IN (%s) AND dfrom_iso<>'' AND dfrom_iso<=? "
+            "AND dto_iso>=? AND id<>?" % ",".join("?" * len(ACTIVE_STS)),
+            (*ACTIVE_STS, d2, d1, exclude_rid),
+        ).fetchall()
     for row in rows:
+        start, end = _request_interval(
+            row["dfrom_iso"], row["dto_iso"], row["tfrom"], row["tto"]
+        )
+        if not _intervals_overlap(start, end, wanted_start, wanted_end):
+            continue
         try: nums = json.loads(row["nums"] or "{}")
         except (TypeError, ValueError): nums = {}
         used.update(_numbers_from_value(nums.get(short)))
     return used
 
 
-def assign_numbers(items, d1, d2, exclude_rid=0, preferred=None):
+def assign_numbers(items, d1, d2, t1="00:00", t2="23:59",
+                   exclude_rid=0, preferred=None):
     """Назначить только исправные и свободные номера, проверив выбор администратора."""
     result, preferred = {}, preferred or {}
     for short, qty in items:
-        used = used_numbers(short, d1, d2, exclude_rid)
+        used = used_numbers(short, d1, d2, t1, t2, exclude_rid)
         free = [num for num in ready_numbers(short) if num not in used]
         wanted = _numbers_from_value(preferred.get(short))
         chosen = wanted if len(wanted) == int(qty) else free[:int(qty)]
@@ -851,25 +892,37 @@ def dayload_map() -> dict:
     return out
 
 
-def slot_expand(slot: str):
-    """Развернуть интервал 626 по получасам; результат включает начало."""
-    bounds = _slot_bounds(slot)
-    if not bounds: return []
-    t, end = datetime.strptime(bounds[0], "%H:%M"), datetime.strptime(bounds[1], "%H:%M")
-    out = []
-    while t < end:
-        out.append(t.strftime("%H:%M")); t += timedelta(minutes=30)
-    return out
-
-
 def busy626_map() -> dict:
-    """{день: [занятые получасовые слоты]} по активным броням 626."""
+    """{день: [{from, to}]} по активным броням 626."""
     out = {}
     with db() as c:
         rows = c.execute("SELECT day, slot FROM b626 WHERE status IN ('new','approved')").fetchall()
     for r in rows:
-        out.setdefault(r["day"], []).extend(slot_expand(r["slot"]))
+        bounds = _slot_bounds(r["slot"])
+        if bounds:
+            out.setdefault(r["day"], []).append({"from": bounds[0], "to": bounds[1]})
+    for intervals in out.values():
+        intervals.sort(key=lambda item: (item["from"], item["to"]))
     return out
+
+
+def studio_conflict(day: str, slot: str, exclude_bid: int = 0) -> bool:
+    wanted = _slot_bounds(slot)
+    if not wanted:
+        return True
+    wanted_start, wanted_end = parse_dt(day, wanted[0]), parse_dt(day, wanted[1])
+    with db() as c:
+        rows = c.execute(
+            "SELECT slot FROM b626 WHERE day=? AND status IN ('new','approved') AND id<>?",
+            (day, exclude_bid),
+        ).fetchall()
+    for row in rows:
+        bounds = _slot_bounds(row["slot"])
+        if bounds and _intervals_overlap(
+            parse_dt(day, bounds[0]), parse_dt(day, bounds[1]), wanted_start, wanted_end
+        ):
+            return True
+    return False
 
 
 def parse_dt(iso: str, hm: str):
@@ -1008,6 +1061,7 @@ def shape_626(b, viewer: int, users=None, messages=None, seen=None) -> dict:
         "when": b["day"], "slot": b["slot"], "goal": b["goal"],
         "needs": json.loads(b["needs"]), "status": b["status"],
         "curator": _disp_user_from(users, b["curator"]) if b["curator"] else None,
+        "lateNote": studio_late_note(b),
         "history": json.loads(b["history"]),
         "chat": _shape_chat(chat_rows, b["user_id"], b["curator"]) if can_chat else [],
         "unread": _unread_from(chat_rows, seen.get(("626", b["id"]), 0), viewer) if can_chat else 0,
@@ -1195,20 +1249,45 @@ def deeplink_kb() -> InlineKeyboardMarkup:
 ST_LABEL = tx.STATUS_LABELS
 
 
-def late_note(r) -> str:
-    """Пометка для команды: поздняя выдача/возврат (сб после 18:00) - команда может отказать."""
+def _risk_notes_for_point(day: str, hm: str, label: str) -> list[str]:
     notes = []
     try:
-        if r["dto_iso"] and datetime.strptime(r["dto_iso"], "%Y-%m-%d").weekday() == 5 and (r["tto"] or "") >= "18:00":
-            notes.append("поздний возврат (сб после 18:00)")
-    except (ValueError, KeyError):
+        date = datetime.strptime(day, "%Y-%m-%d").date()
+        today = datetime.now(MSK).date()
+        if date == today:
+            notes.append(f"{label} сегодня")
+        elif date == today + timedelta(days=1):
+            notes.append(f"{label} завтра")
+        if date.weekday() == 6:
+            notes.append(f"{label} в воскресенье")
+        if date.weekday() == 5 and hm >= "18:00":
+            notes.append(f"{label} в субботу после 18:00")
+        if hm < "09:00" or hm > "21:30":
+            notes.append(f"{label} вне обычного времени 09:00–21:30")
+    except (TypeError, ValueError):
         pass
-    try:
-        if r["dfrom_iso"] and datetime.strptime(r["dfrom_iso"], "%Y-%m-%d").weekday() == 5 and (r["tfrom"] or "") >= "18:00":
-            notes.append("поздняя выдача (сб после 18:00)")
-    except (ValueError, KeyError):
-        pass
+    return notes
+
+
+def late_note(r) -> str:
+    notes = _risk_notes_for_point(r["dfrom_iso"], r["tfrom"] or "", "выдача")
+    notes.extend(_risk_notes_for_point(r["dto_iso"], r["tto"] or "", "приём"))
     return "; ".join(notes)
+
+
+def studio_late_note(b) -> str:
+    bounds = _slot_bounds(b["slot"])
+    if not bounds:
+        return ""
+    notes = _risk_notes_for_point(b["day"], bounds[0], "бронь")
+    try:
+        if datetime.strptime(b["day"], "%Y-%m-%d").weekday() == 5 and bounds[1] >= "18:00":
+            notes.append("окончание брони в субботу после 18:00")
+    except ValueError:
+        pass
+    if bounds[1] < "09:00" or bounds[1] > "21:30":
+        notes.append("окончание брони вне обычного времени 09:00–21:30")
+    return "; ".join(dict.fromkeys(notes))
 
 
 def req_card_text(r) -> str:
@@ -1227,6 +1306,7 @@ def b626_card_text(b) -> str:
         b["id"], b["status"], author["name"] if author else "",
         _disp_user(b["user_id"]), b["day"], b["slot"], b["goal"],
         json.loads(b["needs"]), _disp_user(b["curator"]) if b["curator"] else "",
+        studio_late_note(b),
     )
 
 
@@ -1547,7 +1627,7 @@ async def api_req_create(request, body, uid):
         return jerr("Укажите название мероприятия.")
     hist = [["new", now_str()]]
     async with BOOKING_LOCK:
-        err = check_availability(items, d1, d2)
+        err = check_availability(items, d1, d2, t1, t2)
         if err:
             return jerr(err)
         with db() as c:
@@ -1581,7 +1661,7 @@ async def api_req_update(request, body, uid):
     if not event:
         return jerr("Укажите название мероприятия.")
     async with BOOKING_LOCK:
-        err = check_availability(items, d1, d2, exclude_rid=rid)
+        err = check_availability(items, d1, d2, t1, t2, exclude_rid=rid)
         if err:
             return jerr(err)
         with db() as c:
@@ -1598,18 +1678,19 @@ async def api_req_update(request, body, uid):
 
 @auth
 async def api_availability(request, body, uid):
-    """Занятость и свободные исправные номера на диапазон дат."""
+    """Занятость и свободные исправные номера на точный интервал."""
     d1, d2 = body.get("d1") or "", body.get("d2") or ""
+    t1, t2 = body.get("t1") or "00:00", body.get("t2") or "23:59"
     exclude = int(body.get("exclude") or 0)
     free_nums = {}
     for item in body.get("items") or []:
         short = item[0] if isinstance(item, (list, tuple)) and item else ""
         if short in CATALOG_META:
-            used = used_numbers(short, d1, d2, exclude)
+            used = used_numbers(short, d1, d2, t1, t2, exclude)
             free_nums[short] = [num for num in ready_numbers(short) if num not in used]
     return web.json_response({
         "ok": True,
-        "busy": busy_map(d1, d2, exclude),
+        "busy": busy_map(d1, d2, t1, t2, exclude),
         "capacity": {
             short: ready_capacity(short) for short in CATALOG_META
         },
@@ -1777,7 +1858,12 @@ def _ensure_google_tabs(service) -> None:
         spreadsheetId=GOOGLE_SHEET_ID, fields="sheets.properties.title").execute()
     existing = {s["properties"]["title"] for s in meta.get("sheets", [])}
     requests = []
-    for title in (GOOGLE_SHEET_EVENTS_TAB, GOOGLE_SHEET_SUMMARY_TAB):
+    for title in (
+        GOOGLE_SHEET_EVENTS_TAB,
+        GOOGLE_SHEET_SUMMARY_TAB,
+        GOOGLE_SHEET_REQUESTS_TAB,
+        GOOGLE_SHEET_626_TAB,
+    ):
         if title not in existing:
             requests.append({"addSheet": {"properties": {"title": title}}})
     if requests:
@@ -1799,6 +1885,154 @@ def _ensure_google_tabs(service) -> None:
     ).execute()
 
 
+TERMINAL_STATUSES = ("closed", "rejected", "canceled")
+
+
+def _created_text(ts) -> str:
+    try:
+        return datetime.fromtimestamp(float(ts), MSK).isoformat(timespec="minutes")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _final_note(history_text: str) -> str:
+    try:
+        history = json.loads(history_text or "[]")
+        if history:
+            last = history[-1]
+            return str(last[2]) if len(last) > 2 else ""
+    except (TypeError, ValueError):
+        pass
+    return ""
+
+
+def _terminal_sheet_data():
+    with db() as c:
+        users = {row["id"]: row for row in c.execute("SELECT * FROM users").fetchall()}
+        requests = c.execute(
+            "SELECT * FROM requests WHERE status IN (?,?,?) ORDER BY id",
+            TERMINAL_STATUSES,
+        ).fetchall()
+        studio = c.execute(
+            "SELECT * FROM b626 WHERE status IN (?,?,?) ORDER BY id",
+            TERMINAL_STATUSES,
+        ).fetchall()
+
+    request_headers = [
+        "ID", "Создана", "Статус", "Итог/причина", "Автор", "Telegram ID",
+        "Telegram", "Отделы", "Организации", "Мероприятие", "Дата выдачи",
+        "Время выдачи", "Дата возврата", "Время возврата", "Состав",
+        "Номера экземпляров", "Куратор", "Выдал", "Принял", "Комментарий",
+        "Риск-пометки",
+    ]
+    request_rows = []
+    for row in requests:
+        user = users.get(row["user_id"])
+        items = "; ".join("%s × %s" % (short, qty) for short, qty in json.loads(row["items"] or "[]"))
+        try:
+            raw_nums = json.loads(row["nums"] or "{}")
+        except (TypeError, ValueError):
+            raw_nums = {}
+        nums = "; ".join(
+            "%s: %s" % (short, ", ".join(map(str, values)))
+            for short, values in raw_nums.items()
+        )
+        request_rows.append([
+            str(row["id"]), _created_text(row["created_ts"]),
+            ST_LABEL.get(row["status"], row["status"]), _final_note(row["history"]),
+            user["name"] if user else "", str(row["user_id"]),
+            ("@" + user["username"]) if user and user["username"] else "",
+            ", ".join(json.loads(user["deps"] or "[]")) if user else "",
+            ", ".join(o for o in json.loads(user["orgs"] or "[]") if o != "Media BMSTU") if user else "",
+            row["event"], row["dfrom_iso"], row["tfrom"], row["dto_iso"], row["tto"],
+            items, nums,
+            _disp_user_from(users, row["curator"]) if row["curator"] else "",
+            _disp_user_from(users, row["issued_by"]) if row["issued_by"] else "",
+            _disp_user_from(users, row["returned_by"]) if row["returned_by"] else "",
+            row["comment"], late_note(row),
+        ])
+
+    studio_headers = [
+        "ID", "Создана", "Статус", "Итог/причина", "Автор", "Telegram ID",
+        "Telegram", "Отделы", "Организации", "Дата", "Начало", "Окончание",
+        "Цель", "Потребности", "Куратор", "Риск-пометки",
+    ]
+    studio_rows = []
+    for row in studio:
+        user = users.get(row["user_id"])
+        bounds = _slot_bounds(row["slot"]) or ("", "")
+        studio_rows.append([
+            str(row["id"]), _created_text(row["created_ts"]),
+            ST_LABEL.get(row["status"], row["status"]), _final_note(row["history"]),
+            user["name"] if user else "", str(row["user_id"]),
+            ("@" + user["username"]) if user and user["username"] else "",
+            ", ".join(json.loads(user["deps"] or "[]")) if user else "",
+            ", ".join(o for o in json.loads(user["orgs"] or "[]") if o != "Media BMSTU") if user else "",
+            row["day"], bounds[0], bounds[1], row["goal"],
+            ", ".join(json.loads(row["needs"] or "[]")),
+            _disp_user_from(users, row["curator"]) if row["curator"] else "",
+            studio_late_note(row),
+        ])
+    return (
+        (GOOGLE_SHEET_REQUESTS_TAB, request_headers, request_rows),
+        (GOOGLE_SHEET_626_TAB, studio_headers, studio_rows),
+    )
+
+
+def _sheet_column(number: int) -> str:
+    result = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def _upsert_sheet_rows(values, tab: str, headers: list[str], rows: list[list]) -> None:
+    last_column = _sheet_column(len(headers))
+    values.update(
+        spreadsheetId=GOOGLE_SHEET_ID,
+        range=_score_tab_range(tab, f"A1:{last_column}1"),
+        valueInputOption="RAW",
+        body={"values": [headers]},
+    ).execute()
+    existing = values.get(
+        spreadsheetId=GOOGLE_SHEET_ID,
+        range=_score_tab_range(tab, "A2:A"),
+    ).execute().get("values", [])
+    row_numbers = {
+        str(item[0]): index + 2 for index, item in enumerate(existing) if item
+    }
+    append_rows, update_rows = [], []
+    for row in rows:
+        row_number = row_numbers.get(str(row[0]))
+        if row_number:
+            update_rows.append({
+                "range": _score_tab_range(tab, f"A{row_number}:{last_column}{row_number}"),
+                "values": [row],
+            })
+        else:
+            append_rows.append(row)
+    if update_rows:
+        values.batchUpdate(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            body={"valueInputOption": "RAW", "data": update_rows},
+        ).execute()
+    if append_rows:
+        values.append(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range=_score_tab_range(tab, f"A:{last_column}"),
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": append_rows},
+        ).execute()
+
+
+def _sync_terminal_sheets(service) -> None:
+    values = service.spreadsheets().values()
+    for tab, headers, rows in _terminal_sheet_data():
+        _upsert_sheet_rows(values, tab, headers, rows)
+
+
 def _mark_score_retry(event_ids, error: str) -> None:
     delays = (60, 300, 900, 3600)
     with db() as c:
@@ -1812,12 +2046,13 @@ def _mark_score_retry(event_ids, error: str) -> None:
 
 def sync_scores_once(force: bool = False) -> dict:
     rows = _pending_scores(force)
-    if not rows:
-        return {"sent": 0, "pending": score_status()["pending"]}
     event_ids = [row["event_id"] for row in rows]
     try:
         service = _google_service()
         _ensure_google_tabs(service)
+        _sync_terminal_sheets(service)
+        if not rows:
+            return {"sent": 0, "pending": score_status()["pending"]}
         values = service.spreadsheets().values()
         existing_result = values.get(
             spreadsheetId=GOOGLE_SHEET_ID,
@@ -1980,11 +2215,13 @@ async def api_req_action(request, body, uid):
         if err:
             return jerr(err)
         async with BOOKING_LOCK:
-            err = check_availability(items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid)
+            err = check_availability(
+                items, r["dfrom_iso"], r["dto_iso"], r["tfrom"], r["tto"], exclude_rid=rid
+            )
             if err:
                 return jerr(err)
             nums, err = assign_numbers(
-                items, r["dfrom_iso"], r["dto_iso"], exclude_rid=rid,
+                items, r["dfrom_iso"], r["dto_iso"], r["tfrom"], r["tto"], exclude_rid=rid,
                 preferred=body.get("nums"),
             )
             if err:
@@ -2052,8 +2289,7 @@ async def api_626_create(request, body, uid):
     if not isinstance(needs, list) or len(needs) > 10 or any(not isinstance(item, str) for item in needs):
         return jerr("Некорректный список дополнительного оборудования.")
     async with BOOKING_LOCK:
-        taken = set(busy626_map().get(day, []))
-        if taken & set(slot_expand(slot)): return jerr("Этот слот уже занят — выберите другое время.")
+        if studio_conflict(day, slot): return jerr("Этот интервал уже занят — выберите другое время.")
         hist = [["new", now_str()]]
         with db() as c:
             cur = c.execute("INSERT INTO b626(user_id, day, slot, goal, needs, history, created_ts) VALUES(?,?,?,?,?,?,?)", (uid, day, slot, goal, json.dumps([clean_text(item, 200) for item in needs], ensure_ascii=False), json.dumps(hist, ensure_ascii=False), time.time()))
@@ -2460,47 +2696,6 @@ def admin_activity(limit=None):
     return result[:limit] if limit else result
 
 
-def build_export_text(kind):
-    """Собирает текст выгрузки блоками записей (читаемо в открытом .md на телефоне,
-    без markdown-таблиц). Три типа: requests, 626, admins. Возвращает (fname, text)."""
-    with db() as c:
-        if kind == "admins":
-            admin_stats = admin_activity()
-            top_rejecters = [a for a in sorted(admin_stats, key=lambda a: -a["rejected"]) if a["rejected"] > 0]
-
-            lines = ["АДМИНИСТРАТОРЫ ОБОРУДЫША", ""]
-            for a in admin_stats:
-                lines.append(f"{a['name']}\nКурировал: {a['curated']}\nВыдал: {a['issued']}\n"
-                             f"Принял: {a['returned']}\nОтказал: {a['rejected']}\n---")
-            if top_rejecters:
-                lines.append("")
-                lines.append("ТОП ПО ОТКАЗАМ")
-                for i, a in enumerate(top_rejecters, 1):
-                    lines.append(f"{i}. {a['name']} — {a['rejected']}")
-            fname = "admins.md"
-        elif kind == "626":
-            lines = ["БРОНИ 626", ""]
-            for b in c.execute("SELECT * FROM b626 ORDER BY id").fetchall():
-                au = get_user(b["user_id"])
-                author = au["name"] if au else "?"
-                curator = _disp_user(b["curator"]) if b["curator"] else "—"
-                lines.append(f"Бронь #{b['id']}\nАвтор: {author}\nДень: {b['day']}\nСлот: {b['slot']}\n"
-                             f"Цель: {b['goal']}\nСтатус: {ST_LABEL.get(b['status'], b['status'])}\n"
-                             f"Куратор: {curator}\n---")
-            fname = "studio626.md"
-        else:
-            lines = ["ЗАЯВКИ ОБОРУДЫША", ""]
-            for r in c.execute("SELECT * FROM requests ORDER BY id").fetchall():
-                au = get_user(r["user_id"])
-                items = "; ".join(f"{s}×{q}" for s, q in json.loads(r["items"]))
-                curator = _disp_user(r["curator"]) if r["curator"] else "—"
-                lines.append(f"Заявка #{r['id']}\nАвтор: {(au['name'] if au else '?')}\n"
-                             f"Мероприятие: {r['event']}\nДаты: {r['dfrom']} → {r['dto']}\n"
-                             f"Статус: {ST_LABEL.get(r['status'], r['status'])}\nКуратор: {curator}\n"
-                             f"Состав: {items}\n---")
-            fname = "requests.md"
-    return fname, "\n".join(lines)
-
 
 MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|>])")
 
@@ -2549,73 +2744,6 @@ async def send_rich_markdown(chat_id: int, sections) -> None:
                 await bot.send_message(chat_id, rest[:cut])
                 rest = rest[cut:].lstrip()
 
-
-def build_export_text(kind):
-    """Build a mobile-friendly Markdown document without tables."""
-    generated = datetime.now(MSK).strftime("%d.%m.%Y %H:%M")
-    stamp = datetime.now(MSK).strftime("%Y-%m-%d")
-    with db() as c:
-        users = {row["id"]: row for row in c.execute("SELECT * FROM users").fetchall()}
-        requests_rows = c.execute("SELECT * FROM requests ORDER BY id").fetchall() if kind == "requests" else []
-        studio_rows = c.execute("SELECT * FROM b626 ORDER BY id").fetchall() if kind == "626" else []
-    if kind == "admins":
-        stats = admin_activity()
-        lines = ["# Администраторы Оборудыша", "", "_Сформировано: %s_" % generated]
-        for item in stats:
-            lines.extend(["", "## %s" % md_escape(item["name"]),
-                          "- Курировал: **%s**" % item["curated"],
-                          "- Выдал: **%s**" % item["issued"],
-                          "- Принял: **%s**" % item["returned"],
-                          "- Отказал: **%s**" % item["rejected"]])
-        rejecters = [item for item in sorted(stats, key=lambda x: -x["rejected"]) if item["rejected"]]
-        if rejecters:
-            lines.extend(["", "---", "", "## Топ по отказам"])
-            lines.extend("%s. %s — **%s**" % (i, md_escape(item["name"]), item["rejected"])
-                         for i, item in enumerate(rejecters, 1))
-        filename = "oborudysh-admins-%s.md" % stamp
-    elif kind == "626":
-        lines = ["# Брони аудитории 626", "", "_Сформировано: %s_" % generated]
-        for row in studio_rows:
-            author = users.get(row["user_id"])
-            curator = _disp_user_from(users, row["curator"]) if row["curator"] else "—"
-            lines.extend(["", "## Бронь №%s" % row["id"],
-                          "- Автор: **%s**" % md_escape(author["name"] if author else "?"),
-                          "- День: `%s`" % md_escape(row["day"]), "- Слот: `%s`" % md_escape(row["slot"]),
-                          "- Цель: %s" % md_escape(row["goal"]),
-                          "- Статус: **%s**" % md_escape(ST_LABEL.get(row["status"], row["status"])),
-                          "- Куратор: %s" % md_escape(curator)])
-        filename = "oborudysh-626-%s.md" % stamp
-    else:
-        lines = ["# Заявки Оборудыша", "", "_Сформировано: %s_" % generated]
-        for row in requests_rows:
-            author = users.get(row["user_id"])
-            curator = _disp_user_from(users, row["curator"]) if row["curator"] else "—"
-            lines.extend(["", "## Заявка №%s" % row["id"],
-                          "- Автор: **%s**" % md_escape(author["name"] if author else "?"),
-                          "- Мероприятие: %s" % md_escape(row["event"]),
-                          "- Даты: `%s` → `%s`" % (md_escape(row["dfrom"]), md_escape(row["dto"])),
-                          "- Статус: **%s**" % md_escape(ST_LABEL.get(row["status"], row["status"])),
-                          "- Куратор: %s" % md_escape(curator), "", "### Состав"])
-            lines.extend("- %s × %s" % (md_escape(short), qty) for short, qty in json.loads(row["items"]))
-        filename = "oborudysh-requests-%s.md" % stamp
-    return filename, "\n".join(lines).rstrip() + "\n"
-
-
-@auth
-async def api_export(request, body, uid):
-    """Выгрузка статистики текстом (файлом от бота). Три типа: requests, 626, admins."""
-    if not is_senior(uid):
-        return jerr("Статистика - только старшим админам.", 403)
-    kind = body.get("kind") or "requests"
-    fname, text = build_export_text(kind)
-    if bot is not None:
-        try:
-            await bot.send_document(uid, BufferedInputFile(text.encode("utf-8"), fname),
-                                   caption=f"📊 {kind} из Оборудыша")
-        except Exception as e:
-            log.warning("export send failed: %s", e)
-            return jerr("Не удалось отправить файл. Напишите боту /start и повторите.")
-    return web.json_response({"ok": True, "md": text})
 
 
 async def _broadcast_run(ids, text, blobs):
@@ -3250,29 +3378,6 @@ async def cmd_checks(message: Message) -> None:
     await message.answer("Плановые проверки прогнаны.")
 
 
-@dp.message(Command("export_requests"))
-async def cmd_export_requests(message: Message) -> None:
-    if not is_senior(message.from_user.id):
-        return
-    fname, text = build_export_text("requests")
-    await message.answer_document(BufferedInputFile(text.encode("utf-8"), fname))
-
-
-@dp.message(Command("export_626"))
-async def cmd_export_626(message: Message) -> None:
-    if not is_senior(message.from_user.id):
-        return
-    fname, text = build_export_text("626")
-    await message.answer_document(BufferedInputFile(text.encode("utf-8"), fname))
-
-
-@dp.message(Command("export_admins"))
-async def cmd_export_admins(message: Message) -> None:
-    if not is_senior(message.from_user.id):
-        return
-    fname, text = build_export_text("admins")
-    await message.answer_document(BufferedInputFile(text.encode("utf-8"), fname))
-
 
 def _parse_id_arg(message: Message):
     parts = (message.text or "").split()
@@ -3317,11 +3422,50 @@ async def cmd_deladmin(message: Message) -> None:
 async def cmd_admins(message: Message) -> None:
     if not is_senior(message.from_user.id):
         return
-    lines = [
-        "Старшие (.env): " + (", ".join(map(str, sorted(SENIOR_ADMIN_IDS))) or "—"),
-        "Админы (.env): " + (", ".join(map(str, sorted(ADMIN_IDS))) or "—"),
-        "Админы (добавлены /addadmin): " + (", ".join(map(str, sorted(EXTRA_ADMIN_IDS))) or "—"),
-    ]
+
+    admin_ids = sorted(SENIOR_ADMIN_IDS | ADMIN_IDS | EXTRA_ADMIN_IDS)
+    if not admin_ids:
+        await message.answer("Администраторы не настроены.")
+        return
+
+    placeholders = ",".join("?" for _ in admin_ids)
+    with db() as c:
+        saved_users = {
+            row["id"]: row
+            for row in c.execute(
+                f"SELECT id, name, username FROM users WHERE id IN ({placeholders})",
+                admin_ids,
+            )
+        }
+
+    lines = [f"Все администраторы — {len(admin_ids)}:"]
+    for uid in admin_ids:
+        saved = saved_users.get(uid)
+        username = (saved["username"] if saved else "") or ""
+        short_name = ""
+        if bot:
+            try:
+                chat = await bot.get_chat(uid)
+                username = chat.username or username
+                short_name = chat.first_name or ""
+            except Exception:
+                pass
+        if not short_name and saved:
+            short_name = saved["name"] or ""
+
+        sources = []
+        if uid in SENIOR_ADMIN_IDS:
+            sources.append("старший из .env")
+        if uid in ADMIN_IDS:
+            sources.append("админ из .env")
+        if uid in EXTRA_ADMIN_IDS:
+            sources.append("добавлен через /addadmin")
+
+        tg_name = f"@{username}" if username else "без @username"
+        if short_name:
+            tg_name += f" ({short_name})"
+        lines.append(f"\n{tg_name}\nID: {uid}\n{', '.join(sources)}")
+
     await message.answer("\n".join(lines))
 
 
@@ -3463,7 +3607,6 @@ async def main() -> None:
     app.router.add_post("/api/equip/restore", api_equip_restore)
     app.router.add_post("/api/favset/add", api_favset_add)
     app.router.add_post("/api/favset/del", api_favset_del)
-    app.router.add_post("/api/export", api_export)
     app.router.add_post("/api/broadcast", api_broadcast)
     app.router.add_post("/api/stats", api_stats)
     app.router.add_post("/api/resync", api_resync)
