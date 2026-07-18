@@ -106,8 +106,13 @@ h1.big{font-size:var(--fs-xl);font-weight:700;letter-spacing:-.02em;margin-botto
 .chev{color:var(--hint);font-size:17px}
 .pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-xs);font-weight:600;padding:4px 9px;border-radius:var(--r-pill);white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
-.role-chip{display:inline-flex;align-items:center;background:var(--bg2);border:1px solid var(--sep);border-radius:var(--r-xs);padding:4px 9px;font-size:var(--fs-sm);font-weight:500;margin:0 5px 5px 0;color:var(--text)}
+.role-chip{display:inline-flex;align-items:center;background:var(--bg2);border:1px solid var(--sep);border-radius:var(--r-xs);padding:4px 9px;font-size:var(--fs-sm);font-weight:500;margin:0 5px 5px 0;color:var(--text);white-space:nowrap}
 .role-chip.hl{background:color-mix(in srgb,var(--accent) 16%,transparent);border-color:color-mix(in srgb,var(--accent) 40%,transparent);color:var(--link)}
+.profile-roles-wrap{margin-bottom:12px}
+.profile-roles{max-height:62px;overflow:hidden}
+.profile-roles.expanded{max-height:none}
+.profile-roles-toggle{border:0;background:transparent;color:var(--link);font-family:inherit;font-size:var(--fs-xs);font-weight:600;padding:2px 0 0;cursor:pointer}
+.profile-roles-toggle[hidden]{display:none}
 /* кнопки */
 .mainbtn-wrap{position:absolute;left:0;right:0;bottom:0;padding:10px 14px 20px;background:linear-gradient(transparent,var(--bg2) 35%);pointer-events:none}
 .mainbtn{pointer-events:auto;width:100%;border:none;border-radius:var(--r-pill);padding:15px;background:var(--btn);color:var(--btn-text);font-family:inherit;font-size:var(--fs-lg);font-weight:700;line-height:1;cursor:pointer;transition:.15s}
@@ -153,8 +158,8 @@ input::placeholder,textarea::placeholder{color:var(--hint)}
 .time-fields{display:flex;gap:8px}
 .time-field{flex:1;background:var(--card);border:1px solid var(--sep);border-radius:var(--r-sm);padding:10px 13px;cursor:pointer}
 .time-field .lbl{font:500 var(--fs-2xs) var(--mono);color:var(--hint);text-transform:uppercase;letter-spacing:.06em}
-.time-field .val{font:600 var(--fs-lg) var(--mono);margin-top:2px}
-.time-field .val.empty{color:var(--hint);font-weight:400}
+.time-field input[type="time"]{border:0;background:transparent;color:var(--text);font:600 var(--fs-lg) var(--mono);padding:2px 0 0;min-height:30px;width:100%}
+.time-field input[type="time"]:focus{outline:0}
 .time-field.active{border-color:var(--link)}
 /* слоты */
 .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
