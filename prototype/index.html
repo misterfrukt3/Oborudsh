@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20260717b">
+<link rel="stylesheet" href="style.css?v=20260721i">
 </head>
 <body>
 
@@ -28,8 +28,8 @@
   <div id="overlay"></div>
 </div>
 
-<script src="catalog.js?v=20260717b"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
-<script src="texts.js?v=20260717b"></script>
+<script src="catalog.js?v=20260721i"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script src="texts.js?v=20260721i"></script>
 <script>
 "use strict";
 /* запрет масштабирования интерфейса: жест «щипок» и двойной тап */
@@ -48,6 +48,7 @@ const TG_HASH = new URLSearchParams(location.hash.replace(/^#/, ""));
 const TG_QUERY = new URLSearchParams(location.search);
 function tgLaunchParam(name){ return TG_HASH.get(name) || TG_QUERY.get(name) || ""; }
 const TG_INIT_DATA = (TG && TG.initData) || tgLaunchParam("tgWebAppData");
+const TG_START_PARAM = (TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param) || tgLaunchParam("tgWebAppStartParam");
 const IN_TG = !!(
   TG_INIT_DATA ||
   tgLaunchParam("tgWebAppPlatform") ||
@@ -124,7 +125,29 @@ function applyBoot(d){
   if(d.busy626) BUSY626 = d.busy626;   // занятость 626 из boot (dayload — в SRV.dayload)
   if(d.favSets) favSets = d.favSets;
   if(d.equipmentUnits) equipmentUnits = d.equipmentUnits;
+  inventory = d.inventory || null;
   rebuildCatalog(d.extraItems, d.catBlocks, d.removedItems);  // каталог = база + добавленное − скрытое + блокировки
+}
+function launchRequestTarget(){
+  let id = Number(TG_QUERY.get("requestId") || 0);
+  let mode = TG_QUERY.get("mode") || "user";
+  if(!id && TG_START_PARAM){
+    const match = String(TG_START_PARAM).match(/^request_(\d+)_(user|admin)$/);
+    if(match){ id=Number(match[1]); mode=match[2]; }
+  }
+  return TG_QUERY.get("open")==="request" || id ? {id,mode} : null;
+}
+function openLaunchRequest(d){
+  const target = launchRequestTarget();
+  if(!target || !target.id || !requests.some(r=>r.id===target.id)) return false;
+  if(target.mode==="admin" && d.isAdmin){
+    role = "admin";
+    resetTo("adminReq", {id:target.id});
+  }else{
+    role = "user";
+    resetTo("reqDetail", {id:target.id});
+  }
+  return true;
 }
 /* куратор этой заявки — я? (в демо куратор помечен строкой "@you") */
 function myCur(x){ return SRV ? !!x.curMe : x.curator==="@you"; }
@@ -333,6 +356,7 @@ let stack = [];
 let wiz = null, wiz626 = null, issueCheck = null, adminTab = "queue", userQ = "";
 let favSets = []; // избранные наборы оборудки (свои)
 let equipmentUnits = [], unitPassport = null, unitQ = "", adminWeek = 0, issueFreeNums = {};
+let inventory = null, invItems = [], invCategory = "", invItemId = 0, invParticipants = new Set(), invResult = null;
 const $ = id => document.getElementById(id);
 
 /* ================= НАВИГАЦИЯ ================= */
@@ -709,6 +733,9 @@ SCREENS.home = () => {
       </div>
       <div style="margin-bottom:12px">${roleChips}</div>
 
+      ${SRV&&SRV.inventoryActive?'<div class="inventory-alert"><b>Инвентаризация идёт</b><span>Бронирование и выдача оборудования временно приостановлены.</span></div>':""}
+      ${inventory&&inventory.active&&inventory.isParticipant?'<div class="action-big inventory-entry" onclick="navTo(\'inventoryHub\')"><span class="ic">'+uic("doc",24)+'</span><div class="grow"><b>Продолжить инвентаризацию</b><span>'+inventory.summary.checked+' из '+inventory.summary.total+' экземпляров проверено</span></div><span class="chev">›</span></div>':""}
+
       <div class="action-big" onclick="startWizard()">
         <span class="ic">${uic("box",24)}</span>
         <div class="grow"><b>Забронировать оборудование</b><span>каталог · календарь · корзина</span></div>
@@ -836,6 +863,7 @@ function calHtml(cfg){
 
 /* ================= МАСТЕР ЗАЯВКИ ================= */
 function startWizard(){
+  if(SRV && SRV.inventoryActive){ toast("Во время инвентаризации оборудование нельзя бронировать"); return; }
   wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart:{}, event:"", comment:"", media:false, search:"", catFilter:"Все", busy:{}, capacity:{}, editId:0};
   navTo("wizard");
 }
@@ -1552,6 +1580,7 @@ SCREENS.adminHub = () => {
       <div class="admin-tools">
         <div class="list-item" onclick="adminWeek=0;navTo('adminCalendar')"><div class="emoji-badge">${uic("chart",19)}</div><div class="grow">Недельный календарь<div class="sub">все задачи команды</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('equipmentUnits')"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Паспорта экземпляров<div class="sub">состояние и история</div></div><span class="chev">›</span></div>
+        ${inventory&&inventory.active&&inventory.isParticipant?'<div class="list-item inventory-tool" onclick="navTo(\'inventoryHub\')"><div class="emoji-badge">'+uic("doc",19)+'</div><div class="grow">Инвентаризация<div class="sub">продолжить проверку категорий</div></div><span class="chev">›</span></div>':""}
       </div>
       <div class="seg" role="tablist">
         <button class="${adminTab==="queue"?"on":""}" role="tab" aria-selected="${adminTab==="queue"}" onclick="adminTab='queue';render()">Без куратора</button>
@@ -1894,6 +1923,80 @@ function doIssue(){
   $("overlay").innerHTML=""; render();
 }
 
+/* ================= ИНВЕНТАРИЗАЦИЯ ================= */
+const INV_STATE={stored:"На складе",issued:"Выдано",lost:"Потеряно",broken:"Сломано"};
+const INV_SOURCE={grant:"Грант",university:"Университет",other:"Другое"};
+function openInventory(){
+  if(inventory&&inventory.active){navTo("inventoryHub");return;}
+  invParticipants=new Set(); invResult=null; navTo("inventoryStart");
+}
+function invToggleParticipant(id){ if(invParticipants.has(id))invParticipants.delete(id);else invParticipants.add(id);render(); }
+SCREENS.inventoryStart=()=>{
+  const people=(usersDb||[]).filter(u=>u.ok!==false&&u.verified!=="blocked");
+  return {body:`<div class="inventory-hero"><span>${uic("doc",30)}</span><div><div class="hud">Полная проверка фонда</div><h1 class="big">Новая инвентаризация</h1></div></div>
+    <div class="inventory-alert"><b>Бронирование будет приостановлено</b><span>Пока событие активно, оборудование нельзя бронировать, менять в заявках и выдавать.</span></div>
+    <div class="sec-label">Участники</div><p class="sub">Выберите администраторов и пользователей. Вы как создатель добавитесь автоматически.</p>
+    <div class="participant-list">${people.map((u,i)=>{const id=u.id||i+1,on=invParticipants.has(id);return `<div class="check-row ${on?"on":""}" ${chkA(on)} onclick="invToggleParticipant(${id})"><span class="checkbox">✓</span><div class="grow"><b>${u.name}</b><div class="hud">${u.tg||""} · ${u.role||"пользователь"}</div></div></div>`}).join("")||'<div class="card sub">Нет доступных участников</div>'}</div>`,
+    mainbtn:mainBtn("Запустить инвентаризацию","confirmInventoryStart()")};
+};
+function confirmInventoryStart(){confirmModal("Запустить инвентаризацию?","В течение инвентаризации оборудование нельзя бронировать и выдавать.",startInventoryEvent);}
+function startInventoryEvent(){
+  if(!SRV){toast("Для инвентаризации нужен серверный режим");return;}
+  srvDo("inventory/start",{participants:Array.from(invParticipants)},()=>{resetTo("inventoryHub");toast("Инвентаризация запущена")});
+}
+function invProgress(s){const p=s.total?Math.round(s.checked*100/s.total):0;return `<div class="inv-progress"><i style="width:${p}%"></i></div><div class="hud">${s.checked} из ${s.total} · ${p}%</div>`;}
+SCREENS.inventoryHub=()=>{
+  if(!inventory||!inventory.active)return {body:'<div class="card sub">Активной инвентаризации нет</div>'};
+  const s=inventory.summary,cats=inventory.categories||[];
+  return {body:`<div class="inventory-hero"><span>${uic("doc",30)}</span><div class="grow"><div class="hud">Событие №${inventory.id} · ${inventory.createdAt}</div><h1 class="big">Инвентаризация</h1><div class="sub">Создал: ${inventory.createdBy}</div></div><span class="live-pill">идёт</span></div>
+    <div class="card inv-summary"><div class="inv-kpi"><b>${s.checked}</b><span>проверено</span></div><div class="inv-kpi"><b>${s.ready}</b><span>готово</span></div><div class="inv-kpi"><b>${s.missing}</b><span>не найдено</span></div><div class="inv-kpi"><b>${s.broken}</b><span>сломано</span></div>${invProgress(s)}</div>
+    <div class="sec-label">Команда</div><div class="chip-wrap">${inventory.participants.map(p=>'<span class="chip">'+p.name+'</span>').join("")}</div>
+    <div class="sec-label">Категории</div><div class="inventory-cats">${cats.map(c=>{const done=c.status==="done",busy=c.status==="working"&&!c.mine,can=c.status==="free"||c.mine;return `<button class="inventory-cat ${done?"done":busy?"busy":""}" ${can?'onclick="claimInventoryCategory(\''+escJs(c.name)+'\')"':'disabled'}><div class="grow"><b>${c.name}</b><div class="hud">${done?"Завершена":busy?"Проверяет "+c.lockedBy:c.mine?"Продолжить свою категорию":"Свободна"} · ${c.checked}/${c.total}</div></div><span>${done?"✓":busy?"●":"›"}</span></button>`}).join("")}</div>
+    ${inventory.canManage?'<button class="btn-sm" style="width:100%;margin-top:12px" onclick="addStorageModal()">＋ Добавить место хранения</button>':""}`,
+    mainbtn:(inventory.canFinish||inventory.canEmergency)?'<div class="mainbtn-wrap"><div style="pointer-events:auto">'+(inventory.canFinish?'<button class="mainbtn" onclick="finishInventory(false)">Завершить инвентаризацию</button>':"")+'<button class="mainbtn destructive" style="margin-top:8px" onclick="finishInventory(true)">Экстренно завершить</button></div></div>':""};
+};
+function claimInventoryCategory(category){
+  if(!SRV)return; if(_busy)return;_busy=true;
+  api("inventory/claim",{category}).then(d=>{d=cleanIncoming(d);_busy=false;invCategory=d.category;invItems=d.items||[];navTo("inventoryItems")}).catch(e=>{_busy=false;toast("⚠️ "+e.message)});
+}
+SCREENS.inventoryItems=()=>{
+  const checked=invItems.filter(x=>x.checked).length;
+  return {body:`<div class="row"><div class="grow"><div class="hud">Закреплена за вами</div><h1 class="big">${invCategory}</h1></div><span class="unit-state ready">${checked}/${invItems.length}</span></div>${invProgress({checked,total:invItems.length})}
+    <div class="sec-label">Экземпляры</div>${invItems.map((item,i)=>`<div class="list-item" onclick="openInventoryItem(${item.id})"><div class="inv-number">${i+1}</div><div class="grow"><b>${item.name}</b><div class="hud">${item.inventoryNum||"без инвентарного номера"}${item.checked?" · проверил "+item.checkedBy:""}</div></div><span class="unit-state ${item.checked?"ready":"repair"}">${item.checked?"Проверено":"Ждёт"}</span><span class="chev">›</span></div>`).join("")}`};
+};
+function openInventoryItem(id){invItemId=id;navTo("inventoryItemForm");}
+SCREENS.inventoryItemForm=()=>{
+  const item=invItems.find(x=>x.id===invItemId);if(!item)return {body:'<div class="card sub">Экземпляр не найден</div>'};
+  const details=Object.entries(item.currentData||{}).filter(([k])=>!["short","num"].includes(k)).slice(0,8);
+  return {body:`<div class="card"><div class="hud">${item.category}</div><h1 class="big">${item.name}</h1><div class="inv-id">${item.inventoryNum||"Инвентарный номер не указан"}</div><div class="source-grid">${details.map(([k,v])=>'<div><span>'+k+'</span><b>'+String(v||"—")+'</b></div>').join("")}</div></div>
+    <div class="sec-label">Наличие</div><select id="inv-found"><option value="">Выберите</option><option value="1" ${item.found===true?"selected":""}>Найдено</option><option value="0" ${item.found===false?"selected":""}>Не найдено</option></select>
+    <div class="sec-label">Состояние</div><select id="inv-state" onchange="renderInvIssued(this.value)"><option value="">Выберите</option>${Object.entries(INV_STATE).map(([v,l])=>'<option value="'+v+'" '+(item.state===v?"selected":"")+'>'+l+'</option>').join("")}</select>
+    <div class="sec-label">Источник имущества</div><select id="inv-source"><option value="">Выберите</option>${Object.entries(INV_SOURCE).map(([v,l])=>'<option value="'+v+'" '+(item.source===v?"selected":"")+'>'+l+'</option>').join("")}</select>
+    <div class="sec-label">Участие в рентале</div><select id="inv-rental"><option value="1" ${item.rental!==false?"selected":""}>Да</option><option value="0" ${item.rental===false?"selected":""}>Нет</option></select>
+    <div class="sec-label">Место хранения</div><select id="inv-storage"><option value="">Выберите место</option>${(inventory.locations||[]).map(x=>'<option value="'+escAttr(x)+'" '+(item.storageLocation===x?"selected":"")+'>'+x+'</option>').join("")}</select>
+    <div id="inv-issued" style="display:${item.state==="issued"?"block":"none"}"><div class="sec-label">Кому выдано</div><input id="inv-issued-to" maxlength="120" value="${escAttr(item.issuedTo)}" placeholder="Необязательно"><div class="sec-label">До какого срока</div><input id="inv-issued-until" maxlength="40" value="${escAttr(item.issuedUntil)}" placeholder="Необязательно"></div>
+    <div class="sec-label">Комментарий</div><textarea id="inv-comment" rows="3" maxlength="1000" placeholder="Неисправность, некомплект, другое место…">${escHtml(item.comment)}</textarea>`,
+    mainbtn:mainBtn(item.checked?"Сохранить изменения":"Проверено — дальше","saveInventoryItem()")};
+};
+function renderInvIssued(value){const el=$("inv-issued");if(el)el.style.display=value==="issued"?"block":"none";}
+function saveInventoryItem(){
+  const found=$("inv-found").value,state=$("inv-state").value,source=$("inv-source").value,storage=$("inv-storage").value;
+  if(found===""||!state||!source||!storage){toast("Заполните наличие, состояние, источник и место");return;}
+  const body={id:invItemId,found:found==="1",state,source,rental:$("inv-rental").value==="1",storageLocation:storage,
+    issuedTo:$("inv-issued-to")?$("inv-issued-to").value.trim():"",issuedUntil:$("inv-issued-until")?$("inv-issued-until").value.trim():"",comment:$("inv-comment").value.trim()};
+  if(_busy)return;_busy=true;api("inventory/item",body).then(d=>{d=cleanIncoming(d);_busy=false;invItems=d.items||[];inventory=d.inventory||inventory;if(d.categoryDone){goBack();goBack();render();toast("Категория завершена")}else{goBack();render();toast("Результат сохранён")}}).catch(e=>{_busy=false;toast("⚠️ "+e.message)});
+}
+function addStorageModal(){
+  $("overlay").innerHTML=`<div class="modal-veil" onclick="if(event.target===this)this.remove()"><div class="modal"><h3>Новое место хранения</h3><input id="storage-new" maxlength="120" placeholder="Например: шкаф 2 · верхняя полка"><div class="acts"><button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button><button class="btn-sm primary" onclick="addStorage()">Добавить</button></div></div></div>`;
+}
+function addStorage(){const name=$("storage-new").value.trim();if(!name){toast("Введите название");return;}srvDo("inventory/storage/add",{name},()=>{$("overlay").innerHTML="";toast("Место добавлено")});}
+function finishInventory(emergency){
+  const s=inventory.summary;if(!emergency&&s.checked<s.total){toast("Сначала завершите все категории");return;}
+  confirmModal(emergency?"Экстренно завершить?":"Завершить инвентаризацию?",emergency?"Непроверенные категории останутся без результатов.":"Будут обновлены итоговые листы Google Sheets.",()=>{
+    if(_busy)return;_busy=true;api("inventory/finish",{emergency}).then(d=>{_busy=false;invResult=d.inventoryResult;const exportError=d.inventoryExportError;applyBoot(d);resetTo("inventoryComplete");if(exportError)toast("⚠️ "+exportError,5000)}).catch(e=>{_busy=false;toast("⚠️ "+e.message)});
+  });
+}
+SCREENS.inventoryComplete=()=>{const s=invResult||{checked:0,ready:0,missing:0,broken:0,noRental:0};return {body:`<div class="inventory-complete"><div class="complete-mark">✓</div><h1 class="big">Инвентаризация завершена</h1><p class="sub">Итоги сохранены. Старшие администраторы получили сводку.</p></div><div class="card inv-result"><div><span>Обработано</span><b>${s.checked}</b></div><div><span>Готово к выдаче</span><b>${s.ready}</b></div><div><span>Не найдено</span><b>${s.missing}</b></div><div><span>Сломано</span><b>${s.broken}</b></div><div><span>Без рентала</span><b>${s.noRental}</b></div></div>`,mainbtn:mainBtn("Готово","resetTo('seniorHub')")};};
 /* ================= СТАРШИЙ АДМИН ================= */
 SCREENS.seniorHub = () => {
   const s626new = bookings626.filter(b=>b.status==="new");
@@ -1925,6 +2028,7 @@ SCREENS.seniorHub = () => {
       </div>
       <div class="sec-label">Оборудование</div>
       <div>
+        <div class="list-item inventory-tool" onclick="openInventory()"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">${inventory&&inventory.active?"Инвентаризация идёт":"Провести инвентаризацию"}<div class="sub">${inventory&&inventory.active?inventory.summary.checked+" из "+inventory.summary.total+" проверено":"командная проверка всего оборудования"}</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="startAddEquip()"><div class="emoji-badge">${uic("plus",19)}</div><div class="grow">Добавить оборудование в рентал</div><span class="chev">›</span></div>
         <div class="list-item" onclick="startRemoveEquip()"><div class="emoji-badge">${uic("box",19)}</div><div class="grow">Убрать оборудование</div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('catBlocks')"><div class="emoji-badge">${uic("lock",19)}</div><div class="grow">Блокировка категорий</div><span class="chev">›</span></div>
@@ -2419,7 +2523,7 @@ async function bootApp(){
     applyBoot(d);
     initCalSRV();
     if(d.verified==="blocked") resetTo("blocked");
-    else if(d.registered && d.verified==="ok") resetTo("home");
+    else if(d.registered && d.verified==="ok") { if(!openLaunchRequest(d)) resetTo("home"); }
     else if(d.registered && d.verified==="pending") resetTo("regWait");
     else if(d.registered && d.verified==="rejected") resetTo("rejected");
     else resetTo("rules");

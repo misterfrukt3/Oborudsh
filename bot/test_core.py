@@ -203,6 +203,30 @@ class CoreRulesTest(unittest.TestCase):
         boundary = main.datetime(2030, 1, 1, 12, 5, 0, tzinfo=main.MSK)
         self.assertAlmostEqual(main._seconds_to_next_check(boundary), 300.0)
 
+    def test_request_grace_is_six_full_hours(self):
+        planned = main.datetime(2026, 7, 24, 12, 0, tzinfo=main.MSK)
+        self.assertEqual(main.REQUEST_GRACE, main.timedelta(hours=6))
+        self.assertFalse(main.request_grace_expired(planned, planned))
+        self.assertFalse(main.request_grace_expired(planned + main.timedelta(hours=6), planned))
+        self.assertTrue(main.request_grace_expired(planned + main.timedelta(hours=6, seconds=1), planned))
+
+    def test_request_button_opens_exact_card_and_mode(self):
+        old_url = main.WEBAPP_URL
+        try:
+            main.WEBAPP_URL = "https://example.test/app?version=1"
+            user_button = main.request_button(42)
+            admin_button = main.request_button(42, admin=True)
+        finally:
+            main.WEBAPP_URL = old_url
+        self.assertEqual(
+            user_button.inline_keyboard[0][0].web_app.url,
+            "https://example.test/app?version=1&open=request&requestId=42&mode=user",
+        )
+        self.assertEqual(
+            admin_button.inline_keyboard[0][0].web_app.url,
+            "https://example.test/app?version=1&open=request&requestId=42&mode=admin",
+        )
+
     def test_feature_flags_and_editable_texts(self):
         payload = main.boot_payload(1)
         self.assertEqual(payload["features"]["productionRole"], main.ENABLE_PRODUCTION_ROLE)
@@ -224,6 +248,58 @@ class CoreRulesTest(unittest.TestCase):
         )
         self.assertIn(r"\[тест\]", card)
         self.assertIn(r"Съёмка\!", card)
+
+    def test_inventory_event_claim_save_and_emergency_finish(self):
+        class FakeRequest:
+            def __init__(self, body):
+                self.body = body
+
+            async def json(self):
+                return self.body
+
+        old_dev = main.DEV_USER_ID
+        old_seniors = set(main.SENIOR_ADMIN_IDS)
+        old_source = main.INVENTORY_SOURCE_SHEET_ID
+        old_google = main.GOOGLE_SHEETS_ENABLED
+        main.DEV_USER_ID = 1
+        main.SENIOR_ADMIN_IDS.add(1)
+        main.INVENTORY_SOURCE_SHEET_ID = ""
+        main.GOOGLE_SHEETS_ENABLED = False
+        try:
+            with main.db() as connection:
+                connection.execute("INSERT INTO users(id,name,agreed,verified) VALUES(2,'Second User Name',1,'ok')")
+            response = asyncio.run(main.api_inventory_start(FakeRequest({"participants": [1, 2]})))
+            self.assertEqual(response.status, 200)
+            self.assertTrue(main.inventory_is_active())
+            payload = main.json.loads(response.text)
+            category = payload["inventory"]["categories"][0]["name"]
+
+            claimed = asyncio.run(main.api_inventory_claim(FakeRequest({"category": category})))
+            claim_payload = main.json.loads(claimed.text)
+            self.assertTrue(claim_payload["items"])
+            main.DEV_USER_ID = 2
+            conflict = asyncio.run(main.api_inventory_claim(FakeRequest({"category": category})))
+            self.assertEqual(conflict.status, 409)
+            main.DEV_USER_ID = 1
+            item_id = claim_payload["items"][0]["id"]
+
+            saved = asyncio.run(main.api_inventory_item(FakeRequest({
+                "id": item_id, "found": True, "state": "stored",
+                "source": "university", "rental": True,
+                "storageLocation": "склад", "comment": "проверено",
+            })))
+            self.assertEqual(saved.status, 200)
+            self.assertEqual(main._inventory_summary(payload["inventory"]["id"])["checked"], 1)
+
+            finished = asyncio.run(main.api_inventory_finish(FakeRequest({"emergency": True})))
+            self.assertEqual(finished.status, 200)
+            self.assertFalse(main.inventory_is_active())
+        finally:
+            main.DEV_USER_ID = old_dev
+            main.SENIOR_ADMIN_IDS.clear()
+            main.SENIOR_ADMIN_IDS.update(old_seniors)
+            main.INVENTORY_SOURCE_SHEET_ID = old_source
+            main.GOOGLE_SHEETS_ENABLED = old_google
 
     def test_sources_have_no_broken_question_mark_runs(self):
         for filename in ("main.py", "texts.py"):

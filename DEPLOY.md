@@ -113,11 +113,15 @@ GOOGLE_SHEET_ID=
 GOOGLE_SERVICE_ACCOUNT_JSON_B64=
 GOOGLE_SHEET_EVENTS_TAB=Начисления
 GOOGLE_SHEET_SUMMARY_TAB=Админы
+INVENTORY_SOURCE_SHEET_ID=
+INVENTORY_SOURCE_SHEET_TAB=Инвентарь
 
 SCORE_DAILY_ADMIN=0.1
 SCORE_REQUEST=0.01
 SCORE_626=0.05
 ```
+
+Для инвентаризации дайте тому же Service Account доступ **читателя** к отдельной исходной таблице и **редактора** к таблице `GOOGLE_SHEET_ID`. В `INVENTORY_SOURCE_SHEET_ID` укажите ID исходной таблицы, а в `INVENTORY_SOURCE_SHEET_TAB` — лист, где каждая строка соответствует одному экземпляру. Обязательные заголовки: `Категория` и `Название`; поддерживаются также `Инвентарный номер`, `Рентал`, `Источник`. Итоговые листы `Инвентарка — ДАТА` и `Итоги рентал — ДАТА` создаются автоматически в `GOOGLE_SHEET_ID`.
 
 Сначала оставьте `GOOGLE_SHEETS_ENABLED=0`. Бот запустится штатно, а начисления будут сохраняться в локальной очереди. После настройки таблицы заполните Google-реквизиты, поставьте `GOOGLE_SHEETS_ENABLED=1` и перезапустите сервис.
 

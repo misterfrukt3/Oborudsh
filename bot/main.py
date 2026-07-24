@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -94,6 +94,8 @@ GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
 GOOGLE_SERVICE_ACCOUNT_JSON_B64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64", "").strip()
 GOOGLE_SHEET_EVENTS_TAB = os.getenv("GOOGLE_SHEET_EVENTS_TAB", "Начисления").strip() or "Начисления"
 GOOGLE_SHEET_SUMMARY_TAB = os.getenv("GOOGLE_SHEET_SUMMARY_TAB", "Админы").strip() or "Админы"
+INVENTORY_SOURCE_SHEET_ID = os.getenv("INVENTORY_SOURCE_SHEET_ID", "").strip()
+INVENTORY_SOURCE_SHEET_TAB = os.getenv("INVENTORY_SOURCE_SHEET_TAB", "Инвентарь").strip() or "Инвентарь"
 
 
 def env_decimal(name: str, default: str) -> Decimal:
@@ -111,6 +113,7 @@ SCORE_REQUEST = env_decimal("SCORE_REQUEST", "0.01")
 SCORE_626 = env_decimal("SCORE_626", "0.05")
 
 MSK = timezone(timedelta(hours=3))
+REQUEST_GRACE = timedelta(hours=6)
 log = logging.getLogger("oborudka")
 
 bot: Bot = None  # type: ignore  # создаётся в main()
@@ -186,6 +189,25 @@ def init_db() -> None:
           short TEXT, num INTEGER, serial TEXT DEFAULT '', note TEXT DEFAULT '',
           state TEXT DEFAULT 'ready', updated_at TEXT DEFAULT '', updated_by INTEGER,
           PRIMARY KEY(short, num));
+        CREATE TABLE IF NOT EXISTS inventory_events(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, created_by INTEGER, created_at TEXT,
+          status TEXT DEFAULT 'active', finished_at TEXT DEFAULT '',
+          emergency_finished INTEGER DEFAULT 0, participants TEXT DEFAULT '[]',
+          source_headers TEXT DEFAULT '[]', export_error TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS inventory_categories(
+          event_id INTEGER, category TEXT, locked_by INTEGER,
+          status TEXT DEFAULT 'free', started_at TEXT DEFAULT '', finished_at TEXT DEFAULT '',
+          PRIMARY KEY(event_id, category));
+        CREATE TABLE IF NOT EXISTS inventory_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER, equipment_id TEXT,
+          category TEXT, name TEXT, inventory_num TEXT, source_data TEXT DEFAULT '{}',
+          source_rental INTEGER DEFAULT 1, found INTEGER, state TEXT DEFAULT '',
+          source TEXT DEFAULT '', rental INTEGER, storage_location TEXT DEFAULT '',
+          issued_to TEXT DEFAULT '', issued_until TEXT DEFAULT '', comment TEXT DEFAULT '',
+          checked_by INTEGER, checked_at TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS storage_locations(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, active INTEGER DEFAULT 1,
+          created_by INTEGER, created_at TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS score_events(
           event_id TEXT PRIMARY KEY, happened_at TEXT, fio TEXT, admin_id INTEGER,
           kind TEXT, object_id TEXT, points TEXT, details TEXT DEFAULT '',
@@ -200,13 +222,19 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(ts, admin_id);
         CREATE INDEX IF NOT EXISTS idx_score_events_due ON score_events(status, next_retry);
         CREATE INDEX IF NOT EXISTS idx_equipment_units_state ON equipment_units(short, state, num);
+        CREATE INDEX IF NOT EXISTS idx_inventory_items_event_cat ON inventory_items(event_id, category, checked_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_one_active ON inventory_events(status) WHERE status='active';
         """)
+        for location in DEFAULT_STORAGE_LOCATIONS:
+            c.execute("INSERT OR IGNORE INTO storage_locations(name, active, created_by, created_at) VALUES(?,1,0,?)",
+                      (location, datetime.now(MSK).strftime("%Y-%m-%d %H:%M")))
     _ensure_revision_triggers()
 
 
 REVISION_TABLES = (
     "users", "requests", "b626", "messages", "extra_items", "cat_blocks",
     "removed_items", "fav_sets", "reads", "actions", "extra_admins", "equipment_units",
+    "inventory_events", "inventory_categories", "inventory_items", "storage_locations",
 )
 
 
@@ -276,7 +304,12 @@ def _migrate() -> None:
         CREATE INDEX IF NOT EXISTS idx_actions_ts ON actions(ts, admin_id);
         CREATE INDEX IF NOT EXISTS idx_score_events_due ON score_events(status, next_retry);
         CREATE INDEX IF NOT EXISTS idx_equipment_units_state ON equipment_units(short, state, num);
+        CREATE INDEX IF NOT EXISTS idx_inventory_items_event_cat ON inventory_items(event_id, category, checked_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_one_active ON inventory_events(status) WHERE status='active';
         """)
+        for location in DEFAULT_STORAGE_LOCATIONS:
+            c.execute("INSERT OR IGNORE INTO storage_locations(name, active, created_by, created_at) VALUES(?,1,0,?)",
+                      (location, datetime.now(MSK).strftime("%Y-%m-%d %H:%M")))
     _ensure_revision_triggers()
 
 
@@ -879,6 +912,11 @@ def parse_dt(iso: str, hm: str):
         return None
 
 
+def request_grace_expired(now: datetime, planned_at: datetime) -> bool:
+    """Выдача/возврат считаются просроченными только после полного шестичасового запаса."""
+    return bool(planned_at and now > planned_at + REQUEST_GRACE)
+
+
 def now_str() -> str:
     return datetime.now(MSK).strftime("%d.%m, %H:%M")
 
@@ -1127,7 +1165,11 @@ def boot_payload(uid: int) -> dict:
         "bookings626": [shape_626(b, uid, users, messages, seen) for b in b626s],
         "dayload": dayload_map(),
         "busy626": busy626_map(),
+        "inventoryActive": inventory_is_active(),
     }
+    inv = inventory_payload(uid)
+    if (inv.get("active") and (inv.get("isParticipant") or inv.get("canManage"))) or sen:
+        out["inventory"] = inv
     out["extraItems"] = [{"cat": r["cat"], "short": r["short"], "full": r["full"],
                           "total": r["total"], "level": r["level"] or None} for r in extra_items]
     out["catBlocks"] = {r["cat"]: {"until": r["until"], "term": r["term"]} for r in cat_blocks}
@@ -1165,11 +1207,11 @@ def short_name(full: str) -> str:
 
 # ================= Уведомления =================
 
-async def notify(uid: int, text: str) -> None:
+async def notify(uid: int, text: str, reply_markup: InlineKeyboardMarkup = None) -> None:
     if bot is None or not uid:
         return
     try:
-        await bot.send_message(uid, text)
+        await bot.send_message(uid, text, reply_markup=reply_markup)
     except Exception as e:
         log.warning("notify %s failed: %s", uid, e)
 
@@ -1182,6 +1224,21 @@ async def notify_seniors(text: str) -> None:
 def app_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=tx.APP_BUTTON_TEXT, web_app=WebAppInfo(url=WEBAPP_URL)),
+    ]])
+
+
+def request_button(request_id: int, admin: bool = False) -> InlineKeyboardMarkup:
+    """Открыть Mini App сразу на пользовательской или админской карточке заявки."""
+    parts = urlsplit(WEBAPP_URL)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update({
+        "open": "request",
+        "requestId": str(request_id),
+        "mode": "admin" if admin else "user",
+    })
+    url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Открыть заявку", web_app=WebAppInfo(url=url)),
     ]])
 
 
@@ -1249,6 +1306,223 @@ async def send_or_update_card(table: str, row) -> None:
                 c.execute(f"UPDATE {table} SET admin_msg=? WHERE id=?", (m.message_id, row["id"]))
     except Exception as e:
         log.warning("admin card failed: %s", e)
+
+
+# ================= ИНВЕНТАРИЗАЦИЯ =================
+
+INVENTORY_STATES = {"stored", "issued", "lost", "broken"}
+INVENTORY_SOURCES = {"grant", "university", "other"}
+DEFAULT_STORAGE_LOCATIONS = [
+    "шкаф 1", "шкаф 2", "шкаф 3", "шкаф 4",
+    "стеллаж 1", "стеллаж 2", "стеллаж 3", "стеллаж 4",
+    "нижняя дверца", "под столом", "склад", "студийка",
+]
+
+
+def inventory_is_active() -> bool:
+    with db() as connection:
+        return connection.execute(
+            "SELECT 1 FROM inventory_events WHERE status='active' LIMIT 1"
+        ).fetchone() is not None
+
+
+def _bool_sheet(value, default=True) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    return text in {"1", "да", "yes", "true", "y", "+", "рентал"}
+
+
+def _header_index(headers: list[str], aliases: tuple[str, ...]):
+    normalized = {str(value).strip().lower().replace("ё", "е"): i for i, value in enumerate(headers)}
+    for alias in aliases:
+        if alias in normalized:
+            return normalized[alias]
+    return None
+
+
+def _inventory_source_rows() -> tuple[list[str], list[dict]]:
+    """Снимок отдельного инвентарного листа; без настройки — текущие паспорта."""
+    if INVENTORY_SOURCE_SHEET_ID:
+        service = _google_service(readonly=True)
+        values = service.spreadsheets().values().get(
+            spreadsheetId=INVENTORY_SOURCE_SHEET_ID,
+            range="'%s'!A:ZZ" % INVENTORY_SOURCE_SHEET_TAB.replace("'", "''"),
+        ).execute().get("values", [])
+        if not values:
+            raise ValueError("Исходный лист инвентаризации пуст.")
+        headers = [str(value).strip() for value in values[0]]
+        cat_i = _header_index(headers, ("категория", "раздел"))
+        name_i = _header_index(headers, ("название", "наименование", "оборудование", "короткое название"))
+        inv_i = _header_index(headers, ("инвентарный номер", "инв. номер", "инв №", "номер экземпляра"))
+        rental_i = _header_index(headers, ("рентал", "участие в рентале", "в рентале"))
+        source_i = _header_index(headers, ("источник", "источник имущества"))
+        if cat_i is None or name_i is None:
+            raise ValueError("В исходном листе нужны колонки «Категория» и «Название».")
+        rows, seen = [], {}
+        for raw in values[1:]:
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            category, name = str(padded[cat_i]).strip(), str(padded[name_i]).strip()
+            if not category or not name:
+                continue
+            inv = str(padded[inv_i]).strip() if inv_i is not None else ""
+            key = inv or name
+            seen[key] = seen.get(key, 0) + 1
+            rows.append({
+                "equipment_id": inv or "%s · %s" % (name, seen[key]),
+                "category": category, "name": name, "inventory_num": inv,
+                "source_rental": _bool_sheet(padded[rental_i] if rental_i is not None else "", True),
+                "source": str(padded[source_i]).strip() if source_i is not None else "",
+                "source_data": {headers[i]: (padded[i] if i < len(padded) else "") for i in range(len(headers))},
+            })
+        if not rows:
+            raise ValueError("В исходном листе нет строк оборудования.")
+        return headers, rows
+
+    headers = ["Категория", "Название", "Инвентарный номер", "Серийный номер", "Текущее состояние", "Заметка", "Источник", "Рентал"]
+    with db() as connection:
+        units = connection.execute(
+            "SELECT * FROM equipment_units ORDER BY short COLLATE NOCASE, num"
+        ).fetchall()
+    rows = []
+    for unit in units:
+        meta = CATALOG_META.get(unit["short"])
+        if not meta or unit["num"] not in meta.get("numbers", []):
+            continue
+        inv = "%s · №%s" % (unit["short"], unit["num"])
+        source_data = {
+            "Категория": meta["cat"], "Название": unit["short"],
+            "Инвентарный номер": inv, "Серийный номер": unit["serial"],
+            "Текущее состояние": unit["state"], "Заметка": unit["note"],
+            "Источник": "", "Рентал": "да",
+            "short": unit["short"], "num": unit["num"],
+        }
+        rows.append({"equipment_id": inv, "category": meta["cat"], "name": unit["short"],
+                     "inventory_num": inv, "source_rental": True, "source": "",
+                     "source_data": source_data})
+    if not rows:
+        raise ValueError("Каталог оборудования пуст.")
+    return headers, rows
+
+
+def _inventory_event_row():
+    with db() as connection:
+        return connection.execute(
+            "SELECT * FROM inventory_events WHERE status='active' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+
+def _inventory_summary(event_id: int) -> dict:
+    with db() as connection:
+        rows = connection.execute(
+            "SELECT found, state, rental, checked_at FROM inventory_items WHERE event_id=?", (event_id,)
+        ).fetchall()
+    checked = [row for row in rows if row["checked_at"]]
+    return {
+        "total": len(rows), "checked": len(checked),
+        "ready": sum(1 for row in checked if row["found"] == 1 and row["state"] == "stored" and row["rental"] == 1),
+        "missing": sum(1 for row in checked if row["found"] == 0),
+        "broken": sum(1 for row in checked if row["state"] == "broken"),
+        "noRental": sum(1 for row in checked if row["rental"] == 0),
+    }
+
+
+def inventory_payload(uid: int):
+    event = _inventory_event_row()
+    with db() as connection:
+        locations = [row["name"] for row in connection.execute(
+            "SELECT name FROM storage_locations WHERE active=1 ORDER BY name COLLATE NOCASE"
+        ).fetchall()]
+    if not event:
+        return {"active": False, "canStart": is_senior(uid), "locations": locations}
+    participants = json.loads(event["participants"] or "[]")
+    allowed = uid in participants or is_senior(uid)
+    base = {"active": True, "isParticipant": uid in participants,
+            "canManage": is_senior(uid), "locations": locations}
+    if not allowed:
+        return base
+    with db() as connection:
+        cats = connection.execute(
+            "SELECT * FROM inventory_categories WHERE event_id=? ORDER BY category COLLATE NOCASE", (event["id"],)
+        ).fetchall()
+        counts = {row["category"]: row for row in connection.execute(
+            "SELECT category, COUNT(*) total, SUM(CASE WHEN checked_at<>'' THEN 1 ELSE 0 END) checked "
+            "FROM inventory_items WHERE event_id=? GROUP BY category", (event["id"],)
+        ).fetchall()}
+    base.update({
+        "id": event["id"], "createdById": event["created_by"],
+        "createdBy": _disp_user(event["created_by"]), "createdAt": event["created_at"],
+        "participants": [{"id": person, "name": _disp_user(person)} for person in participants],
+        "categories": [{"name": row["category"], "status": row["status"],
+            "lockedById": row["locked_by"], "lockedBy": _disp_user(row["locked_by"]) if row["locked_by"] else "",
+            "mine": row["locked_by"] == uid, "total": counts.get(row["category"], {"total": 0})["total"],
+            "checked": counts.get(row["category"], {"checked": 0})["checked"] or 0}
+            for row in cats],
+        "summary": _inventory_summary(event["id"]),
+        "canFinish": is_senior(uid) and event["created_by"] == uid,
+        "canEmergency": is_senior(uid),
+    })
+    return base
+
+
+def _shape_inventory_item(row) -> dict:
+    source_data = json.loads(row["source_data"] or "{}")
+    return {"id": row["id"], "category": row["category"], "name": row["name"],
+            "inventoryNum": row["inventory_num"], "sourceRental": bool(row["source_rental"]),
+            "sourceInitial": source_data.get("Источник", source_data.get("Источник имущества", "")),
+            "currentData": source_data, "found": None if row["found"] is None else bool(row["found"]),
+            "state": row["state"], "source": row["source"],
+            "rental": None if row["rental"] is None else bool(row["rental"]),
+            "storageLocation": row["storage_location"], "issuedTo": row["issued_to"],
+            "issuedUntil": row["issued_until"], "comment": row["comment"],
+            "checked": bool(row["checked_at"]), "checkedBy": _disp_user(row["checked_by"]) if row["checked_by"] else ""}
+
+
+def _safe_sheet_title(title: str) -> str:
+    return re.sub(r"[\\/?*\[\]:]", "-", title)[:100]
+
+
+def _export_inventory(event_id: int) -> str:
+    if not GOOGLE_SHEETS_ENABLED or not GOOGLE_SHEET_ID:
+        return "Google Sheets выключен или не задан GOOGLE_SHEET_ID"
+    with db() as connection:
+        event = connection.execute("SELECT * FROM inventory_events WHERE id=?", (event_id,)).fetchone()
+        items = connection.execute("SELECT * FROM inventory_items WHERE event_id=? ORDER BY category, name, inventory_num", (event_id,)).fetchall()
+    headers = json.loads(event["source_headers"] or "[]")
+    date = (event["created_at"] or datetime.now(MSK).strftime("%d.%m.%Y")).split(",")[0]
+    inv_title = _safe_sheet_title("Инвентарка — " + date)
+    rental_title = _safe_sheet_title("Итоги рентал — " + date)
+    result_headers = ["категория", "название", "инвентарный номер", "источник", "рентал", "найдено",
+                      "состояние", "место хранения", "кому выдано", "срок возврата", "комментарий", "кто проверил"]
+    rental_extra = ["доступно к выдаче", "актуальное состояние", "актуальное место хранения",
+                    "инвентарный номер", "кому выдано", "срок возврата"]
+    inv_values = [headers + result_headers]
+    rental_values = [headers + rental_extra]
+    for row in items:
+        source_data = json.loads(row["source_data"] or "{}")
+        original = [source_data.get(header, "") for header in headers]
+        found = "да" if row["found"] == 1 else ("нет" if row["found"] == 0 else "")
+        rental = "да" if row["rental"] == 1 else ("нет" if row["rental"] == 0 else "")
+        checked_by = _disp_user(row["checked_by"]) if row["checked_by"] else ""
+        inv_values.append(original + [row["category"], row["name"], row["inventory_num"], row["source"], rental,
+            found, row["state"], row["storage_location"], row["issued_to"], row["issued_until"], row["comment"], checked_by])
+        available = row["found"] == 1 and row["state"] == "stored" and row["rental"] == 1
+        rental_values.append(original + ["да" if available else "нет", row["state"], row["storage_location"],
+                                          row["inventory_num"], row["issued_to"], row["issued_until"]])
+    service = _google_service()
+    sheets = service.spreadsheets()
+    meta = sheets.get(spreadsheetId=GOOGLE_SHEET_ID, fields="sheets.properties.title").execute()
+    existing = {sheet["properties"]["title"] for sheet in meta.get("sheets", [])}
+    requests_to_add = [{"addSheet": {"properties": {"title": title}}}
+                       for title in (inv_title, rental_title) if title not in existing]
+    if requests_to_add:
+        sheets.batchUpdate(spreadsheetId=GOOGLE_SHEET_ID, body={"requests": requests_to_add}).execute()
+    values = sheets.values()
+    for title, rows in ((inv_title, inv_values), (rental_title, rental_values)):
+        values.clear(spreadsheetId=GOOGLE_SHEET_ID, range="'%s'" % title, body={}).execute()
+        values.update(spreadsheetId=GOOGLE_SHEET_ID, range="'%s'!A1" % title,
+                      valueInputOption="RAW", body={"values": rows}).execute()
+    return ""
 
 
 # ================= API =================
@@ -1328,6 +1602,202 @@ async def send_photos_b64(chat_id: int, photos, caption: str) -> None:
     """Фото (base64 с фронта) -> в чат, без хранения на сервере."""
     await _send_blobs(chat_id, _decode_photos(photos), caption)
 
+
+@auth
+async def api_inventory_start(request, body, uid):
+    if not is_senior(uid):
+        return jerr("Запустить инвентаризацию может только старший администратор.", 403)
+    if inventory_is_active():
+        return jerr("Инвентаризация уже идёт.")
+    participant_ids = []
+    for value in body.get("participants") or []:
+        try:
+            person = int(value)
+        except (TypeError, ValueError):
+            continue
+        if person not in participant_ids:
+            participant_ids.append(person)
+    if uid not in participant_ids:
+        participant_ids.append(uid)
+    with db() as connection:
+        valid = {row["id"] for row in connection.execute(
+            "SELECT id FROM users WHERE agreed=1 AND verified='ok'"
+        ).fetchall()}
+    participant_ids = [person for person in participant_ids if person in valid or person == uid]
+    try:
+        headers, items = await asyncio.to_thread(_inventory_source_rows)
+    except Exception as exc:
+        log.exception("inventory source failed")
+        return jerr("Не удалось загрузить исходный инвентарный лист: %s" % exc)
+    stamp = datetime.now(MSK).strftime("%d.%m.%Y, %H:%M")
+    with db() as connection:
+        cur = connection.execute(
+            "INSERT OR IGNORE INTO inventory_events(created_by, created_at, participants, source_headers) VALUES(?,?,?,?)",
+            (uid, stamp, json.dumps(participant_ids), json.dumps(headers, ensure_ascii=False)))
+        if cur.rowcount != 1:
+            return jerr("Инвентаризация уже идёт.", 409)
+        event_id = cur.lastrowid
+        for category in sorted({item["category"] for item in items}):
+            connection.execute("INSERT INTO inventory_categories(event_id, category) VALUES(?,?)", (event_id, category))
+        for item in items:
+            connection.execute(
+                "INSERT INTO inventory_items(event_id,equipment_id,category,name,inventory_num,source_data,source_rental,source,rental) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (event_id, item["equipment_id"], item["category"], item["name"], item["inventory_num"],
+                 json.dumps(item["source_data"], ensure_ascii=False), int(item["source_rental"]), item["source"], int(item["source_rental"])))
+    for person in participant_ids:
+        if person != uid:
+            await notify(person, "📋 Вы добавлены в инвентаризацию оборудования. Откройте «Оборудыш» и выберите свободную категорию.")
+    try:
+        export_error = await asyncio.to_thread(_export_inventory, event_id)
+    except Exception as exc:
+        log.exception("inventory initial export failed")
+        export_error = str(exc)
+    if export_error:
+        with db() as connection:
+            connection.execute("UPDATE inventory_events SET export_error=? WHERE id=?", (export_error[:1000], event_id))
+    return web.json_response(boot_payload(uid))
+
+
+@auth
+async def api_inventory_claim(request, body, uid):
+    event = _inventory_event_row()
+    if not event or uid not in json.loads(event["participants"] or "[]"):
+        return jerr("У вас нет доступа к активной инвентаризации.", 403)
+    category = clean_text(body.get("category"), 120)
+    stamp = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
+    with db() as connection:
+        own = connection.execute(
+            "SELECT category FROM inventory_categories WHERE event_id=? AND locked_by=? AND status='working'",
+            (event["id"], uid)).fetchone()
+        if own and own["category"] != category:
+            return jerr("Сначала завершите категорию «%s»." % own["category"])
+        row = connection.execute("SELECT * FROM inventory_categories WHERE event_id=? AND category=?",
+                                 (event["id"], category)).fetchone()
+        if not row:
+            return jerr("Категория не найдена.", 404)
+        if row["status"] == "done":
+            return jerr("Категория уже завершена.")
+        if row["locked_by"] not in (None, uid):
+            return jerr("Категорию уже проверяет %s." % _disp_user(row["locked_by"]), 409)
+        claim = connection.execute(
+            "UPDATE inventory_categories SET locked_by=?,status='working',started_at=CASE WHEN started_at='' THEN ? ELSE started_at END "
+            "WHERE event_id=? AND category=? AND status<>'done' AND (locked_by IS NULL OR locked_by=?)",
+            (uid, stamp, event["id"], category, uid))
+        if claim.rowcount != 1:
+            owner = connection.execute("SELECT locked_by FROM inventory_categories WHERE event_id=? AND category=?",
+                                       (event["id"], category)).fetchone()
+            return jerr("Категорию уже проверяет %s." % _disp_user(owner["locked_by"]), 409)
+        rows = connection.execute(
+            "SELECT * FROM inventory_items WHERE event_id=? AND category=? ORDER BY name COLLATE NOCASE, inventory_num",
+            (event["id"], category)).fetchall()
+    return web.json_response({"ok": True, "category": category,
+                              "items": [_shape_inventory_item(row) for row in rows]})
+
+
+@auth
+async def api_inventory_item(request, body, uid):
+    event = _inventory_event_row()
+    if not event or uid not in json.loads(event["participants"] or "[]"):
+        return jerr("У вас нет доступа к активной инвентаризации.", 403)
+    try:
+        item_id = int(body.get("id"))
+    except (TypeError, ValueError):
+        return jerr("Экземпляр не найден.")
+    with db() as connection:
+        item = connection.execute("SELECT * FROM inventory_items WHERE id=? AND event_id=?", (item_id, event["id"])).fetchone()
+        category = connection.execute("SELECT * FROM inventory_categories WHERE event_id=? AND category=?",
+                                      (event["id"], item["category"] if item else "")).fetchone()
+    if not item or not category or category["locked_by"] != uid or category["status"] != "working":
+        return jerr("Категория не закреплена за вами.", 409)
+    found = body.get("found")
+    if not isinstance(found, bool):
+        return jerr("Укажите, найден ли экземпляр.")
+    state = clean_text(body.get("state"), 20)
+    source = clean_text(body.get("source"), 30)
+    rental = body.get("rental")
+    storage = clean_text(body.get("storageLocation"), 120)
+    if state not in INVENTORY_STATES:
+        return jerr("Выберите состояние экземпляра.")
+    if source not in INVENTORY_SOURCES:
+        return jerr("Выберите источник имущества.")
+    if not isinstance(rental, bool):
+        return jerr("Укажите участие в рентале.")
+    if not storage:
+        return jerr("Выберите место хранения.")
+    stamp = datetime.now(MSK).strftime("%Y-%m-%d %H:%M")
+    with db() as connection:
+        connection.execute(
+            "UPDATE inventory_items SET found=?,state=?,source=?,rental=?,storage_location=?,issued_to=?,issued_until=?,"
+            "comment=?,checked_by=?,checked_at=? WHERE id=?",
+            (int(found), state, source, int(rental), storage, clean_text(body.get("issuedTo"), 120),
+             clean_text(body.get("issuedUntil"), 40), clean_text(body.get("comment"), 1000), uid, stamp, item_id))
+        remaining = connection.execute(
+            "SELECT COUNT(*) n FROM inventory_items WHERE event_id=? AND category=? AND checked_at=''",
+            (event["id"], item["category"])).fetchone()["n"]
+        if not remaining:
+            connection.execute(
+                "UPDATE inventory_categories SET status='done',finished_at=? WHERE event_id=? AND category=?",
+                (stamp, event["id"], item["category"]))
+        rows = connection.execute(
+            "SELECT * FROM inventory_items WHERE event_id=? AND category=? ORDER BY name COLLATE NOCASE, inventory_num",
+            (event["id"], item["category"])).fetchall()
+    return web.json_response({"ok": True, "categoryDone": not remaining,
+                              "items": [_shape_inventory_item(row) for row in rows],
+                              "inventory": inventory_payload(uid)})
+
+
+@auth
+async def api_inventory_storage_add(request, body, uid):
+    if not is_senior(uid):
+        return jerr("Добавлять места хранения может только старший администратор.", 403)
+    name = clean_text(body.get("name"), 120)
+    if not name:
+        return jerr("Введите название места хранения.")
+    with db() as connection:
+        connection.execute(
+            "INSERT INTO storage_locations(name,active,created_by,created_at) VALUES(?,1,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET active=1",
+            (name, uid, datetime.now(MSK).strftime("%Y-%m-%d %H:%M")))
+    return web.json_response(boot_payload(uid))
+
+
+@auth
+async def api_inventory_finish(request, body, uid):
+    event = _inventory_event_row()
+    if not event:
+        return jerr("Активной инвентаризации нет.")
+    emergency = bool(body.get("emergency"))
+    if not is_senior(uid):
+        return jerr("Завершить инвентаризацию может только старший администратор.", 403)
+    if not emergency and event["created_by"] != uid:
+        return jerr("Штатно завершить событие может только создавший его старший администратор.", 403)
+    with db() as connection:
+        unfinished = connection.execute(
+            "SELECT COUNT(*) n FROM inventory_categories WHERE event_id=? AND status<>'done'", (event["id"],)
+        ).fetchone()["n"]
+    if unfinished and not emergency:
+        return jerr("Сначала завершите все категории. Осталось: %s." % unfinished)
+    stamp = datetime.now(MSK).strftime("%d.%m.%Y, %H:%M")
+    with db() as connection:
+        connection.execute(
+            "UPDATE inventory_events SET status='finished',finished_at=?,emergency_finished=? WHERE id=?",
+            (stamp, int(emergency), event["id"]))
+    try:
+        export_error = await asyncio.to_thread(_export_inventory, event["id"])
+    except Exception as exc:
+        log.exception("inventory final export failed")
+        export_error = str(exc)
+    with db() as connection:
+        connection.execute("UPDATE inventory_events SET export_error=? WHERE id=?", (export_error[:1000], event["id"]))
+    summary = _inventory_summary(event["id"])
+    await notify_seniors("📋 Инвентаризация завершена%s.\nГотово к выдаче: %s\nНе найдено: %s\nТребуется ремонт: %s%s" % (
+        " экстренно" if emergency else "", summary["ready"], summary["missing"], summary["broken"],
+        ("\n⚠️ Выгрузка в Google Sheets: " + export_error) if export_error else ""))
+    payload = boot_payload(uid)
+    payload["inventoryResult"] = summary
+    payload["inventoryExportError"] = export_error
+    return web.json_response(payload)
 
 @auth
 async def api_me(request, body, uid):
@@ -1532,6 +2002,8 @@ async def api_register(request, body, uid):
 
 @auth
 async def api_req_create(request, body, uid):
+    if inventory_is_active():
+        return jerr("Во время инвентаризации оборудование нельзя бронировать.", 423)
     u = get_user(uid)
     if not (u and u["agreed"] and u["verified"] == "ok"):
         return jerr("Сначала завершите регистрацию и верификацию.")
@@ -1563,6 +2035,8 @@ async def api_req_create(request, body, uid):
 
 @auth
 async def api_req_update(request, body, uid):
+    if inventory_is_active():
+        return jerr("Во время инвентаризации заявки на оборудование нельзя изменять.", 423)
     rid = body.get("id")
     with db() as c:
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
@@ -1973,6 +2447,8 @@ async def api_req_action(request, body, uid):
                 + (f" Причина: {comment}" if comment else ""),
             )
     elif action == "issue":
+        if inventory_is_active():
+            return jerr("Во время инвентаризации оборудование нельзя выдавать.", 423)
         if r["status"] != "approved" or not curator_or_senior:
             return jerr("Выдать оборудование может только куратор заявки или старший.", 403)
         raw_items = body.get("items") if body.get("items") is not None else json.loads(r["items"])
@@ -2951,30 +3427,51 @@ async def run_checks() -> None:
 
         if r["status"] == "issued" and deadline:
             left = (deadline - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("user_return_24"):
+                await notify(r["user_id"], f"📦 Завтра срок возврата по заявке ID {rid} ({r['dto']}).",
+                             reply_markup=request_button(rid))
+                notif["user_return_24"] = 1; changed = True
             if 0 < left <= 3600 and not notif.get("pre"):
-                await notify(r["user_id"], f"⏰ Через час - срок сдачи по заявке ID {rid} ({r['dto']}). Не опаздывайте!")
+                await notify(r["user_id"], f"⏰ Через час - срок сдачи по заявке ID {rid} ({r['dto']}). Не опаздывайте!",
+                             reply_markup=request_button(rid))
                 notif["pre"] = 1; changed = True
-            elif left <= 0 and ts - notif.get("over", 0) > 7200:  # просрочка: раз в 2 часа
+            elif request_grace_expired(now, deadline) and ts - notif.get("over", 0) > 7200:  # после запаса: раз в 2 часа
                 await notify(r["user_id"], f"❗ Просрочка сдачи по заявке ID {rid} (срок был {r['dto']}). "
-                                           f"Верните оборудование как можно скорее.")
+                                           f"Шестичасовой запас истёк — верните оборудование как можно скорее.",
+                             reply_markup=request_button(rid))
                 notif["over"] = ts; changed = True
+
+        if r["status"] == "approved" and start_at:
+            left = (start_at - now).total_seconds()
+            if 3600 < left <= 86400 and not notif.get("user_issue_24"):
+                await notify(r["user_id"], f"📦 Завтра получение по заявке ID {rid} ({r['dfrom']}). Проверьте время.",
+                             reply_markup=request_button(rid))
+                notif["user_issue_24"] = 1; changed = True
+            if 0 < left <= 3600 and not notif.get("user_issue_1"):
+                await notify(r["user_id"], f"⏰ Через час получение по заявке ID {rid} ({r['dfrom']}).",
+                             reply_markup=request_button(rid))
+                notif["user_issue_1"] = 1; changed = True
 
         if r["curator"] and r["status"] == "approved" and start_at:
             left = (start_at - now).total_seconds()
             if 3600 < left <= 86400 and not notif.get("cur_issue_24"):
-                await notify(r["curator"], f"📦 Завтра выдача по заявке ID {rid} ({r['dfrom']}). Проверьте состав и время.")
+                await notify(r["curator"], f"📦 Завтра выдача по заявке ID {rid} ({r['dfrom']}). Проверьте состав и время.",
+                             reply_markup=request_button(rid, admin=True))
                 notif["cur_issue_24"] = 1; changed = True
             if 0 < left <= 3600 and not notif.get("cur_issue_1"):
-                await notify(r["curator"], f"⏰ Через час выдача по заявке ID {rid} ({r['dfrom']}).")
+                await notify(r["curator"], f"⏰ Через час выдача по заявке ID {rid} ({r['dfrom']}).",
+                             reply_markup=request_button(rid, admin=True))
                 notif["cur_issue_1"] = 1; changed = True
 
         if r["curator"] and r["status"] == "issued" and deadline:
             left = (deadline - now).total_seconds()
             if 3600 < left <= 86400 and not notif.get("cur_return_24"):
-                await notify(r["curator"], f"📦 Завтра возврат по заявке ID {rid} ({r['dto']}).")
+                await notify(r["curator"], f"📦 Завтра возврат по заявке ID {rid} ({r['dto']}).",
+                             reply_markup=request_button(rid, admin=True))
                 notif["cur_return_24"] = 1; changed = True
             if 0 < left <= 3600 and not notif.get("cur_return_1"):
-                await notify(r["curator"], f"⏰ Через час возврат по заявке ID {rid} ({r['dto']}).")
+                await notify(r["curator"], f"⏰ Через час возврат по заявке ID {rid} ({r['dto']}).",
+                             reply_markup=request_button(rid, admin=True))
                 notif["cur_return_1"] = 1; changed = True
 
         # напоминания в общий канал о зависших (порог 6 ч, повтор раз в 6 ч)
@@ -2989,14 +3486,15 @@ async def run_checks() -> None:
         auto_cancel = None
         if r["status"] in ("new", "curator") and r["created_ts"] and ts - r["created_ts"] > 3 * 86400:
             auto_cancel = "не рассмотрена за 3 дня"
-        elif r["status"] == "approved" and start_at and now > start_at:
-            auto_cancel = "срок получения истёк"
+        elif r["status"] == "approved" and request_grace_expired(now, start_at):
+            auto_cancel = "истёк шестичасовой запас после времени получения"
         if auto_cancel:
             with db() as c:
                 c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
             _push_hist("requests", rid, "canceled", "автоотмена: " + auto_cancel)
             await notify(r["user_id"], f"⏳ Заявка ID {rid} отменена автоматически: {auto_cancel}. "
-                                       f"Оборудование освобождено - можно подать заново.")
+                                       f"Оборудование освобождено - можно подать заново.",
+                         reply_markup=request_button(rid))
             with db() as c:
                 row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
             await send_or_update_card("requests", row)
@@ -3448,6 +3946,11 @@ async def main() -> None:
     app.router.add_post("/api/availability", api_availability)
     app.router.add_post("/api/equipment/unit", api_equipment_unit)
     app.router.add_post("/api/equipment/unit/update", api_equipment_unit_update)
+    app.router.add_post("/api/inventory/start", api_inventory_start)
+    app.router.add_post("/api/inventory/claim", api_inventory_claim)
+    app.router.add_post("/api/inventory/item", api_inventory_item)
+    app.router.add_post("/api/inventory/storage/add", api_inventory_storage_add)
+    app.router.add_post("/api/inventory/finish", api_inventory_finish)
     app.router.add_post("/api/626/create", api_626_create)
     app.router.add_post("/api/626/action", api_626_action)
     app.router.add_post("/api/chat", api_chat)
