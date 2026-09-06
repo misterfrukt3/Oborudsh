@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20260724-time">
+<link rel="stylesheet" href="style.css?v=20260906-20260724-time">
 </head>
 <body>
 
@@ -82,16 +82,11 @@ function srvDo(path, body, after){
   api(path, body).then(d=>{ _busy=false; applyBoot(d); if(after) after(); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); });
 }
 /* экранирование строки для JS внутри HTML-атрибута onclick (short с кавычками/апострофами не ломает разметку) */
-function escJs(s){ return String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(/"/g,"&quot;"); }
+function escJs(s){ return escHtml(JSON.stringify(String(s)).slice(1,-1).replace(/'/g,"\\u0027")); }
 /* ARIA + клавиатура для псевдо-чекбоксов (.check-row): роль, состояние, Enter/Пробел = клик */
 function escHtml(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function escAttr(s){ return escHtml(s); }
-function cleanIncoming(v){
-  if(typeof v === "string") return v.replace(/[<>"']/g, "");
-  if(Array.isArray(v)) return v.map(cleanIncoming);
-  if(v && typeof v === "object"){ Object.keys(v).forEach(k=>{ v[k]=cleanIncoming(v[k]); }); }
-  return v;
-}
+function cleanIncoming(v){ return v; }
 function chkA(on){ return 'role="checkbox" aria-checked="'+(on?"true":"false")+'" tabindex="0" onkeydown="if(event.key===' + "' '" + '||event.key===\'Enter\'){event.preventDefault();this.click();}"'; }
 /* отметить переписку прочитанной (сброс бейджа непрочитанных) */
 function markRead(kind, id){
@@ -103,7 +98,7 @@ function unreadBadge(o){ return (o && o.unread) ? '<span class="unread-b">'+o.un
 /* одно сообщение чата: подпись (кто пишет) + красный, если писал старший. invert — для панелей админа/старшего */
 function chatMsg(m, invert){
   const who = invert ? (m.who==="me"?"them":"me") : m.who;
-  return '<div class="msg '+who+(m.senior?" senior":"")+'">'+(m.label?'<span class="who-lbl">'+m.label+'</span>':"")+m.text+'<span class="tm">'+m.tm+'</span></div>';
+  return '<div class="msg '+who+(m.senior?" senior":"")+'">'+(m.label?'<span class="who-lbl">'+escHtml(m.label)+'</span>':"")+escHtml(m.text)+'<span class="tm">'+m.tm+'</span></div>';
 }
 function applyBoot(d){
   d = cleanIncoming(d || {});
@@ -409,9 +404,10 @@ function initCalSRV(){
 let role = "user";
 let profile = {name:"Птицын Фрукт Медийщикович", short:"Фрукт Птицын", tg:"@misterfrukt", orgs:["Media BMSTU"], deps:["Видео","Фото"], status:"активист"};
 let stack = [];
+let photoErrors={ret:"",ho:""};
 let wiz = null, wiz626 = null, issueCheck = null, adminTab = "queue", userQ = "";
 let favSets = []; // избранные наборы оборудки (свои)
-let equipmentUnits = [], unitPassport = null, unitQ = "", adminWeek = 0, issueFreeNums = {};
+let equipmentUnits = [], unitPassport = null, unitQ = "", adminWeek = 0, issueFreeNums = {}, issueHeldUnits = {};
 let inventory = null, invItems = [], invCategory = "", invItemId = 0, invParticipants = new Set(), invResult = null;
 let profileRolesExpanded = false;
 const $ = id => document.getElementById(id);
@@ -533,8 +529,31 @@ function statusPill(st, dict){
   const s = (dict||ST)[st];
   return '<span class="pill" style="background:color-mix(in srgb,'+s.c+' 14%,transparent);color:'+s.c+'"><span class="dot" style="background:'+s.c+'"></span>'+s.l+'</span>';
 }
+function nextStep(o,studio=false){
+  if(["closed","canceled","rejected"].includes(o.status))return "";
+  const start=studio?fmtIso(o.when)+", "+o.slot.split(/[–—-]/)[0]:o.from;
+  const end=studio?fmtIso(o.when)+", "+o.slot.split(/[–—-]/)[1]:o.to;
+  const startAt=new Date((studio?o.when:o.d1Iso)+"T"+(studio?o.slot.split(/[–—-]/)[0].trim():o.t1)+":00+03:00").getTime();
+  const endAt=new Date((studio?o.when:o.d2Iso)+"T"+(studio?o.slot.split(/[–—-]/)[1].trim():o.t2)+":00+03:00").getTime();
+  const today=new Intl.DateTimeFormat("sv-SE",{timeZone:"Europe/Moscow"}).format(new Date());
+  const issue=(o.d1Iso===today?"сегодня в "+o.t1:start);
+  let action="Ожидайте согласования",deadline="Начало: "+start;
+  if(o.status==="approved"){
+    action=studio?(Date.now()>=endAt?"Отправьте фото сдачи":Date.now()>=startAt?"Бронь идёт — после съёмки отправьте фото":"Приходите "+start):"Заберите "+issue;
+    deadline="Вернуть до: "+end;
+  }
+  if(o.status==="issued"){action="Отправьте фото сдачи";deadline="Вернуть до: "+end;}
+  if(o.status==="ret"){action="Ожидайте проверки сдачи";deadline="Срок возврата: "+end;}
+  if(role!=="user"){
+    if(!o.curator)action=studio&&o.status==="new"?"Согласуйте или отклоните бронь":"Возьмите в кураторство";
+    else if(o.status==="curator")action="Согласуйте или отклоните заявку";
+    else if(o.status==="ret")action="Проверьте фото и примите возврат";
+    else if(o.status==="approved"&&!studio)action="Выдайте "+start;
+  }
+  return `<div class="next-step"><b>${escHtml(action)}</b><div class="booking-time">${escHtml(deadline)}</div><div class="sub">Куратор: ${escHtml(o.curator||"ещё не назначен")}</div></div>`;
+}
 function itemsTitle(items){
-  return items[0][0] + (items.length>1 ? " +"+(items.length-1) : "");
+  return escHtml(items[0]?.[0]||"") + (items.length>1 ? " +"+(items.length-1) : "");
 }
 
 /* ================= ОНБОРДИНГ (первый экран) ================= */
@@ -797,8 +816,8 @@ SCREENS.home = () => {
           ? '<div class="avatar" style="background:url('+profile.photo+') center/cover"></div>'
           : '<div class="avatar">'+profile.short.split(" ").map(w=>w[0]).slice(0,2).join("")+'</div>'}
         <div class="grow">
-          <div style="font-weight:700;font-size:16px;line-height:1.25">${(SRV&&profile.name)?profile.name:profile.short} ${(!SRV||SRV.verified==="ok")?'<span style="color:var(--ok);font-size:14px">✓</span>':""}</div>
-          <div class="sub">${profile.tg}</div>
+          <div style="font-weight:700;font-size:16px;line-height:1.25">${escHtml((SRV&&profile.name)?profile.name:profile.short)} ${(!SRV||SRV.verified==="ok")?'<span style="color:var(--ok);font-size:14px">✓</span>':""}</div>
+          <div class="sub">${escHtml(profile.tg)}</div>
         </div>
         <button class="theme-tgl" title="Тема" aria-label="Переключить тему" aria-pressed="${$("phone").classList.contains("dark")}" onclick="userToggleTheme()"><i>${$("phone").classList.contains("dark")?"🌙":"☀️"}</i></button>
         <button class="btn-sm" title="Изменить данные" onclick="navTo('regProfile',{edit:true})">⚙️</button>
@@ -821,15 +840,16 @@ SCREENS.home = () => {
         <div class="action-half" onclick="navTo('rules',{readonly:true})"><span class="ic">${uic("book",21)}</span><b>Регламент</b></div>
       </div>
 
+      ${readDraft()?'<div class="card"><b>Черновик заявки</b><p class="sub">Даты, корзина и детали сохранены.</p><button class="btn-sm primary" onclick="restoreDraft()">Продолжить</button><button class="btn-sm" onclick="clearDraft();render()">Удалить</button></div>':""}
       <div class="sec-label">Мои активные брони</div>
       ${active.length? '<div>'+active.map(r=>`
         <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
           <div class="grow">
             <div style="font-weight:600;font-size:14.5px">${itemsTitle(r.items)}${unreadBadge(r)}</div>
-            <div class="hud" style="margin-top:4px">${r.event} · ${r.from} → ${r.to}${r.dueSoon?'<br><b style="color:var(--warn)">сдать сегодня к 19:00</b>':''}</div>
+            <div class="hud" style="margin-top:4px">${escHtml(r.event)} · ${r.from} → ${r.to}</div>
+            ${statusPill(r.status)}${nextStep(r)}
           </div>
-          ${statusPill(r.status)}
         </div>`).join("")+'</div>'
       : '<div class="card sub" style="text-align:center">Активных броней нет — самое время что-нибудь снять 🎬</div>'}
       ${my626.map(b=>`
@@ -837,7 +857,7 @@ SCREENS.home = () => {
           <div class="emoji-badge">${uic("studio",19)}</div>
           <div class="grow"><div style="font-weight:600;font-size:14.5px">Аудитория 626${unreadBadge(b)}</div>
           <div class="hud" style="margin-top:4px">${fmtIso(b.when)} · ${b.slot}</div></div>
-          ${statusPill(b.status,ST626)}
+          ${statusPill(b.status,ST626)}${nextStep(b,true)}
         </div>`).join("")}
 
       <div class="sec-label">История броней</div>
@@ -937,7 +957,38 @@ function calHtml(cfg){
 }
 
 /* ================= МАСТЕР ЗАЯВКИ ================= */
-function startWizard(){
+function draftKey(){return "obor_draft_v1_"+(TG?.initDataUnsafe?.user?.id||"demo");}
+function readDraft(){try{const d=JSON.parse(localStorage.getItem(draftKey()));return d&&d.version===1&&d.wiz&&typeof d.wiz.cart==="object"?d.wiz:null;}catch(e){return null;}}
+function saveDraft(){
+  if(!wiz || wiz.editId || stack[stack.length-1]?.name!=="wizard")return;
+  try{localStorage.setItem(draftKey(),JSON.stringify({version:1,wiz:{...wiz,busy:{},capacity:{}}}));}catch(e){}
+}
+function clearDraft(){try{localStorage.removeItem(draftKey());}catch(e){}}
+function openDraftPrompt(){
+  $("overlay").innerHTML=`<div class="sheet-veil" onclick="closeSheet()"></div><div class="sheet"><h3>Есть черновик заявки</h3><p class="sub">Можно продолжить — доступность оборудования проверим заново.</p><button class="btn-sm primary" onclick="restoreDraft()">Продолжить</button><button class="btn-sm danger" onclick="clearDraft();closeSheet();startWizard(true)">Удалить черновик</button></div>`;
+}
+function clampDraftCart(){
+  const changed=[];
+  Object.entries(wiz.cart).forEach(([short,qty])=>{
+    const it=itemOf(short),n=it&&!itemLocked(it)?Math.max(0,Math.min(Number(qty)||0,freeOf(it))):0;
+    if(n)wiz.cart[short]=n;else delete wiz.cart[short];
+    if(n!==qty)changed.push(short+": "+(n?"осталось "+n:"недоступно"));
+  });
+  if(changed.length)toast(changed.join("; "),8000);
+}
+function restoreDraft(){
+  const d=readDraft();if(!d)return;
+  wiz={...d,step:1,busy:{},capacity:{},editId:0};closeSheet();navTo("wizard");
+  if(wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!dateBlock())wizToCatalog();
+  else toast("Проверьте даты и время черновика");
+}
+document.addEventListener("input",()=>queueMicrotask(saveDraft));
+document.addEventListener("click",()=>queueMicrotask(saveDraft));
+window.addEventListener("pagehide",saveDraft);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)saveDraft();});
+
+function startWizard(fresh=false){
+  if(!fresh && readDraft()){openDraftPrompt();return;}
   if(SRV && SRV.inventoryActive){ toast("Во время инвентаризации оборудование нельзя бронировать"); return; }
   wiz = {step:1, month:MONTHS[0], d1:null, d2:null, t1:null, t2:null, cart:{}, event:"", comment:"", media:false, search:"", catFilter:"Все", busy:{}, capacity:{}, editId:0};
   navTo("wizard");
@@ -1033,7 +1084,7 @@ function wizToCatalog(){
     const btn = document.querySelector(".mainbtn");
     if(btn){ btn.disabled = true; btn.textContent = "Проверяем занятость…"; }
     api("availability",{d1:wiz.d1, d2:wiz.d2, t1:wiz.t1, t2:wiz.t2, exclude:wiz.editId||0})
-      .then(d=>{ wiz.busy=d.busy||{}; wiz.capacity=d.capacity||{}; wiz.step=2; render(); })
+      .then(d=>{ wiz.busy=d.busy||{}; wiz.capacity=d.capacity||{}; clampDraftCart(); wiz.step=2; render(); })
       .catch(e=>{ render(); toast("⚠️ "+e.message); });
     return;
   }
@@ -1072,16 +1123,27 @@ function openFavSets(){
     <div class="sheet"><div class="grab"></div><h3>⭐ Мои наборы</h3>
       ${favSets.length? favSets.map(f=>`
         <div class="row" style="padding:8px 0;border-bottom:1px solid var(--sep)">
-          <div class="grow" onclick="applyFavSet(${f.id})" style="cursor:pointer"><b style="font-size:14px">${f.name}</b>
-          <div class="hud">${f.items.map(i=>i[0]).join(", ")}</div></div>
+          <div class="grow" onclick="applyFavSet(${f.id})" style="cursor:pointer"><b style="font-size:14px">${escHtml(f.name)}</b>
+          <div class="hud">${escHtml(f.items.map(i=>i[0]).join(", "))}</div></div>
           <button class="btn-sm danger" onclick="delFavSet(${f.id})">✕</button>
         </div>`).join("") : '<p class="sub">Наборов пока нет. Соберите корзину и нажмите «Сохранить набор».</p>'}
     </div>`;
 }
-function applyFavSet(id){
+async function applyFavSet(id){
   const f = favSets.find(x=>x.id===id); if(!f) return;
-  f.items.forEach(([s,q])=>{ const it=itemOf(s); if(it && !itemLocked(it)){ const free=freeOf(it); const n=Math.min(q, free||q); if(n>0) wiz.cart[s]=n; } });
-  closeSheet(); toast("Набор добавлен в корзину");
+  if(SRV){
+    try{ const d=await api("availability",{d1:wiz.d1,d2:wiz.d2,t1:wiz.t1,t2:wiz.t2,exclude:wiz.editId||0}); wiz.busy=d.busy||{};wiz.capacity=d.capacity||{}; }
+    catch(e){toast(e.message);return;}
+  }
+  const changes=[];
+  f.items.forEach(([short,q])=>{
+    const it=itemOf(short), n=it&&!itemLocked(it)?Math.min(q,freeOf(it)):0;
+    if(n>0) wiz.cart[short]=n;
+    else delete wiz.cart[short];
+    if(n<q)changes.push(short+": "+(n?"добавлено "+n+" из "+q:"пропущено"));
+  });
+  saveDraft(); closeSheet(); render();
+  toast(changes.length?changes.join("; "):"Набор добавлен в корзину",8000);
 }
 function delFavSet(id){
   if(SRV){ srvDo("favset/del",{id}, ()=>{ openFavSets(); toast("Набор удалён"); }); return; }
@@ -1098,8 +1160,8 @@ function wizCatalog(){
       <div class="row">
         ${thumb(it.short)}
         <div class="grow" onclick="this.closest('.eq-item').classList.toggle('open')">
-          <div class="eq-name">${it.short}</div>
-          <div class="eq-full">${it.full}<br><span style="opacity:.7">фото позиции — из базы оборудования</span></div>
+          <div class="eq-name">${escHtml(it.short)}</div>
+          <div class="eq-full">${escHtml(it.full)}<br><span style="opacity:.7">фото позиции — из базы оборудования</span></div>
           <div class="eq-meta">
             <span style="color:${free? "var(--ok)":"var(--destructive)"}">${free? "свободно "+free+" из "+it.total : "всё занято"}</span>
             ${it.level==="акт" ? (canAct()
@@ -1187,7 +1249,7 @@ function openCart(){
   const rows = Object.entries(wiz.cart).map(([s,q])=>{ const es=escJs(s); return `
     <div class="row" style="padding:9px 0;border-bottom:1px solid var(--sep)">
       ${thumb(s,36)}
-      <div class="grow" style="font-size:14.5px">${s}</div>
+      <div class="grow" style="font-size:14.5px">${escHtml(s)}</div>
       <div class="stepper">
         <button aria-label="Убавить" onclick="chQty('${es}',-1);openCart()">−</button><b>${q}</b><button aria-label="Добавить" onclick="chQty('${es}',1);openCart()">+</button>
       </div>
@@ -1207,7 +1269,7 @@ function wizDetails(){
       <h1 class="big">Детали заявки</h1>
       <div class="sec-label">Корзина · ${cartCount()} поз.</div>
       <div class="card">
-        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+s+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
+        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+escHtml(s)+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
         <button class="btn-sm" style="margin-top:8px;width:100%" onclick="wiz.step=2;render()">✏️ Изменить набор</button>
       </div>
       ${warns}
@@ -1227,14 +1289,14 @@ function wizConfirm(){
       <div class="card" style="margin-top:10px">
         <div class="row" style="margin-bottom:10px">
           <div class="emoji-badge">🎬</div>
-          <div class="grow"><b>${escHtml(wiz.event)}</b><div class="hud">${profile.short} · ${profile.deps[0]||""}</div></div>
+          <div class="grow"><b>${escHtml(wiz.event)}</b><div class="hud">${escHtml(profile.short)} · ${profile.deps[0]||""}</div></div>
         </div>
         <div class="hud" style="margin-bottom:2px">ВЗЯТЬ</div>
         <div style="font:600 14px var(--mono)">${fmtIso(wiz.d1)}.${wiz.d1.slice(0,4)}, ${wiz.t1}</div>
         <div class="hud" style="margin:8px 0 2px">ВЕРНУТЬ ДО</div>
         <div style="font:600 14px var(--mono)">${fmtIso(wiz.d2)}.${wiz.d2.slice(0,4)}, ${wiz.t2}</div>
         <div class="hud" style="margin:10px 0 6px">ОБОРУДОВАНИЕ · ${cartCount()} ПОЗ.</div>
-        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0;border-top:1px solid var(--sep)"><span class="grow" style="font-size:14px">'+s+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
+        ${Object.entries(wiz.cart).map(([s,q])=>'<div class="row" style="padding:5px 0;border-top:1px solid var(--sep)"><span class="grow" style="font-size:14px">'+escHtml(s)+'</span><b style="font:600 13px var(--mono)">× '+q+'</b></div>').join("")}
         ${wiz.media?'<div class="check-row on" style="border-radius:14px;margin-top:8px"><span class="checkbox">✓</span><div class="grow">Ответственный за медиа</div></div>':""}
         ${wiz.comment?'<p class="sub" style="margin-top:8px">💬 '+wiz.comment+'</p>':""}
       </div>
@@ -1254,7 +1316,7 @@ function submitWizard(){
       event:wiz.event.trim(), comment:wiz.comment.trim(), media:wiz.media};
     if(wiz.editId) body.id = wiz.editId;
     api(wiz.editId?"request/update":"request/create", body)
-      .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast(wiz.editId?"✅ Изменения сохранены":"✅ Заявка отправлена — карточка ушла админам."); })
+      .then(d=>{ _busy=false; applyBoot(d); if(!wiz.editId)clearDraft(); resetTo("home"); toast(wiz.editId?"✅ Изменения сохранены":"✅ Заявка отправлена — карточка ушла админам."); })
       .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
     return;
   }
@@ -1274,7 +1336,7 @@ function submitWizard(){
     d1Iso:wiz.d1, d2Iso:wiz.d2, t1:wiz.t1, t2:wiz.t2,
     status:"new", curator:null, history:[["new","02.07, "+new Date().toTimeString().slice(0,5)]], chat:[]
   });
-  resetTo("home");
+  clearDraft();resetTo("home");
   toast("✅ Заявка ID "+id+" отправлена — вы в главном меню. Карточка ушла в админ-чат.");
 }
 function startEditReq(id){
@@ -1314,7 +1376,7 @@ SCREENS.reqDetail = ({id}) => {
   const editable = ["new","curator"].includes(r.status);
   const fact = (r.takenAt||r.returnedAt) ? `<div class="hud" style="margin-top:8px">факт: взял ${r.takenAt||"—"}${r.returnedAt?" · вернул "+r.returnedAt:""}</div>` : "";
   const chat = r.curator ? `
-    <div class="sec-label">Переписка с куратором · ${r.curator}</div>
+    <div class="sec-label">Переписка с куратором · ${escHtml(r.curator)}</div>
     <div class="card">
       <div class="chat">
         ${r.chat.map(m=>chatMsg(m,false)).join("")||'<p class="sub">Куратор на связи — напишите, если что-то поменялось.</p>'}
@@ -1328,11 +1390,12 @@ SCREENS.reqDetail = ({id}) => {
     body:`
       <div class="card">
         <div class="row" style="margin-bottom:8px">
-          <div class="grow"><div class="hud">ID <b>${r.id}</b> · ${r.dep}</div><h1 class="big">${r.event}</h1></div>
+          <div class="grow"><div class="hud">ID <b>${r.id}</b> · ${escHtml(r.dep)}</div><h1 class="big">${escHtml(r.event)}</h1></div>
           ${statusPill(r.status)}
         </div>
+        ${nextStep(r)}
         <div class="hud">${r.from} → <b>${r.to}</b></div>${fact}
-        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+i[0]+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
+        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+escHtml(i[0])+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
       </div>
       <div class="sec-label">Статус</div>
       <div class="card"><div class="tl">${tl}</div></div>
@@ -1417,12 +1480,13 @@ function redrawPhotoHost(kind){
   else if(kind==="bc") openBroadcast();
   else render();
 }
-function startReturn(id){ retPhotos = []; navTo("returnFlow",{id}); }
+function startReturn(id){ photoErrors.ret="";retPhotos = []; navTo("returnFlow",{id}); }
 SCREENS.returnFlow = ({id}) => ({
   body:`
     <h1 class="big">Фото при сдаче</h1>
     <p class="sub" style="margin-bottom:14px">Обязательны по регламенту — снимите комплект с нескольких ракурсов, чтобы было видно состояние. Можно выбрать сразу несколько. Тап по рамке — камера/галерея.</p>
     ${photosGrid("ret")}
+    ${photoErrors.ret?`<div class="kit-warn" role="alert">${escHtml(photoErrors.ret)} Нажмите кнопку отправки, чтобы повторить.</div>`:""}
     <div class="sec-label">Комментарий (необязательно)</div>
     <textarea rows="2" id="ret-comm" maxlength="500" placeholder="Например: потёрся кофр…"></textarea>`,
   mainbtn: mainBtn("Отправить на проверку","doReturn("+id+")","", retPhotos.length<1)
@@ -1435,7 +1499,7 @@ function doReturn(id){
     if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
     api("request/action",{id, action:"userret", comment:c, photos:retPhotos.filter(Boolean)})
       .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast("📷 Возврат по ID "+id+" отправлен на проверку"); })
-      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+      .catch(e=>{ _busy=false; photoErrors.ret=e.message; render(); toast("⚠️ "+e.message); });
     return;
   }
   const r = requests.find(x=>x.id===id);
@@ -1465,9 +1529,9 @@ SCREENS.studio = () => {
           <div>${list.map(b=>`
             <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
               <div class="emoji-badge">${uic("studio",19)}</div>
-              <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+              <div class="grow"><div style="font-weight:600;font-size:14px">${escHtml(b.goal)}${unreadBadge(b)}</div>
               <div class="hud" style="margin-top:4px">${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>
-              ${statusPill(b.status,ST626)}
+              ${statusPill(b.status,ST626)}${nextStep(b,true)}
             </div>`).join("")}</div>`;
         }).join("");
       })()}
@@ -1584,20 +1648,22 @@ SCREENS.studioDetail = ({id}) => {
     body:`
       <div class="card">
         <div class="row" style="margin-bottom:8px">
-          <div class="grow"><div class="hud">626 · БРОНЬ <b>${b.id}</b></div><h1 class="big">${b.goal}</h1></div>
-          ${statusPill(b.status,ST626)}
+          <div class="grow"><div class="hud">626 · БРОНЬ <b>${b.id}</b></div><h1 class="big">${escHtml(b.goal)}</h1></div>
+          ${statusPill(b.status,ST626)}${nextStep(b,true)}
         </div>
         <div class="hud">${fmtIso(b.when)}.${b.when.slice(0,4)} · <b>${b.slot}</b></div>
         ${b.lateNote?'<div class="kit-warn" style="margin-top:10px"><b>⚠️ '+b.lateNote+'</b> — команда может отказать.</div>':""}
         <div style="margin-top:10px">${b.needs.map(n=>'<span class="chip">'+n+'</span>').join("")||'<span class="sub">без допов</span>'}</div>
-        ${b.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+b.curator+'</b></div>':""}
+        ${b.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+escHtml(b.curator)+'</b></div>':""}
       </div>
       <div class="sec-label">Статус</div>
       <div class="card"><div class="tl">${tl}</div></div>
       ${chat}
+      ${["new","approved"].includes(b.status)&&isSeniorNow()?`<button class="btn-sm danger" onclick="seniorCancel626(${b.id})">Отменить с причиной</button>`:""}
+      ${["approved","ret"].includes(b.status)?(b.curator?(myCur(b)||isSeniorNow()?`<button class="btn-sm" onclick="release626(${b.id})">Сменить куратора</button>`:""):((SRV?SRV.isAdmin:role!=="user")?`<button class="btn-sm" onclick="take626(${b.id})">Стать куратором</button>`:"")):""}
       ${(b.me && ["new","approved"].includes(b.status))?`<div class="btnrow" style="margin-top:14px">
         ${b.status==="approved"?'<button class="btn-sm ok grow" style="padding:12px" onclick="handover626('+b.id+')">Сдать аудиторию</button>':""}
-        <button class="btn-sm danger grow" style="padding:12px" onclick="cancel626(${b.id})">Отменить бронь</button>
+        ${!studioStarted(b)?`<button class="btn-sm danger grow" style="padding:12px" onclick="cancel626(${b.id})">Отменить бронь</button>`:""}
       </div>`:""}
       ${(b.status==="ret" && (myCur(b) || (SRV?SRV.isSenior:role!=="user")))?mainBtn("Завершить бронь","close626("+b.id+")"):""}`,
     after: ()=>markRead("626", b.id)
@@ -1624,12 +1690,13 @@ function send626Chat(id, asAdmin){
   render();
   toast(okToast);
 }
-function handover626(id){ hoPhotos = []; navTo("handover626",{id}); }
+function handover626(id){ photoErrors.ho="";hoPhotos = []; navTo("handover626",{id}); }
 SCREENS.handover626 = ({id}) => ({
   body:`
     <h1 class="big">Сдача аудитории 626</h1>
     <p class="sub" style="margin-bottom:14px">Фото аудитории после съёмки — куратор проверит состояние. Можно выбрать сразу несколько. Тап по рамке — камера/галерея.</p>
     ${photosGrid("ho")}
+    ${photoErrors.ho?`<div class="kit-warn" role="alert">${escHtml(photoErrors.ho)} Нажмите кнопку отправки, чтобы повторить.</div>`:""}
     <div class="sec-label">Комментарий (необязательно)</div>
     <textarea rows="2" id="ho-comm" maxlength="500" placeholder="Например: убрали, свет выключили…"></textarea>`,
   mainbtn: mainBtn("Сдать аудиторию","doHandover626("+id+")","", hoPhotos.length<1)
@@ -1641,14 +1708,31 @@ function doHandover626(id){
     if(btn){ btn.disabled = true; btn.textContent = "Отправляем…"; }
     api("626/action",{id, action:"handover", comment:($("ho-comm")?$("ho-comm").value.trim():""), photos:hoPhotos.filter(Boolean)})
       .then(d=>{ _busy=false; applyBoot(d); resetTo("home"); toast("📷 Сдача 626 на проверке. После проверки: «Спасибо, приходите ещё!»"); })
-      .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
+      .catch(e=>{ _busy=false; photoErrors.ho=e.message; render(); toast("⚠️ "+e.message); });
     return;
   }
   const b = bookings626.find(x=>x.id===id);
   b.status="ret"; b.history.push(["ret","02.07, "+new Date().toTimeString().slice(0,5)]);
   resetTo("home"); toast("📷 Сдача 626 на проверке. После проверки: «Спасибо, приходите ещё!»");
 }
+function studioStarted(b){
+  const time=(b.slot||"").split(/[–—-]/)[0].trim();
+  const start=new Date(b.when+"T"+time+":00+03:00").getTime();
+  return !Number.isFinite(start)||Date.now()>=start;
+}
+function seniorCancel626(id){
+  const comment=prompt("Причина отмены брони 626:");if(!comment||!comment.trim())return;
+  if(SRV){srvDo("626/action",{id,action:"cancel",comment:comment.trim()},()=>{render();toast("Бронь отменена");});return;}
+  bookings626.find(b=>b.id===id).status="canceled";render();
+}
+function release626(id){
+  confirmModal("Сменить куратора 626?","Бронь сохранится. После снятия текущего куратора другой администратор сможет взять её в работу.",()=>{
+    if(SRV){srvDo("626/action",{id,action:"uncurator"},()=>{render();toast("Бронь ожидает нового куратора");});return;}
+    bookings626.find(b=>b.id===id).curator=null;render();
+  });
+}
 function cancel626(id){
+  if(studioStarted(bookings626.find(b=>b.id===id))){toast("Бронь началась — отправьте фотографии сдачи");render();return;}
   confirmModal("Отменить бронь 626?","Слот освободится в графике.",()=>{
     if(SRV){ srvDo("626/action",{id, action:"cancel"}, ()=>{ resetTo("home"); toast("Бронь 626 отменена"); }); return; }
     const b = bookings626.find(x=>x.id===id);
@@ -1690,24 +1774,24 @@ SCREENS.adminHub = () => {
         <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
           <div class="grow">
-            <div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
-            <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · ${r.dep} · ${r.from}</div>
+            <div style="font-weight:600;font-size:14px">${escHtml(r.event)}${unreadBadge(r)}</div>
+            <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · ${escHtml(r.dep)} · ${r.from}</div>
+            ${statusPill(r.status)}${nextStep(r)}
           </div>
-          ${statusPill(r.status)}
         </div>`).join("")||'<div class="card sub">В этой очереди пусто ✨</div>'}</div>
       ${adminTab==="history" && hist626.length ? '<div class="sec-label">626 · обработанные</div>'+hist626.map(b=>`
         <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
           <div class="emoji-badge">${uic("studio",19)}</div>
-          <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${escHtml(b.goal)}${unreadBadge(b)}</div>
           <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>
-          ${statusPill(b.status,ST626)}
+          ${statusPill(b.status,ST626)}${nextStep(b,true)}
         </div>`).join("") : ""}
 
       <div class="sec-label">626 · согласовано, нужен куратор</div>
       ${s626free.map(b=>`
         <div class="card">
-          <div class="row"><div class="grow"><b style="font-size:14px">${b.goal}</b>
-          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>${statusPill(b.status,ST626)}</div>
+          <div class="row"><div class="grow"><b style="font-size:14px">${escHtml(b.goal)}</b>
+          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>${statusPill(b.status,ST626)}${nextStep(b,true)}</div>
           <button class="btn-sm primary" style="width:100%;margin-top:10px;padding:11px" onclick="take626(${b.id})">Стать куратором</button>
         </div>`).join("")||'<div class="card sub">Свободных броней 626 нет</div>'}
       ${(()=>{
@@ -1715,9 +1799,9 @@ SCREENS.adminHub = () => {
         return mine626.length ? '<div class="sec-label">626 · мои кураторства</div>'+mine626.map(b=>`
         <div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})">
           <div class="emoji-badge">${uic("studio",19)}</div>
-          <div class="grow"><div style="font-weight:600;font-size:14px">${b.goal}${unreadBadge(b)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${escHtml(b.goal)}${unreadBadge(b)}</div>
           <div class="hud" style="margin-top:4px">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>
-          ${statusPill(b.status,ST626)}
+          ${statusPill(b.status,ST626)}${nextStep(b,true)}
         </div>`).join("") : "";
       })()}
       ${s626new.length?'<p class="sub" style="padding:0 4px">Ещё '+s626new.length+' бронь(и) 626 ждут согласования старшими.</p>':""}
@@ -1757,7 +1841,7 @@ SCREENS.adminCalendar=()=>{
     <button class="cal-nav" aria-label="Следующая неделя" onclick="adminWeek++;render()">›</button></div>
     <div class="week-list">${days.map((day,i)=>{const list=tasks.filter(t=>t.day===day);return `<section class="week-day ${day===isoPlus(0)?"today":""}">
       <div class="week-date"><b>${names[i]}</b><span>${fmtIso(day)}</span></div>
-      <div class="week-tasks">${list.map(t=>`<button class="week-task ${t.mine?"mine":""}" onclick="${t.click}"><span class="task-action">${t.action}</span><span>${t.title}</span>${t.mine?'<small>моя задача</small>':""}</button>`).join("")||'<div class="sub week-empty">Задач нет</div>'}</div>
+      <div class="week-tasks">${list.map(t=>`<button class="week-task ${t.mine?"mine":""}" onclick="${t.click}"><span class="task-action">${t.action}</span><span>${escHtml(t.title)}</span>${t.mine?'<small>моя задача</small>':""}</button>`).join("")||'<div class="sub week-empty">Задач нет</div>'}</div>
     </section>`;}).join("")}</div>`,mainbtn:mainBtn("К текущей неделе","adminWeek=0;render()","secondary")};
 };
 const UNIT_ST={ready:"Готов",repair:"На ремонте",retired:"Списан"};
@@ -1765,7 +1849,7 @@ SCREENS.equipmentUnits=()=>{
   const q=unitQ.toLowerCase(),list=equipmentUnits.filter(u=>!q||u.short.toLowerCase().includes(q)||String(u.num).includes(q));
   return {body:`<h1 class="big">Паспорта экземпляров</h1><p class="sub" style="margin-bottom:12px">Серийные номера, состояние и история выдач.</p>
     <div class="search"><input id="unit-search" type="text" placeholder="Позиция или номер" value="${escAttr(unitQ)}" oninput="unitQ=this.value;renderKeepFocus()"></div>
-    <div style="margin-top:12px">${list.map(u=>`<div class="list-item" onclick="openUnit('${escJs(u.short)}',${u.num})">${thumb(u.short,38)}<div class="grow"><b>${u.short} · №${u.num}</b><div class="hud">${u.serial?"серийный: "+u.serial:"серийный не указан"}</div></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span><span class="chev">›</span></div>`).join("")||'<div class="card sub">Ничего не найдено</div>'}</div>`};
+    <div style="margin-top:12px">${list.map(u=>`<div class="list-item" onclick="openUnit('${escJs(u.short)}',${u.num})">${thumb(u.short,38)}<div class="grow"><b>${escHtml(u.short)} · №${u.num}</b><div class="hud">${u.serial?"серийный: "+u.serial:"серийный не указан"}</div></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span><span class="chev">›</span></div>`).join("")||'<div class="card sub">Ничего не найдено</div>'}</div>`};
 };
 function openUnit(short,num){
   if(SRV){if(_busy)return;_busy=true;api("equipment/unit",{short,num}).then(d=>{_busy=false;unitPassport=d.unit;navTo("unitPassport")}).catch(e=>{_busy=false;toast("Ошибка: "+e.message)});return;}
@@ -1773,12 +1857,12 @@ function openUnit(short,num){
   unitPassport=Object.assign({history:[]},u);navTo("unitPassport");
 }
 SCREENS.unitPassport=()=>{const u=unitPassport;if(!u)return {body:'<div class="card sub">Экземпляр не найден</div>'};return {body:`
-  <div class="card"><div class="row">${thumb(u.short,48)}<div class="grow"><div class="hud">Паспорт экземпляра</div><h1 class="big">${u.short} · №${u.num}</h1></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span></div></div>
+  <div class="card"><div class="row">${thumb(u.short,48)}<div class="grow"><div class="hud">Паспорт экземпляра</div><h1 class="big">${escHtml(u.short)} · №${u.num}</h1></div><span class="unit-state ${u.state}">${UNIT_ST[u.state]||u.state}</span></div></div>
   <div class="sec-label">Серийный номер</div><input id="unit-serial" type="text" maxlength="120" value="${escAttr(u.serial)}" placeholder="Не указан">
   <div class="sec-label">Заметка</div><textarea id="unit-note" rows="3" maxlength="1000" placeholder="Комплектация, дефекты, ремонт…">${escHtml(u.note)}</textarea>
   <div class="sec-label">Состояние</div><select id="unit-state">${[["ready","Готов"],["repair","На ремонте"],["retired","Списан"]].map(x=>`<option value="${x[0]}" ${u.state===x[0]?"selected":""}>${x[1]}</option>`).join("")}</select>
   <p class="sub" style="padding:8px 4px">Последнее изменение: ${u.updatedAt||"—"} · ${u.updatedBy||"система"}</p>
-  <div class="sec-label">История экземпляра</div>${(u.history||[]).map(h=>`<div class="card unit-history tappable" onclick="navTo('adminReq',{id:${h.requestId}})"><b>Заявка ID ${h.requestId} · ${h.user}</b><div class="hud">Бронь: ${h.from} → ${h.to}</div><div class="hud">Выдал: ${h.issuedBy} (${h.takenAt})</div><div class="hud">Принял: ${h.returnedBy} (${h.returnedAt})</div><div class="hud">Итог: ${ST[h.status]?ST[h.status].l:h.status}</div></div>`).join("")||'<div class="card sub">Этот экземпляр ещё не выдавался</div>'}`,
+  <div class="sec-label">История экземпляра</div>${(u.history||[]).map(h=>`<div class="card unit-history tappable" onclick="navTo('adminReq',{id:${h.requestId}})"><b>Заявка ID ${h.requestId} · ${escHtml(h.user)}</b><div class="hud">Бронь: ${h.from} → ${h.to}</div><div class="hud">Выдал: ${escHtml(h.issuedBy)} (${h.takenAt})</div><div class="hud">Принял: ${escHtml(h.returnedBy)} (${h.returnedAt})</div><div class="hud">Итог: ${ST[h.status]?ST[h.status].l:h.status}</div></div>`).join("")||'<div class="card sub">Этот экземпляр ещё не выдавался</div>'}`,
   mainbtn:mainBtn("Сохранить паспорт","saveUnit()")};};
 function saveUnit(){
   const u=unitPassport,body={short:u.short,num:u.num,serial:$("unit-serial").value.trim(),note:$("unit-note").value.trim(),state:$("unit-state").value};
@@ -1801,16 +1885,16 @@ SCREENS.adminReq = ({id}) => {
   } else if(r.status==="curator" && myCur(r)){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="row" style="gap:8px"><button class="mainbtn" style="background:var(--ok);color:#fff" onclick="adminAct('+id+',\'approved\')">🟡 Согласовано</button><button class="mainbtn destructive" style="flex:0 0 38%" onclick="rejReqModal('+id+')">Отклонить</button></div><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
   } else if(r.status==="curator"){
-    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div></div>';
+    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+escHtml(r.curator)+'</span></div></div>';
   } else if(r.status==="approved" && myCur(r)){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><button class="mainbtn" onclick="openIssue('+id+')">🟢 Выдать оборудование</button><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
   } else if(r.status==="approved"){
-    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div></div>';
+    actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+escHtml(r.curator)+'</span></div></div>';
   } else if(r.status==="issued"){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="card" style="text-align:center"><span class="sub">Ждём сдачу оборудования пользователем</span></div>' + (myCur(r)?'<button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button>':'') + '</div></div>';
   } else if(r.status==="ret"){
     const canAccept = myCur(r) || isSeniorNow();
-    const accept = !canAccept ? '<div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+r.curator+'</span></div>'
+    const accept = !canAccept ? '<div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+escHtml(r.curator)+'</span></div>'
       : (r.escalated && !isSeniorNow()) ? '<div class="card" style="pointer-events:auto;text-align:center"><span class="sub">⛔ Проблемный возврат передан старшим</span></div>'
       : '<button class="mainbtn" onclick="openIssue('+id+',true)">Принять возврат</button>';
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto">'+accept + ((myCur(r) && !r.escalated)?'<button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button>':'')+'</div></div>';
@@ -1826,19 +1910,21 @@ SCREENS.adminReq = ({id}) => {
     </div>`;
   return {
     body:`
+      ${isSeniorNow() && ["new","curator","approved"].includes(r.status)?`<button class="btn-sm danger" style="margin-bottom:12px" onclick="rejReqModal(${id})">Отклонить с причиной</button>`:""}
       <div class="card">
         <div class="row" style="margin-bottom:8px">
           <div class="grow"><div class="hud">ID <b>${r.id}</b> · создана ${r.history[0][1]}</div>
-          <h1 class="big">${r.event}</h1></div>
+          <h1 class="big">${escHtml(r.event)}</h1></div>
           ${statusPill(r.status)}
         </div>
+        ${nextStep(r)}
         <div class="row" style="margin:6px 0 10px">
           <div class="avatar" style="width:32px;height:32px;font-size:12px">${r.author.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
-          <div class="grow"><b style="font-size:13.5px">${r.author}</b><div class="hud">${r.dep}</div></div>
+          <div class="grow"><b style="font-size:13.5px">${escHtml(r.author)}</b><div class="hud">${escHtml(r.dep)}</div></div>
         </div>
         <div class="hud">${r.from} → <b>${r.to}</b></div>
-        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+i[0]+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
-        ${r.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+r.curator+'</b></div>':""}
+        <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+escHtml(i[0])+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
+        ${r.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+escHtml(r.curator)+'</b></div>':""}
       </div>
       ${r.lateNote?'<div class="kit-warn"><b>⚠️ '+r.lateNote+'</b> — команда может отказать в выдаче/приёме.</div>':""}
       <div class="sec-label">История</div>
@@ -1915,8 +2001,8 @@ function openIssue(id,isReturn){
   const r=requests.find(x=>x.id===id);
   if(SRV&&!isReturn){
     if(_busy)return;_busy=true;
-    api("availability",{d1:r.d1Iso,d2:r.d2Iso,exclude:r.id,items:r.items})
-      .then(d=>{_busy=false;issueFreeNums=d.freeNums||{};initIssue(r,false)})
+    api("availability",{d1:r.d1Iso,d2:r.d2Iso,t1:r.t1,t2:r.t2,exclude:r.id,items:r.items})
+      .then(d=>{_busy=false;issueFreeNums=d.freeNums||{};issueHeldUnits=d.heldUnits||{};initIssue(r,false)})
       .catch(e=>{_busy=false;toast("Ошибка: "+e.message)});
     return;
   }
@@ -1940,8 +2026,8 @@ function issueAdd(short,rid){
   const r=requests.find(x=>x.id===rid);
   if(SRV&&issueFreeNums[short]===undefined){
     if(_busy)return;_busy=true;
-    api("availability",{d1:r.d1Iso,d2:r.d2Iso,exclude:r.id,items:[[short,1]]})
-      .then(d=>{_busy=false;issueFreeNums[short]=(d.freeNums||{})[short]||[];issueAdd(short,rid)})
+    api("availability",{d1:r.d1Iso,d2:r.d2Iso,t1:r.t1,t2:r.t2,exclude:r.id,items:[[short,1]]})
+      .then(d=>{_busy=false;issueFreeNums[short]=(d.freeNums||{})[short]||[];issueHeldUnits[short]=(d.heldUnits||{})[short]||[];issueAdd(short,rid)})
       .catch(e=>{_busy=false;toast("Ошибка: "+e.message)});
     return;
   }
@@ -1964,7 +2050,7 @@ function issueAddSheet(rid){
       <div class="search" style="margin-bottom:8px"><input type="text" placeholder="Поиск по каталогу" value="${issueCheck.addQ||""}"
         oninput="issueCheck.addQ=this.value;issueAddSheet(${rid});const i=document.querySelector('.sheet .search input');i.focus();i.setSelectionRange(i.value.length,i.value.length)"></div>
       <div style="max-height:40vh;overflow-y:auto">
-        ${list.slice(0,120).map(s=>'<div class="list-item" onclick="issueAdd(\''+escJs(s)+'\','+rid+')">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+s+'</span><span class="chev">＋</span></div>').join("")||'<p class="sub">Ничего не нашлось</p>'}
+        ${list.slice(0,120).map(s=>'<div class="list-item" onclick="issueAdd(\''+escJs(s)+'\','+rid+')">'+thumb(s,32)+'<span class="grow" style="font-size:14px">'+escHtml(s)+'</span><span class="chev">＋</span></div>').join("")||'<p class="sub">Ничего не нашлось</p>'}
         ${list.length>120?'<p class="sub" style="padding:8px">Показаны первые 120 — уточните поиск.</p>':""}
       </div>
       <button class="mainbtn secondary" style="margin-top:12px" onclick="drawIssue(requests.find(x=>x.id===${rid}))">‹ К чек-листу</button>
@@ -1974,15 +2060,16 @@ function drawIssue(r){
   /* сохраняем скролл шита и введённый комментарий — чтобы тап по чекбоксу не прыгал наверх и не стирал текст */
   const _sh = document.querySelector(".sheet"); const _top = _sh ? _sh.scrollTop : 0;
   const _ci = $("issue-comm"); const _comm = _ci ? _ci.value : "";
-  const all = issueCheck.items.length>0 && issueCheck.items.every(i=>issueCheck.done[i[0]]);
+  const all = issueCheck.items.length>0 && issueCheck.items.every(i=>issueCheck.done[i[0]] && (issueCheck.isReturn || new Set(issueCheck.nums[i[0]]||[]).size===i[1]));
   $("overlay").innerHTML = `
     <div class="sheet-veil" onclick="closeSheet()"></div>
     <div class="sheet"><div class="grab"></div>
       <h3>${issueCheck.isReturn?"🔁 Приём возврата":"🟢 Выдача"} · ID ${r.id}</h3>
       <p class="sub" style="margin-bottom:10px">Отметьте каждую позицию. № экземпляра предложен автоматически — тап по номеру, чтобы сменить.${issueCheck.isReturn?"":" Нет в наличии — уберите позицию крестиком."}</p>
+      ${!issueCheck.isReturn?Object.entries(issueHeldUnits).flatMap(([short,units])=>units.map(u=>`<div class="kit-warn">${escHtml(short)} №${u.num}: у ${escHtml(u.holder)} · заявка ${u.requestId}, возврат ещё не принят</div>`)).join(""):""}
       ${issueCheck.items.map(i=>{ const es=escJs(i[0]); return `
         <div class="check-row ${issueCheck.done[i[0]]?"on":""}" ${chkA(issueCheck.done[i[0]])} onclick="issueCheck.done['${es}']=!issueCheck.done['${es}'];drawIssue(requests.find(x=>x.id===${r.id}))">
-          <span class="checkbox">✓</span><span class="grow">${i[0]}${i[1]>1?" × "+i[1]:""}</span>
+          <span class="checkbox">✓</span><span class="grow">${escHtml(i[0])}${i[1]>1?" × "+i[1]:""}</span>
           ${(issueCheck.nums[i[0]]||[]).length?'<button class="btn-sm" style="font-family:var(--mono)" onclick="event.stopPropagation();cycleNum(\''+es+'\','+r.id+')">№ '+issueCheck.nums[i[0]].join(", ")+'</button>':""}
           ${issueCheck.isReturn?'<span class="hud">'+(issueCheck.done[i[0]]?"OK":"—")+'</span>'
             :'<button class="btn-sm danger" onclick="event.stopPropagation();issueDrop(\''+es+'\','+r.id+')">✕</button>'}
@@ -2034,7 +2121,7 @@ SCREENS.inventoryStart=()=>{
   return {body:`<div class="inventory-hero"><span>${uic("doc",30)}</span><div><div class="hud">Полная проверка фонда</div><h1 class="big">Новая инвентаризация</h1></div></div>
     <div class="inventory-alert"><b>Бронирование будет приостановлено</b><span>Пока событие активно, оборудование нельзя бронировать, менять в заявках и выдавать.</span></div>
     <div class="sec-label">Участники</div><p class="sub">Выберите администраторов и пользователей. Вы как создатель добавитесь автоматически.</p>
-    <div class="participant-list">${people.map((u,i)=>{const id=u.id||i+1,on=invParticipants.has(id);return `<div class="check-row ${on?"on":""}" ${chkA(on)} onclick="invToggleParticipant(${id})"><span class="checkbox">✓</span><div class="grow"><b>${u.name}</b><div class="hud">${u.tg||""} · ${u.role||"пользователь"}</div></div></div>`}).join("")||'<div class="card sub">Нет доступных участников</div>'}</div>`,
+    <div class="participant-list">${people.map((u,i)=>{const id=u.id||i+1,on=invParticipants.has(id);return `<div class="check-row ${on?"on":""}" ${chkA(on)} onclick="invToggleParticipant(${id})"><span class="checkbox">✓</span><div class="grow"><b>${escHtml(u.name)}</b><div class="hud">${u.tg||""} · ${u.role||"пользователь"}</div></div></div>`}).join("")||'<div class="card sub">Нет доступных участников</div>'}</div>`,
     mainbtn:mainBtn("Запустить инвентаризацию","confirmInventoryStart()")};
 };
 function confirmInventoryStart(){confirmModal("Запустить инвентаризацию?","В течение инвентаризации оборудование нельзя бронировать и выдавать.",startInventoryEvent);}
@@ -2109,8 +2196,8 @@ SCREENS.seniorHub = () => {
       <div class="sec-label">⏳ 626 · ждут согласования</div>
       ${s626new.map(b=>`
         <div class="card">
-          <div class="row"><div class="grow"><b style="font-size:14px">${b.goal}</b>
-          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>${statusPill(b.status,ST626)}</div>
+          <div class="row"><div class="grow"><b style="font-size:14px">${escHtml(b.goal)}</b>
+          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>${statusPill(b.status,ST626)}${nextStep(b,true)}</div>
           <div class="btnrow" style="margin-top:10px">
             <button class="btn-sm ok grow" onclick="dec626(${b.id},'approved')">Согласовать</button>
             <button class="btn-sm danger grow" onclick="rej626Modal(${b.id})">Отклонить</button>
@@ -2133,9 +2220,9 @@ SCREENS.seniorHub = () => {
       </div>
       <div class="sec-label">Коммуникация и данные</div>
       <div>
-        <div class="list-item" onclick="doResync()"><div class="emoji-badge">${uic("refresh",19)}</div><div class="grow">Обновить БД</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="doResync()"><div class="emoji-badge">${uic("refresh",19)}</div><div class="grow">Перепроверить пользователей по спискам</div><span class="chev">›</span></div>
         <div class="list-item" onclick="startBroadcast()"><div class="emoji-badge">${uic("mega",19)}</div><div class="grow">Массовая рассылка</div><span class="chev">›</span></div>
-        <div class="list-item" onclick="openStats(true)"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Статистика (MD)</div><span class="chev">›</span></div>
+        <div class="list-item" onclick="openStats(true)"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Статистика</div><span class="chev">›</span></div>
       </div>
       <p class="sub" style="padding:4px">Заявки на оборудование обрабатывают админы в своей панели — переключите роль, чтобы посмотреть.</p>
       <div style="margin-top:10px"><button class="mainbtn secondary" onclick="setRole('user')">‹ Режим пользователя</button></div>`,
@@ -2178,7 +2265,7 @@ function doResync(){
   if(!confirm("⚠️ Пересверка базы: все верифицированные пользователи будут проверены заново. Продолжить?")){
     return;
   }
-  if(SRV){ if(_busy) return; _busy=true; api("resync").then(d=>{ _busy=false; applyBoot(d); toast("БД обновлена: " + (d.reloaded||0) + " человек, " + (d.pending||0) + " в очередь верификации"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  if(SRV){ if(_busy) return; _busy=true; api("resync").then(d=>{ _busy=false; applyBoot(d); toast("Пользователи перепроверены: " + (d.reloaded||0) + " человек, " + (d.pending||0) + " в очередь верификации"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
   toast("Демо: бот бы пересверил людей");
 }
 function sendBroadcast(){
@@ -2240,11 +2327,11 @@ SCREENS.stats = () => {
 SCREENS.reqChats = () => ({
   body:`
     <h1 class="big">Переписки заявок</h1>
-    <p class="sub" style="margin:6px 0 12px">Все заявки и переписка заявитель↔куратор. Писать можно только по своим кураторствам.</p>
+    <p class="sub" style="margin:6px 0 12px">Все заявки и переписки. Старший может отклонить заявку с причиной до выдачи и написать заявителю и куратору.</p>
     ${requests.length? requests.map(r=>`
       <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
         <div class="emoji-badge">${uic("box",19)}</div>
-        <div class="grow"><div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
+        <div class="grow"><div style="font-weight:600;font-size:14px">${escHtml(r.event)}${unreadBadge(r)}</div>
         <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · ${(r.chat&&r.chat.length)?r.chat.length+" сообщ.":"без переписки"}</div></div>
         ${statusPill(r.status)}
       </div>`).join("") : '<div class="card sub">Заявок нет</div>'}`
@@ -2259,10 +2346,11 @@ SCREENS.problemReturns = () => {
       ${list.length? list.map(r=>`
         <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
-          <div class="grow"><div style="font-weight:600;font-size:14px">${r.event}${unreadBadge(r)}</div>
+          <div class="grow"><div style="font-weight:600;font-size:14px">${escHtml(r.event)}${unreadBadge(r)}</div>
           <div class="hud">ID <b>${r.id}</b> · ${r.author.split(" ")[0]} · куратор ${r.curator||"—"}</div></div>
           ${statusPill(r.status)}
-        </div>`).join("") : '<div class="card sub">Проблемных возвратов нет ✨</div>'}`
+        </div>
+        ${nextStep(r)}`).join("") : '<div class="card sub">Проблемных возвратов нет ✨</div>'}`
   };
 };
 /* ---- чёрный список (старший) ---- */
@@ -2360,24 +2448,24 @@ SCREENS.addEquip = () => {
       </div>
       ${equipForm.cat==='__new'?'<input type="text" maxlength="80" style="margin-top:8px" placeholder="Название новой категории" value="'+equipForm.newCat+'" oninput="equipForm.newCat=this.value">':""}
       <div class="sec-label">Короткое название (как в каталоге)</div>
-      <input type="text" id="eq-short" maxlength="80" placeholder="напр. R8 №2" value="${equipForm.short}" oninput="equipForm.short=this.value;const b=document.querySelector('.mainbtn');if(b)b.disabled=!this.value.trim()">
+      <input type="text" id="eq-short" maxlength="80" placeholder="напр. R8 №2" value="${escHtml(equipForm.short)}" oninput="equipForm.short=this.value;const b=document.querySelector('.mainbtn');if(b)b.disabled=!this.value.trim()">
       <div class="sec-label">Полное название</div>
-      <input type="text" id="eq-full" maxlength="160" placeholder="напр. Фотоаппарат Canon EOS R8 body" value="${equipForm.full}" oninput="equipForm.full=this.value">
+      <input type="text" id="eq-full" maxlength="160" placeholder="напр. Фотоаппарат Canon EOS R8 body" value="${escHtml(equipForm.full)}" oninput="equipForm.full=this.value">
       <div class="sec-label">Количество</div>
       <input type="text" id="eq-total" maxlength="4" inputmode="numeric" placeholder="1" value="${equipForm.total}" oninput="equipForm.total=this.value.replace(/[^0-9]/g,'')">
       <div class="sec-label">Уровень доступа</div>
       <div class="row" style="gap:6px">
         ${[["","всем"],["акт","активисты"],["глава","старшие"]].map(o=>'<button class="chip-btn '+(equipForm.level===o[0]?"on":"")+'" onclick="equipForm.level=\''+o[0]+'\';render()">'+o[1]+'</button>').join("")}
       </div>
-      ${extra.length?'<div class="sec-label">Добавленные позиции</div><div>'+extra.map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+it.short+'</div><div class="hud">'+it.cat+' · '+it.total+' шт</div></div><button class="btn-sm danger" onclick="delEquip(\''+escJs(it.short)+'\')">Удалить</button></div>').join("")+'</div>':""}
+      ${extra.length?'<div class="sec-label">Добавленные позиции</div><div>'+extra.map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+escHtml(it.short)+'</div><div class="hud">'+escHtml(it.cat)+' · '+it.total+' шт</div></div><button class="btn-sm danger" onclick="delEquip(\''+escJs(it.short)+'\')">Удалить</button></div>').join("")+'</div>':""}
       <div class="sec-label">Убрать позицию из каталога</div>
       <input type="text" id="eq-rm" maxlength="60" placeholder="Поиск позиции для скрытия" value="${equipForm.rmQ||""}" oninput="equipForm.rmQ=this.value;render()">
       ${(()=>{
         const q=(equipForm.rmQ||"").toLowerCase(); if(!q) return "";
         const list=[]; CATALOG.forEach(c=>c.items.forEach(it=>{ if(it.short.toLowerCase().includes(q)) list.push(it.short); }));
-        return '<div>'+(list.slice(0,20).map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm danger" onclick="equipRemove(\''+escJs(s)+'\')">Скрыть</button></div>').join("")||'<p class="sub">Ничего не нашлось</p>')+'</div>';
+        return '<div>'+(list.slice(0,20).map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+escHtml(s)+'</span><button class="btn-sm danger" onclick="equipRemove(\''+escJs(s)+'\')">Скрыть</button></div>').join("")||'<p class="sub">Ничего не нашлось</p>')+'</div>';
       })()}
-      ${(SRV&&SRV.removedItems&&SRV.removedItems.length)?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+SRV.removedItems.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`,
+      ${(SRV&&SRV.removedItems&&SRV.removedItems.length)?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+SRV.removedItems.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+escHtml(s)+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`,
     mainbtn: mainBtn("Добавить позицию","saveEquip()","", !ready)
   };
 };
@@ -2425,10 +2513,10 @@ SCREENS.removeEquip = () => {
       <h1 class="big">Убрать оборудование</h1>
       <p class="sub" style="margin:6px 0 10px">Скрытая позиция пропадает из каталога у всех. Можно вернуть.</p>
       <div class="chips">${cats.map(c=>'<button class="chip-btn '+(removeCat===c?"on":"")+'" onclick="removeCat=\''+escJs(c)+'\';render()">'+(c==="Все"?"Все":icon(c,14)+c)+'</button>').join("")}</div>
-      <div class="search"><input type="text" maxlength="60" placeholder="Поиск позиции" value="${removeQ}" oninput="removeQ=this.value;renderKeepFocus()"></div>
-      <div>${list.slice(0,80).map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+it.short+'</div><div class="hud">'+it.cat+'</div></div><button class="btn-sm danger" onclick="equipRemove(\''+escJs(it.short)+'\')">Скрыть</button></div>').join("")||'<div class="card sub">Ничего не нашлось</div>'}
+      <div class="search"><input type="text" maxlength="60" placeholder="Поиск позиции" value="${escHtml(removeQ)}" oninput="removeQ=this.value;renderKeepFocus()"></div>
+      <div>${list.slice(0,80).map(it=>'<div class="list-item"><div class="grow"><div style="font-size:14px">'+escHtml(it.short)+'</div><div class="hud">'+escHtml(it.cat)+'</div></div><button class="btn-sm danger" onclick="equipRemove(\''+escJs(it.short)+'\')">Скрыть</button></div>').join("")||'<div class="card sub">Ничего не нашлось</div>'}
         ${list.length>80?'<p class="sub" style="padding:8px">Показаны первые 80 — уточните поиск.</p>':""}</div>
-      ${removed.length?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+removed.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+s+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`
+      ${removed.length?'<div class="sec-label">Скрытые (можно вернуть)</div><div>'+removed.map(s=>'<div class="list-item"><span class="grow" style="font-size:14px">'+escHtml(s)+'</span><button class="btn-sm ok" onclick="equipRestore(\''+escJs(s)+'\')">Вернуть</button></div>').join("")+'</div>':""}`
   };
 };
 SCREENS.adminUsers = () => ({
@@ -2438,7 +2526,7 @@ SCREENS.adminUsers = () => ({
     ${verifQueue.map(v=>`
       <div class="card" style="border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)">
         <div class="row"><div class="avatar" style="width:38px;height:38px;font-size:14px">${v.name[0]}</div>
-        <div class="grow"><b style="font-size:14px">${v.name}</b><div class="hud">${v.org} · ${v.tg}${v.role?" · просит: "+v.role:""}</div></div></div>
+        <div class="grow"><b style="font-size:14px">${escHtml(v.name)}</b><div class="hud">${escHtml(v.org)} · ${escHtml(v.tg)}${v.role?" · просит: "+v.role:""}</div></div></div>
         <div class="hud" style="margin:10px 0 5px">РОЛЬ ПРИ ВЕРИФИКАЦИИ (СТАВИТ АДМИН)</div>
         <div class="row" style="gap:6px">
           ${["активист","стажёр","СО/ССФ","production"].map(rl=>'<button class="chip-btn '+((v.assignRole||v.role||"активист")===rl?"on":"")+'" onclick="verifQueue.find(x=>x.id==='+v.id+').assignRole=\''+rl+'\';render()">'+rl+'</button>').join("")}
@@ -2454,7 +2542,7 @@ SCREENS.adminUsers = () => ({
     <div>${usersDb.filter(u=>!userQ||u.name.toLowerCase().includes(userQ.toLowerCase())||u.org.toLowerCase().includes(userQ.toLowerCase())).map(u=>`
       <div class="list-item" onclick="openUserCard(${usersDb.indexOf(u)})">
         <div class="avatar" style="width:34px;height:34px;font-size:12px">${u.name.split(" ").map(w=>w[0]).slice(0,2).join("")}</div>
-        <div class="grow"><div style="font-size:14px;font-weight:500">${u.name}</div>
+        <div class="grow"><div style="font-size:14px;font-weight:500">${escHtml(u.name)}</div>
         <div class="hud">${u.org} · ${u.dep} · ${u.role}</div></div>
         <span class="hud">${u.ok?"✓":"⏳"}</span>
       </div>`).join("")}</div>`

@@ -25,3 +25,6 @@ directory.csv
 # Локальные ключи Google Service Account
 oborudsh-*.json
 bot/bot_fixed.py
+
+# Generated browser verification screenshots
+/tests/*.png

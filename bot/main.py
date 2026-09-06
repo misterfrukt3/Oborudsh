@@ -143,7 +143,48 @@ def db() -> sqlite3.Connection:
     return conn
 
 
+
+def studio_started(b):
+    bounds = _slot_bounds(b["slot"])
+    start = parse_dt(b["day"], bounds[0]) if bounds else None
+    return not start or datetime.now(MSK) >= start
+
+
+def workflow_schema():
+    with db() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS photo_receipts(kind TEXT, ref INTEGER, digest TEXT, recipient INTEGER,
+            PRIMARY KEY(kind,ref,digest,recipient));
+        CREATE TABLE IF NOT EXISTS admin_offers(ref INTEGER, admin_id INTEGER, sent INTEGER DEFAULT 0,
+            answer TEXT DEFAULT '', PRIMARY KEY(ref,admin_id));
+        CREATE TABLE IF NOT EXISTS offer_escalations(ref INTEGER PRIMARY KEY);
+        """)
+
+
+async def deliver_return_photos(kind, ref, curator, photos, caption):
+    import hashlib
+    digest = hashlib.sha256(b"".join(photos) + caption.encode()).hexdigest()
+    recipients = set(filter(None, [curator, ADMIN_CHAT_ID]))
+    if bot is None and DEV_USER_ID:
+        return None
+    if bot is None or not recipients:
+        return "Не настроен получатель фотографий. Обратитесь к старшему администратору."
+    for recipient in recipients:
+        with db() as c:
+            done = c.execute("SELECT 1 FROM photo_receipts WHERE kind=? AND ref=? AND digest=? AND recipient=?", (kind,ref,digest,recipient)).fetchone()
+        if done:
+            continue
+        try:
+            await _send_blobs(recipient, photos, caption, strict=True)
+        except Exception as exc:
+            return "Фото не доставлены: " + str(exc)[:250] + ". Повторите отправку — фотографии сохранены в форме."
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO photo_receipts VALUES(?,?,?,?)", (kind,ref,digest,recipient))
+    return None
+
+
 def init_db() -> None:
+    workflow_schema()
     with db() as c:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript("""
@@ -262,6 +303,7 @@ def db_revision() -> str:
 
 def _migrate() -> None:
     """Догоняем схему на старых базах (ALTER TABLE, если колонок нет)."""
+    workflow_schema()
     adds = {
         "requests": {"dfrom_iso": "TEXT DEFAULT ''", "dto_iso": "TEXT DEFAULT ''",
                      "tfrom": "TEXT DEFAULT ''", "tto": "TEXT DEFAULT ''",
@@ -319,6 +361,8 @@ def _migrate() -> None:
 TOTALS = {}
 CATALOG_META = {}
 BOOKING_LOCK = asyncio.Lock()
+ACTION_LOCK = asyncio.Lock()
+OFFER_LOCK = asyncio.Lock()
 
 
 def _item_numbers(item: dict) -> list[int]:
@@ -749,7 +793,7 @@ def _request_interval(d1: str, d2: str, t1: str, t2: str):
 def busy_map(d1: str, d2: str, t1: str = "00:00", t2: str = "23:59",
              exclude_rid: int = 0) -> dict:
     """Сколько единиц занято на точном пересечении дат и времени."""
-    out = {}
+    out, events = {}, {}
     wanted_start, wanted_end = _request_interval(d1, d2, t1, t2)
     if not wanted_start or not wanted_end:
         return out
@@ -766,7 +810,13 @@ def busy_map(d1: str, d2: str, t1: str = "00:00", t2: str = "23:59",
         if not _intervals_overlap(start, end, wanted_start, wanted_end):
             continue
         for s, q in json.loads(r["items"]):
-            out[s] = out.get(s, 0) + int(q)
+            events.setdefault(s, []).extend([(max(start, wanted_start), int(q)), (min(end, wanted_end), -int(q))])
+    for short, points in events.items():
+        current = peak = 0
+        for _, delta in sorted(points):
+            current += delta
+            peak = max(peak, current)
+        out[short] = peak
     return out
 
 
@@ -822,7 +872,6 @@ def validate_items(uid, raw_items, media=False, allow_restricted=False):
         if not isinstance(pair, (list, tuple)) or len(pair) != 2: return None, "Некорректный формат позиции."
         short, qty = pair
         if not isinstance(short, str): return None, "Некорректное название позиции."
-        short = short.strip()
         if not short or short in seen or short not in CATALOG_META: return None, "В заявке есть неизвестная или повторяющаяся позиция."
         if isinstance(qty, bool): return None, "Некорректное количество экземпляров."
         try: qty = int(qty)
@@ -866,25 +915,23 @@ def _numbers_from_value(value):
     return out
 
 
+def held_units(short, exclude_rid=0):
+    with db() as c:
+        rows = c.execute("SELECT id,user_id,nums FROM requests WHERE status IN ('issued','ret') AND id<>?", (exclude_rid,)).fetchall()
+    return [{"num": n, "requestId": r["id"], "holder": _disp_user(r["user_id"])}
+            for r in rows for n in _numbers_from_value(json.loads(r["nums"] or "{}").get(short))]
+
+
 def used_numbers(short, d1, d2, t1="00:00", t2="23:59", exclude_rid=0):
-    used = set()
+    # A physical handover is blocked until the previous return is accepted.
+    used = {unit["num"] for unit in held_units(short, exclude_rid)}
     wanted_start, wanted_end = _request_interval(d1, d2, t1, t2)
     with db() as c:
-        rows = c.execute(
-            "SELECT nums,dfrom_iso,dto_iso,tfrom,tto FROM requests "
-            "WHERE status IN (%s) AND dfrom_iso<>'' AND dfrom_iso<=? "
-            "AND dto_iso>=? AND id<>?" % ",".join("?" * len(ACTIVE_STS)),
-            (*ACTIVE_STS, d2, d1, exclude_rid),
-        ).fetchall()
+        rows = c.execute("SELECT nums,dfrom_iso,dto_iso,tfrom,tto FROM requests WHERE status IN ('new','curator','approved') AND id<>?", (exclude_rid,)).fetchall()
     for row in rows:
-        start, end = _request_interval(
-            row["dfrom_iso"], row["dto_iso"], row["tfrom"], row["tto"]
-        )
-        if not _intervals_overlap(start, end, wanted_start, wanted_end):
-            continue
-        try: nums = json.loads(row["nums"] or "{}")
-        except (TypeError, ValueError): nums = {}
-        used.update(_numbers_from_value(nums.get(short)))
+        start, end = _request_interval(row["dfrom_iso"], row["dto_iso"], row["tfrom"], row["tto"])
+        if _intervals_overlap(start, end, wanted_start, wanted_end):
+            used.update(_numbers_from_value(json.loads(row["nums"] or "{}").get(short)))
     return used
 
 
@@ -898,7 +945,9 @@ def assign_numbers(items, d1, d2, t1="00:00", t2="23:59",
         wanted = _numbers_from_value(preferred.get(short))
         chosen = wanted if len(wanted) == int(qty) else free[:int(qty)]
         if len(set(chosen)) != int(qty) or any(num not in free for num in chosen):
-            return None, "Не хватает исправных свободных экземпляров позиции «%s»." % short
+            holders = held_units(short, exclude_rid)
+            detail = "; ".join("№%s у %s (заявка %s)" % (h["num"], h["holder"], h["requestId"]) for h in holders)
+            return None, "Не хватает исправных свободных экземпляров позиции «%s». %s" % (short, detail)
         result[short] = chosen
     return result, None
 
@@ -1633,10 +1682,15 @@ def auth(handler):
         if not tg_user:
             return jerr("Не удалось проверить подпись Telegram. Откройте приложение из Telegram.", 401)
         touch_user(tg_user)
-        response = await handler(request, body, tg_user["id"])
+        if handler.__name__ in ("api_req_action", "api_626_action"):
+            async with ACTION_LOCK:
+                response = await handler(request, body, tg_user["id"])
+        else:
+            response = await handler(request, body, tg_user["id"])
         if db_revision() != before:
             await sse_broadcast()
         return response
+    wrapped.__wrapped__ = handler
     return wrapped
 
 
@@ -1647,10 +1701,12 @@ def _decode_photos(photos) -> list:
     """base64 data-URL с фронта -> список bytes. На диск НЕ пишем (фото не хранятся на сервере)."""
     import base64
     out = []
-    for p in (photos or [])[:PHOTO_MAX]:
+    if not isinstance(photos, list):
+        return out
+    for p in photos[:PHOTO_MAX]:
         try:
-            raw = base64.b64decode(p.split(",", 1)[1] if "," in p else p)
-            if len(raw) > 4 * 1024 * 1024:
+            raw = base64.b64decode(p.split(",", 1)[1] if "," in p else p, validate=True)
+            if not raw or len(raw) > 4 * 1024 * 1024:
                 continue
             out.append(raw)
         except Exception as e:
@@ -1658,7 +1714,7 @@ def _decode_photos(photos) -> list:
     return out
 
 
-async def _send_blobs(chat_id: int, blobs, caption: str, parse_mode=None) -> None:
+async def _send_blobs(chat_id: int, blobs, caption: str, parse_mode=None, strict=False) -> None:
     """Список bytes -> в чат одним сообщением (media group), подпись на первом."""
     if not chat_id or bot is None or not blobs:
         return
@@ -1676,6 +1732,8 @@ async def _send_blobs(chat_id: int, blobs, caption: str, parse_mode=None) -> Non
             await bot.send_media_group(chat_id, media=media)
     except Exception as e:
         log.warning("send_photos %s failed: %s", chat_id, e)
+        if strict:
+            raise
 
 
 async def send_photos_b64(chat_id: int, photos, caption: str) -> None:
@@ -2169,6 +2227,7 @@ async def api_availability(request, body, uid):
             short: ready_capacity(short) for short in CATALOG_META
         },
         "freeNums": free_nums,
+        "heldUnits": {short: held_units(short, exclude) for short in free_nums} if is_admin(uid) else {},
     })
 
 
@@ -2176,7 +2235,7 @@ async def api_availability(request, body, uid):
 async def api_equipment_unit(request, body, uid):
     if not is_admin(uid):
         return jerr("Только для администраторов.", 403)
-    short = clean_text(body.get("short"), 80)
+    short = str(body.get("short") or "")
     try:
         num = int(body.get("num"))
     except (TypeError, ValueError):
@@ -2191,7 +2250,7 @@ async def api_equipment_unit(request, body, uid):
 async def api_equipment_unit_update(request, body, uid):
     if not is_admin(uid):
         return jerr("Только для администраторов.", 403)
-    short = clean_text(body.get("short"), 80)
+    short = str(body.get("short") or "")
     try:
         num = int(body.get("num"))
     except (TypeError, ValueError):
@@ -2624,22 +2683,20 @@ async def api_req_action(request, body, uid):
         if r["curator"]:
             await notify(r["curator"], f"Заявка ID {rid} отменена пользователем.")
     elif action == "userret":
+        if uid == owner and r["status"] == "ret":
+            return web.json_response(boot_payload(uid))
         if uid != owner or r["status"] != "issued":
             return jerr("Сдать можно только выданную заявку.")
         photos = _decode_photos(body.get("photos"))
-        if not photos:
-            return jerr("Для сдачи приложите хотя бы одну фотографию.")
+        if not isinstance(body.get("photos"), list) or not photos or len(photos) != len(body["photos"]):
+            return jerr("Приложите от 1 до 5 корректных фотографий (до 4 МБ каждая).")
+        error = await deliver_return_photos("requests", rid, r["curator"], photos, tx.request_return_caption(rid, comment))
+        if error:
+            return jerr(error, 502)
         with db() as c:
             c.execute("UPDATE requests SET status='ret' WHERE id=?", (rid,))
-        _push_hist("requests", rid, "ret", "фото отправлены" + (" · " + comment if comment else ""))
-        caption = tx.request_return_caption(rid, comment)
-        if r["curator"]:
-            await notify(
-                r["curator"],
-                f"📷 Сдача по заявке ID {rid} отправлена — проверьте оборудование в приложении.",
-            )
-            await _send_blobs(r["curator"], photos, caption)
-        await _send_blobs(ADMIN_CHAT_ID, photos, caption)
+        _push_hist("requests", rid, "ret", "фото доставлены" + (" · " + comment if comment else ""))
+
     elif not is_admin(uid):
         return jerr("Недостаточно прав.", 403)
     elif action == "curator":
@@ -2666,8 +2723,10 @@ async def api_req_action(request, body, uid):
         if ADMIN_CHAT_ID and bot is not None:
             await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} снова без куратора — возьмите её в работу.")
     elif action in ("approved", "rejected"):
-        if r["status"] != "curator" or not curator_or_senior:
+        if not curator_or_senior or (r["status"] != "curator" and not (action == "rejected" and is_senior(uid) and r["status"] in ("new", "approved"))):
             return jerr("Согласовать или отклонить заявку может только её куратор или старший.", 403)
+        if action == "rejected" and not comment:
+            return jerr("Укажите причину отказа.")
         new_status = "approved" if action == "approved" else "rejected"
         with db() as c:
             c.execute("UPDATE requests SET status=? WHERE id=?", (new_status, rid))
@@ -2785,28 +2844,29 @@ async def api_626_action(request, body, uid):
     owner = b["user_id"]
     curator_or_senior = b["curator"] == uid or is_senior(uid)
     if action == "cancel":
-        if uid != owner or b["status"] not in ("new", "approved"):
+        if b["status"] not in ("new", "approved") or (not is_senior(uid) and (uid != owner or studio_started(b))):
             return jerr("Отменить бронь может только её владелец до начала.")
+        if is_senior(uid) and (studio_started(b) or uid != owner) and not comment:
+            return jerr("Укажите причину отмены.")
         with db() as c:
             c.execute("UPDATE b626 SET status='canceled' WHERE id=?", (bid,))
-        _push_hist("b626", bid, "canceled")
+        _push_hist("b626", bid, "canceled", comment)
+        await notify(owner, f"Бронь 626 №{bid} отменена. {comment}")
     elif action == "handover":
+        if uid == owner and b["status"] == "ret":
+            return web.json_response(boot_payload(uid))
         if uid != owner or b["status"] != "approved":
             return jerr("Сдать можно только согласованную бронь.")
         photos = _decode_photos(body.get("photos"))
-        if not photos:
-            return jerr("Для сдачи аудитории приложите хотя бы одну фотографию.")
+        if not isinstance(body.get("photos"), list) or not photos or len(photos) != len(body["photos"]):
+            return jerr("Приложите от 1 до 5 корректных фотографий (до 4 МБ каждая).")
+        error = await deliver_return_photos("b626", bid, b["curator"], photos, tx.studio_return_caption(bid, comment))
+        if error:
+            return jerr(error, 502)
         with db() as c:
             c.execute("UPDATE b626 SET status='ret' WHERE id=?", (bid,))
-        _push_hist("b626", bid, "ret", "фото отправлены" + (" · " + comment if comment else ""))
-        caption = tx.studio_return_caption(bid, comment)
-        if b["curator"]:
-            await notify(
-                b["curator"],
-                f"📷 Бронь 626 №{bid}: пользователь отправил фото сдачи, проверьте аудиторию.",
-            )
-            await _send_blobs(b["curator"], photos, caption)
-        await _send_blobs(ADMIN_CHAT_ID, photos, caption)
+        _push_hist("b626", bid, "ret", "фото доставлены" + (" · " + comment if comment else ""))
+
     elif action in ("approved", "rejected"):
         if not is_senior(uid):
             return jerr("Брони 626 согласуют только старшие администраторы.", 403)
@@ -2828,10 +2888,17 @@ async def api_626_action(request, body, uid):
                 f"⛔ Бронь 626 №{bid} отклонена."
                 + (f" Причина: {comment}" if comment else ""),
             )
+    elif action == "uncurator":
+        if not curator_or_senior or b["status"] not in ("approved", "ret"):
+            return jerr("Сменить куратора может текущий куратор или старший.", 403)
+        with db() as c:
+            c.execute("UPDATE b626 SET curator=NULL WHERE id=?", (bid,))
+        _log_action(uid, "b626", bid, "uncurator")
+        await notify(owner, f"По брони 626 №{bid} ожидается новый куратор.")
     elif action == "curator":
         if not is_admin(uid):
             return jerr("Недостаточно прав.", 403)
-        if b["status"] != "approved" or b["curator"]:
+        if b["status"] not in ("approved", "ret") or b["curator"]:
             return jerr("Куратором можно стать только у согласованной свободной брони.")
         with db() as c:
             c.execute("UPDATE b626 SET curator=? WHERE id=?", (uid, bid))
@@ -3541,6 +3608,103 @@ def weekly_backup() -> None:
     except Exception as e:
         log.warning("backup failed: %s", e)
 
+async def escalate_offers(rid):
+    async with OFFER_LOCK:
+        await _escalate_offers(rid)
+
+
+async def _escalate_offers(rid):
+    with db() as c:
+        r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+        offers = c.execute("SELECT * FROM admin_offers WHERE ref=?", (rid,)).fetchall()
+        done = c.execute("SELECT 1 FROM offer_escalations WHERE ref=?", (rid,)).fetchone()
+    eligible = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
+    offers = [o for o in offers if o["admin_id"] in eligible]
+    if not r or r["status"] != "new" or r["curator"] or done or not offers or {o["admin_id"] for o in offers} != eligible or any(o["answer"] != "no" for o in offers):
+        return
+    import html
+    mentions = " ".join(f'<a href="tg://user?id={sid}">{html.escape(_disp_user(sid))}</a>' for sid in sorted(SENIOR_ADMIN_IDS))
+    if bot is None or not ADMIN_CHAT_ID:
+        return
+    await bot.send_message(ADMIN_CHAT_ID,
+        f"Никто из администраторов не может взять заявку ID {rid}. Предлагается отклонить заявку с причиной.\n"
+        + mentions + "\nОткройте заявку для принятия решения.", parse_mode="HTML", reply_markup=request_button(rid, admin=True))
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
+
+
+async def offer_unclaimed_request(r):
+    if bot is None:
+        return
+    rid = r["id"]
+    admins = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
+    with db() as c:
+        c.executemany("INSERT OR IGNORE INTO admin_offers(ref,admin_id) VALUES(?,?)", [(rid, aid) for aid in admins])
+        pending = c.execute("SELECT admin_id FROM admin_offers WHERE ref=? AND sent=0", (rid,)).fetchall()
+    items = "\n".join(f"• {short} × {qty}" for short, qty in json.loads(r["items"]))
+    heading = f"Заявка ID {rid} без куратора более 36 часов. Сможете взять её в работу?\nВыдача: {r['dfrom_iso']} в {r['tfrom']}\n"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Возьму", callback_data=f"offer:yes:{rid}"), InlineKeyboardButton(text="Не смогу", callback_data=f"offer:no:{rid}")]])
+    for row in pending:
+        with db() as c:
+            current = c.execute("SELECT status,curator FROM requests WHERE id=?", (rid,)).fetchone()
+        if not current or current["status"] != "new" or current["curator"]:
+            return
+        aid = row["admin_id"]
+        if aid not in admins:
+            continue
+        try:
+            # Each message carries the request identity; the full kit is never truncated.
+            lines, chunk = items.splitlines(), heading
+            for line in lines:
+                if len(chunk) + len(line) > 3800:
+                    await bot.send_message(aid, chunk)
+                    chunk = f"Заявка ID {rid} (продолжение)\n"
+                chunk += line + "\n"
+            await bot.send_message(aid, chunk, reply_markup=keyboard)
+            with db() as c:
+                c.execute("UPDATE admin_offers SET sent=1 WHERE ref=? AND admin_id=?", (rid, aid))
+        except Exception as exc:
+            log.warning("Admin offer delivery failed for %s: %s", aid, exc)
+    await escalate_offers(rid)
+
+
+@dp.callback_query(F.data.startswith("offer:"))
+async def answer_admin_offer(callback):
+    uid = callback.from_user.id
+    if not is_admin(uid):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    try:
+        _, answer, raw_id = callback.data.split(":")
+        rid = int(raw_id)
+        if answer not in ("yes", "no"):
+            raise ValueError()
+    except ValueError:
+        await callback.answer("Некорректный ответ")
+        return
+    async with ACTION_LOCK:
+        with db() as c:
+            r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+            offer = c.execute("SELECT * FROM admin_offers WHERE ref=? AND admin_id=?", (rid, uid)).fetchone()
+            if not r or not offer or r["status"] != "new" or r["curator"]:
+                await callback.answer("Заявка уже обработана или назначена", show_alert=True)
+                return
+            c.execute("UPDATE admin_offers SET answer=? WHERE ref=? AND admin_id=?", (answer, rid, uid))
+            if answer == "yes":
+                c.execute("UPDATE requests SET status='curator',curator=? WHERE id=? AND status='new' AND curator IS NULL", (uid, rid))
+        if answer == "yes":
+            _push_hist("requests", rid, "curator", "куратор ответил на приглашение")
+            _log_action(uid, "requests", rid, "curator")
+            await notify(r["user_id"], f"По заявке ID {rid} назначен куратор {_disp_user(uid)}.")
+            with db() as c:
+                updated = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
+            await send_or_update_card("requests", updated)
+        else:
+            await escalate_offers(rid)
+    await callback.answer("Вы назначены куратором" if answer == "yes" else "Ответ записан")
+    await sse_broadcast()
+
+
 async def run_checks() -> None:
     now = datetime.now(MSK)
     ts = time.time()
@@ -3602,6 +3766,12 @@ async def run_checks() -> None:
                              reply_markup=request_button(rid, admin=True))
                 notif["cur_return_1"] = 1; changed = True
 
+        if r["status"] == "new" and not r["curator"] and r["created_ts"] and ts - r["created_ts"] >= 36 * 3600:
+            try:
+                await offer_unclaimed_request(r)
+            except Exception as exc:
+                log.warning("Offer escalation failed: %s", exc)
+
         # напоминания в общий канал о зависших (порог 6 ч, повтор раз в 6 ч)
         STALE = 6 * 3600
         if r["status"] == "new" and r["created_ts"] and ts - r["created_ts"] > STALE and ts - notif.get("nocur", 0) > STALE:
@@ -3618,7 +3788,9 @@ async def run_checks() -> None:
             auto_cancel = "истёк шестичасовой запас после времени получения"
         if auto_cancel:
             with db() as c:
-                c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
+                changed_row = c.execute("UPDATE requests SET status='canceled' WHERE id=? AND status=? AND curator IS ?", (rid, r["status"], r["curator"])).rowcount
+            if not changed_row:
+                continue
             _push_hist("requests", rid, "canceled", "автоотмена: " + auto_cancel)
             await notify(r["user_id"], f"⏳ Заявка ID {rid} отменена автоматически: {auto_cancel}. "
                                        f"Оборудование освобождено - можно подать заново.",

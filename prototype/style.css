@@ -346,3 +346,17 @@ body.in-tg .phone .cartbar{bottom:calc(86px + env(safe-area-inset-bottom))}
 .inv-result div:last-child:nth-child(odd){grid-column:1/-1}
 .inv-result span{color:var(--hint);font-size:var(--fs-xs)}
 .inv-result b{font:800 var(--fs-xl)/1 monospace;color:var(--text)}
+
+/* Booking cards: readable dates and actions on narrow phones. */
+.phone .next-step{margin-top:10px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.phone .next-step>b{font-size:var(--fs-md);color:var(--link)}
+.phone .booking-time{font-family:var(--mono);font-size:var(--fs-md);color:var(--text)}
+.phone .list-item:has(.next-step){flex-wrap:wrap;align-items:flex-start}
+.phone .list-item>.next-step{flex-basis:100%}
+.phone .list-item .grow{min-width:0;overflow-wrap:anywhere}
+.phone .list-item .pill{margin-top:6px;max-width:100%;white-space:normal}
+.phone .card>.row:has(h1.big){flex-wrap:wrap;align-items:flex-start}
+.phone .card>.row:has(h1.big)>.grow{flex-basis:100%;min-width:0;overflow-wrap:anywhere}
+.phone .card>.row:has(h1.big)>.pill{margin-top:4px}
+.phone .card>.hud:has(b){font-size:var(--fs-md);line-height:1.5}
+.phone .check-row .grow{min-width:0;overflow-wrap:anywhere}

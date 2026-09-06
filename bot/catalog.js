@@ -6,7 +6,7 @@ window.OBORUDKA_CATALOG = [
         "short": "A6700 (Sony E)",
         "full": "Беззеркальная камера Sony A6700 body",
         "total": 1,
-        "level": "none",
+        "level": null,
         "numbers": [
           1
         ]
@@ -140,7 +140,7 @@ window.OBORUDKA_CATALOG = [
         "short": "Sony 18-135мм (Sony E)",
         "full": "Sony E 18-135mm F3.5-5.6 OSS",
         "total": 1,
-        "level": "none",
+        "level": null,
         "numbers": [
           1
         ]
