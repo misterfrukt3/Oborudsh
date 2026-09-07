@@ -156,9 +156,14 @@ def workflow_schema():
         CREATE TABLE IF NOT EXISTS photo_receipts(kind TEXT, ref INTEGER, digest TEXT, recipient INTEGER,
             PRIMARY KEY(kind,ref,digest,recipient));
         CREATE TABLE IF NOT EXISTS admin_offers(ref INTEGER, admin_id INTEGER, sent INTEGER DEFAULT 0,
-            answer TEXT DEFAULT '', PRIMARY KEY(ref,admin_id));
+            answer TEXT DEFAULT '', sent_at REAL DEFAULT 0, PRIMARY KEY(ref,admin_id));
         CREATE TABLE IF NOT EXISTS offer_escalations(ref INTEGER PRIMARY KEY);
         """)
+        offer_columns = {
+            row["name"] for row in c.execute("PRAGMA table_info(admin_offers)").fetchall()
+        }
+        if "sent_at" not in offer_columns:
+            c.execute("ALTER TABLE admin_offers ADD COLUMN sent_at REAL DEFAULT 0")
 
 
 async def deliver_return_photos(kind, ref, curator, photos, caption):
@@ -3608,26 +3613,79 @@ def weekly_backup() -> None:
     except Exception as e:
         log.warning("backup failed: %s", e)
 
+OFFER_RESPONSE_SECONDS = 6 * 3600
+
+
+def expire_admin_offers(rid, now_ts=None):
+    """Зафиксировать молчание после общего шестичасового окна ответа."""
+    current = now_ts if now_ts is not None else time.time()
+    with db() as c:
+        c.execute(
+            """UPDATE admin_offers SET answer='ignored'
+               WHERE ref=? AND answer='' AND sent_at>0 AND sent_at<=?""",
+            (rid, current - OFFER_RESPONSE_SECONDS),
+        )
+
+
+def offer_status_summary():
+    """Активные опросы и суммарные ответы для команды старших."""
+    now_ts = time.time()
+    with db() as c:
+        refs = c.execute(
+            """SELECT DISTINCT r.id, r.dfrom_iso, r.tfrom
+               FROM requests r JOIN admin_offers o ON o.ref=r.id
+               WHERE r.status='new' AND r.curator IS NULL ORDER BY r.id"""
+        ).fetchall()
+    result = []
+    for ref in refs:
+        expire_admin_offers(ref["id"], now_ts)
+        with db() as c:
+            offers = c.execute(
+                "SELECT admin_id, sent, answer, sent_at FROM admin_offers WHERE ref=?",
+                (ref["id"],),
+            ).fetchall()
+            escalated = bool(c.execute(
+                "SELECT 1 FROM offer_escalations WHERE ref=?", (ref["id"],)
+            ).fetchone())
+        eligible = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
+        offers = [row for row in offers if row["admin_id"] in eligible]
+        started = min((row["sent_at"] for row in offers if row["sent_at"]), default=0)
+        result.append({
+            "id": ref["id"],
+            "dfrom_iso": ref["dfrom_iso"],
+            "tfrom": ref["tfrom"],
+            "declined": sum(row["answer"] == "no" for row in offers),
+            "ignored": sum(row["answer"] == "ignored" for row in offers),
+            "waiting": sum(row["answer"] == "" for row in offers),
+            "undelivered": sum(not row["sent"] for row in offers),
+            "deadline": started + OFFER_RESPONSE_SECONDS if started else 0,
+            "escalated": escalated,
+        })
+    return result
+
+
 async def escalate_offers(rid):
     async with OFFER_LOCK:
         await _escalate_offers(rid)
 
 
 async def _escalate_offers(rid):
+    expire_admin_offers(rid)
     with db() as c:
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         offers = c.execute("SELECT * FROM admin_offers WHERE ref=?", (rid,)).fetchall()
         done = c.execute("SELECT 1 FROM offer_escalations WHERE ref=?", (rid,)).fetchone()
     eligible = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
     offers = [o for o in offers if o["admin_id"] in eligible]
-    if not r or r["status"] != "new" or r["curator"] or done or not offers or {o["admin_id"] for o in offers} != eligible or any(o["answer"] != "no" for o in offers):
+    if not r or r["status"] != "new" or r["curator"] or done or not offers or any(o["answer"] not in ("no", "ignored") for o in offers):
         return
     import html
     mentions = " ".join(f'<a href="tg://user?id={sid}">{html.escape(_disp_user(sid))}</a>' for sid in sorted(SENIOR_ADMIN_IDS))
     if bot is None or not ADMIN_CHAT_ID:
         return
     await bot.send_message(ADMIN_CHAT_ID,
-        f"Никто из администраторов не может взять заявку ID {rid}. Предлагается отклонить заявку с причиной.\n"
+        f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
+        "Отказавшиеся и не ответившие больше не учитываются. Предлагается отклонить заявку с причиной.\n"
         + mentions + "\nОткройте заявку для принятия решения.", parse_mode="HTML", reply_markup=request_button(rid, admin=True))
     with db() as c:
         c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
@@ -3639,10 +3697,26 @@ async def offer_unclaimed_request(r):
     rid = r["id"]
     admins = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
     with db() as c:
-        c.executemany("INSERT OR IGNORE INTO admin_offers(ref,admin_id) VALUES(?,?)", [(rid, aid) for aid in admins])
+        existing_started = c.execute(
+            "SELECT MIN(sent_at) started FROM admin_offers WHERE ref=? AND sent_at>0", (rid,)
+        ).fetchone()["started"]
+        started = existing_started or time.time()
+        if not existing_started or time.time() < started + OFFER_RESPONSE_SECONDS:
+            c.executemany(
+                "INSERT OR IGNORE INTO admin_offers(ref,admin_id,sent_at) VALUES(?,?,?)",
+                [(rid, aid, started) for aid in admins],
+            )
+        c.execute("UPDATE admin_offers SET sent_at=? WHERE ref=? AND sent_at=0", (started, rid))
         pending = c.execute("SELECT admin_id FROM admin_offers WHERE ref=? AND sent=0", (rid,)).fetchall()
     items = "\n".join(f"• {short} × {qty}" for short, qty in json.loads(r["items"]))
-    heading = f"Заявка ID {rid} без куратора более 36 часов. Сможете взять её в работу?\nВыдача: {r['dfrom_iso']} в {r['tfrom']}\n"
+    response_until = datetime.fromtimestamp(
+        started + OFFER_RESPONSE_SECONDS, MSK
+    ).strftime("%d.%m в %H:%M")
+    heading = (
+        f"Заявка ID {rid} без куратора более 36 часов. Сможете взять её в работу?\n"
+        f"Выдача: {r['dfrom_iso']} в {r['tfrom']}\n"
+        f"Ответьте до {response_until}.\n"
+    )
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Возьму", callback_data=f"offer:yes:{rid}"), InlineKeyboardButton(text="Не смогу", callback_data=f"offer:no:{rid}")]])
     for row in pending:
         with db() as c:
@@ -3682,6 +3756,7 @@ async def answer_admin_offer(callback):
     except ValueError:
         await callback.answer("Некорректный ответ")
         return
+    expired = False
     async with ACTION_LOCK:
         with db() as c:
             r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
@@ -3689,9 +3764,23 @@ async def answer_admin_offer(callback):
             if not r or not offer or r["status"] != "new" or r["curator"]:
                 await callback.answer("Заявка уже обработана или назначена", show_alert=True)
                 return
-            c.execute("UPDATE admin_offers SET answer=? WHERE ref=? AND admin_id=?", (answer, rid, uid))
-            if answer == "yes":
-                c.execute("UPDATE requests SET status='curator',curator=? WHERE id=? AND status='new' AND curator IS NULL", (uid, rid))
+            expired = offer["answer"] == "ignored" or bool(
+                offer["sent_at"]
+                and time.time() >= offer["sent_at"] + OFFER_RESPONSE_SECONDS
+            )
+            if expired:
+                c.execute(
+                    "UPDATE admin_offers SET answer='ignored' WHERE ref=? AND admin_id=?",
+                    (rid, uid),
+                )
+            else:
+                c.execute("UPDATE admin_offers SET answer=? WHERE ref=? AND admin_id=?", (answer, rid, uid))
+                if answer == "yes":
+                    c.execute("UPDATE requests SET status='curator',curator=? WHERE id=? AND status='new' AND curator IS NULL", (uid, rid))
+        if expired:
+            await escalate_offers(rid)
+            await callback.answer("Время ответа истекло", show_alert=True)
+            return
         if answer == "yes":
             _push_hist("requests", rid, "curator", "куратор ответил на приглашение")
             _log_action(uid, "requests", rid, "curator")
@@ -4046,6 +4135,40 @@ async def cmd_checks(message: Message) -> None:
         return
     await run_checks()
     await message.answer("Плановые проверки прогнаны.")
+
+
+@dp.message(Command("offerstatus"))
+async def cmd_offerstatus(message: Message) -> None:
+    """Скрытая статистика ответов на заявки без куратора."""
+    if not is_senior(message.from_user.id):
+        return
+    rows = offer_status_summary()
+    if not rows:
+        await message.answer("Активных опросов администраторов нет.")
+        return
+    declined = sum(row["declined"] for row in rows)
+    ignored = sum(row["ignored"] for row in rows)
+    waiting = sum(row["waiting"] for row in rows)
+    lines = ["Опросы по заявкам без куратора:"]
+    for row in rows:
+        deadline = (
+            datetime.fromtimestamp(row["deadline"], MSK).strftime("%d.%m %H:%M")
+            if row["deadline"] else "не начат"
+        )
+        state = (
+            "вопрос об отклонении поднят"
+            if row["escalated"] else f"ответы до {deadline}"
+        )
+        lines.append(
+            f"ID {row['id']} · выдача {row['dfrom_iso']} {row['tfrom']}\n"
+            f"Отказались: {row['declined']} · проигнорировали: {row['ignored']} · "
+            f"ожидаем: {row['waiting']} · недоставлено: {row['undelivered']}\n{state}"
+        )
+    lines.append(
+        f"Итого: отказались {declined}, проигнорировали {ignored}, ожидаем {waiting}."
+    )
+    for chunk in _rich_chunks(lines, limit=3900):
+        await message.answer(chunk)
 
 
 

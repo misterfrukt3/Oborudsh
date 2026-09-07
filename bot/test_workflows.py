@@ -125,6 +125,68 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT curator FROM requests WHERE id=?',(ref,)).fetchone()['curator'],2)
         self.assertIn('уже обработана',callbacks[1].answer.call_args.args[0])
 
+    def test_unanswered_offers_expire_after_six_hours_and_escalate(self):
+        import time
+        ref,_=self.request()
+        old = time.time() - main.OFFER_RESPONSE_SECONDS - 1
+        with main.db() as c:
+            c.executemany(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at,answer) VALUES(?,?,1,?,?)",
+                [(ref,2,old,"no"),(ref,3,old,"")],
+            )
+        fake=type('FakeBot',(),{'send_message':AsyncMock()})()
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
+            asyncio.run(main.escalate_offers(ref))
+        with main.db() as c:
+            answers={row['admin_id']:row['answer'] for row in c.execute('SELECT admin_id,answer FROM admin_offers WHERE ref=?',(ref,))}
+        self.assertEqual(answers,{2:'no',3:'ignored'})
+        self.assertEqual(fake.send_message.await_count,1)
+        self.assertIn('за 6 часов',fake.send_message.call_args.args[1])
+
+    def test_late_offer_button_cannot_assign_curator(self):
+        import time
+        from types import SimpleNamespace
+        ref,_=self.request()
+        with main.db() as c:
+            c.execute(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at) VALUES(?,?,1,?)",
+                (ref,2,time.time()-main.OFFER_RESPONSE_SECONDS-1),
+            )
+        callback=SimpleNamespace(from_user=SimpleNamespace(id=2),data=f"offer:yes:{ref}",answer=AsyncMock())
+        with patch.object(main,'is_admin',return_value=True),patch.object(main,'escalate_offers',new=AsyncMock()),patch.object(main,'sse_broadcast',new=AsyncMock()):
+            asyncio.run(main.answer_admin_offer(callback))
+        with main.db() as c:
+            row=c.execute('SELECT status,curator FROM requests WHERE id=?',(ref,)).fetchone()
+            answer=c.execute('SELECT answer FROM admin_offers WHERE ref=? AND admin_id=2',(ref,)).fetchone()['answer']
+        self.assertEqual((row['status'],row['curator']),('new',None))
+        self.assertEqual(answer,'ignored')
+        self.assertIn('истекло',callback.answer.call_args.args[0])
+
+    def test_offer_status_counts_declined_ignored_and_waiting(self):
+        import time
+        ref,_=self.request()
+        now=time.time()
+        with main.db() as c:
+            c.executemany(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at,answer) VALUES(?,?,1,?,?)",
+                [(ref,2,now,'no'),(ref,3,now,'ignored'),(ref,4,now,'')],
+            )
+        with patch.object(main,'ADMIN_IDS',{2,4}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}):
+            row=main.offer_status_summary()[0]
+        self.assertEqual((row['declined'],row['ignored'],row['waiting']),(1,1,1))
+
+    def test_offerstatus_command_is_senior_only_and_reports_counts(self):
+        from types import SimpleNamespace
+        message=SimpleNamespace(from_user=SimpleNamespace(id=3),answer=AsyncMock())
+        rows=[{'id':15,'dfrom_iso':'2030-06-02','tfrom':'10:00','declined':2,
+               'ignored':3,'waiting':1,'undelivered':0,'deadline':0,'escalated':True}]
+        with patch.object(main,'is_senior',return_value=True),patch.object(main,'offer_status_summary',return_value=rows):
+            asyncio.run(main.cmd_offerstatus(message))
+        output=message.answer.call_args.args[0]
+        self.assertIn('Отказались: 2',output)
+        self.assertIn('проигнорировали: 3',output)
+        self.assertIn('вопрос об отклонении поднят',output)
+
     def test_invitation_threshold_is_36_hours(self):
         import time
         ref,_=self.request()
