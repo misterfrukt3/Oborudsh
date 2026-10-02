@@ -1,0 +1,59 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+(async()=>{
+  const browser=await chromium.launch({headless:true,...(process.env.PW_CHANNEL?{channel:process.env.PW_CHANNEL}:{})});
+  const page=await browser.newPage({viewport:{width:390,height:844}});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.route('https://telegram.org/**',r=>r.abort());
+  await page.goto('http://127.0.0.1:8745/');
+  await page.evaluate(()=>resetTo('home'));
+  await page.getByText('Медиа выезд',{exact:true}).click();
+  await page.getByText('Настройки выезда',{exact:true}).click();
+  await page.locator('#mt-place').fill('Рентал у входа');
+  await page.locator('#mt-channel').fill('-10099');
+  await page.getByRole('button',{name:'Сохранить настройки'}).click();
+  await page.evaluate(()=>navTo('mediaTripTeams'));
+  await page.locator('#mt-team-number').fill('1');
+  await page.locator('#mt-curator').fill('1896340090');
+  await page.getByRole('button',{name:'Сохранить команду'}).click();
+  await page.evaluate(()=>navTo('mediaTripCatalog'));
+  await page.locator('#mt-item-name').fill('Камера " -> <тест>');
+  await page.locator('#mt-total').fill('2');
+  await page.getByRole('button',{name:'Сохранить позицию'}).click();
+  await page.evaluate(()=>navTo('mediaTripBlocks'));
+  const times=await page.evaluate(()=>[mtInputTime(Date.now()/1000+3600),mtInputTime(Date.now()/1000+7200)]);
+  await page.locator('#mt-start').fill(times[0]);
+  await page.locator('#mt-end').fill(times[1]);
+  await page.getByRole('button',{name:'Сохранить блок'}).click();
+  await page.evaluate(()=>resetTo('mediaTrip'));
+  await page.locator('#mt-code').fill('demo-1');
+  await page.getByRole('button',{name:'Вступить',exact:true}).click();
+  await page.getByRole('button',{name:'Подать заявку'}).click();
+  await page.getByRole('spinbutton',{name:'Камера (видео): количество',exact:true}).fill('1');
+  await page.locator('#mt-purpose').fill('Интервью команды');
+  await page.getByRole('button',{name:'Отправить заявку'}).click();
+  await page.locator('.mt-request').click();
+  await page.getByRole('button',{name:'Принять и начать сборку'}).click();
+  await page.getByRole('spinbutton').fill('1');
+  await page.getByRole('button',{name:'Готова к выдаче',exact:true}).click();
+  assert.match(await page.locator('#screen').innerText(),/Рентал у входа/);
+  await page.getByRole('button',{name:'Отметить: выдана'}).click();
+  await page.getByRole('button',{name:'Да',exact:true}).click();
+  await page.getByRole('button',{name:'Отметить: всё вернули'}).click();
+  await page.getByRole('button',{name:'Да',exact:true}).click();
+  assert.match(await page.locator('#screen').innerText(),/Возвращена/);
+  for(const width of [320,390,430]){
+    await page.setViewportSize({width,height:844});
+    for(const name of ['mediaTrip','mediaTripRental','mediaTripSettings','mediaTripTeams','mediaTripCatalog','mediaTripBlocks']){
+      await page.evaluate(name=>resetTo(name),name);
+      assert.equal(await page.evaluate(()=>document.querySelector('#screen').scrollWidth<=document.querySelector('#screen').clientWidth),true,`${name}: overflow at ${width}`);
+    }
+  }
+  await page.evaluate(()=>{SRV={mediaTrip:{allowed:false}};resetTo('home');});
+  assert.equal(await page.getByText('Медиа выезд',{exact:true}).count(),0);
+  await page.evaluate(()=>resetTo('mediaTrip'));
+  assert.match(await page.locator('#screen').innerText(),/тестирования/);
+  assert.deepEqual(errors,[]);
+  await browser.close();
+  console.log('Media trip browser workflow and mobile layouts passed.');
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -45,6 +45,9 @@ import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
 import texts as tx
+from media_trip import MediaTrip
+
+MEDIA_TRIP = MediaTrip(globals())
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(BASE / ".env")
@@ -151,6 +154,7 @@ def studio_started(b):
 
 
 def workflow_schema():
+    MEDIA_TRIP.schema()
     with db() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS photo_receipts(kind TEXT, ref INTEGER, digest TEXT, recipient INTEGER,
@@ -158,6 +162,8 @@ def workflow_schema():
         CREATE TABLE IF NOT EXISTS admin_offers(ref INTEGER, admin_id INTEGER, sent INTEGER DEFAULT 0,
             answer TEXT DEFAULT '', sent_at REAL DEFAULT 0, PRIMARY KEY(ref,admin_id));
         CREATE TABLE IF NOT EXISTS offer_escalations(ref INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS time_changes(kind TEXT,ref INTEGER,reason TEXT,
+            requested_by INTEGER,requested_at TEXT,PRIMARY KEY(kind,ref));
         """)
         offer_columns = {
             row["name"] for row in c.execute("PRAGMA table_info(admin_offers)").fetchall()
@@ -283,6 +289,8 @@ REVISION_TABLES = (
     "users", "requests", "b626", "messages", "extra_items", "cat_blocks",
     "removed_items", "fav_sets", "reads", "actions", "extra_admins", "equipment_units",
     "inventory_events", "inventory_categories", "inventory_items", "storage_locations",
+    "trip_settings", "trip_teams", "trip_members", "trip_blocks", "trip_items",
+    "trip_requests", "trip_history", "trip_outbox", "time_changes",
 )
 
 
@@ -1130,6 +1138,7 @@ def shape_req(r, viewer: int, users=None, messages=None, seen=None) -> dict:
         "curator": _disp_user_from(users, r["curator"]) if r["curator"] else None,
         "pwUsed": bool(r["pw"]), "media": bool(r["media"]), "escalated": bool(r["escalated"]),
         "lateNote": late_note(r),
+        "timeChange": time_change('req', r['id']),
         "takenAt": r["taken_at"], "returnedAt": r["returned_at"],
         "history": json.loads(r["history"]),
         "chat": _shape_chat(chat_rows, r["user_id"], r["curator"]) if can_chat else [],
@@ -1154,6 +1163,7 @@ def shape_626(b, viewer: int, users=None, messages=None, seen=None) -> dict:
         "needs": json.loads(b["needs"]), "status": b["status"],
         "curator": _disp_user_from(users, b["curator"]) if b["curator"] else None,
         "lateNote": studio_late_note(b),
+        "timeChange": time_change('626', b['id']),
         "history": json.loads(b["history"]),
         "chat": _shape_chat(chat_rows, b["user_id"], b["curator"]) if can_chat else [],
         "unread": _unread_from(chat_rows, seen.get(("626", b["id"]), 0), viewer) if can_chat else 0,
@@ -1264,6 +1274,7 @@ def boot_payload(uid: int) -> dict:
     seen = {(row["kind"], row["ref"]): row["seen"] for row in read_rows}
     out = {
         "ok": True, "isAdmin": adm, "isSenior": sen,
+        "mediaTrip": MEDIA_TRIP.payload(uid),
         "revision": db_revision(),
         "features": {"productionRole": ENABLE_PRODUCTION_ROLE},
         "registered": bool(u and u["agreed"]),
@@ -1315,13 +1326,17 @@ def short_name(full: str) -> str:
 
 # ================= Уведомления =================
 
-async def notify(uid: int, text: str, reply_markup: InlineKeyboardMarkup = None) -> None:
+async def notify(uid: int, text: str, reply_markup: InlineKeyboardMarkup = None, strict=False) -> None:
     if bot is None or not uid:
+        if strict and not DEV_USER_ID:
+            raise RuntimeError('Telegram-бот не запущен')
         return
     try:
         await bot.send_message(uid, text, reply_markup=reply_markup)
     except Exception as e:
         log.warning("notify %s failed: %s", uid, e)
+        if strict:
+            raise
 
 
 async def notify_seniors(text: str) -> None:
@@ -1335,7 +1350,7 @@ def app_button() -> InlineKeyboardMarkup:
     ]])
 
 
-def request_button(request_id: int, admin: bool = False) -> InlineKeyboardMarkup:
+def request_button(request_id: int, admin: bool = False, kind: str = 'req') -> InlineKeyboardMarkup:
     """Открыть Mini App сразу на пользовательской или админской карточке заявки."""
     parts = urlsplit(WEBAPP_URL)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
@@ -1344,6 +1359,8 @@ def request_button(request_id: int, admin: bool = False) -> InlineKeyboardMarkup
         "requestId": str(request_id),
         "mode": "admin" if admin else "user",
     })
+    if kind!='req':
+        query['kind']=kind
     url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="Открыть заявку", web_app=WebAppInfo(url=url)),
@@ -1661,6 +1678,24 @@ def _export_inventory(event_id: int) -> str:
 
 # ================= API =================
 
+def time_change(kind, ref):
+    with db() as c:
+        row = c.execute('SELECT reason,requested_by,requested_at FROM time_changes WHERE kind=? AND ref=?', (kind, ref)).fetchone()
+    return dict(row) if row else None
+
+
+def reset_booking_review(kind, ref):
+    table = 'requests' if kind == 'req' else 'b626'
+    with db() as c:
+        c.execute(f"UPDATE {table} SET status='new',curator=NULL,notif='{{}}' WHERE id=?", (ref,))
+        c.execute('DELETE FROM time_changes WHERE kind=? AND ref=?', (kind, ref))
+        if kind == 'req':
+            c.execute('DELETE FROM admin_offers WHERE ref=?', (ref,))
+            c.execute('DELETE FROM offer_escalations WHERE ref=?', (ref,))
+    _push_hist(table,ref,'new','изменение данных → повторное согласование')
+
+
+
 def jerr(msg: str, status: int = 400) -> web.Response:
     return web.json_response({"error": msg}, status=status)
 
@@ -1687,7 +1722,7 @@ def auth(handler):
         if not tg_user:
             return jerr("Не удалось проверить подпись Telegram. Откройте приложение из Telegram.", 401)
         touch_user(tg_user)
-        if handler.__name__ in ("api_req_action", "api_626_action"):
+        if handler.__name__ in ("api_req_action", "api_626_action", "api_req_update", "api_time_change", "api_booking_time"):
             async with ACTION_LOCK:
                 response = await handler(request, body, tg_user["id"])
         else:
@@ -1697,6 +1732,96 @@ def auth(handler):
         return response
     wrapped.__wrapped__ = handler
     return wrapped
+
+
+@auth
+async def api_time_change(request, body, uid):
+    kind, ref = body.get('kind'), body.get('id')
+    if kind not in ('req','626'):
+        return jerr('Неизвестный тип заявки.')
+    table = 'requests' if kind == 'req' else 'b626'
+    with db() as c:
+        row = c.execute(f'SELECT * FROM {table} WHERE id=?',(ref,)).fetchone()
+    if not row:
+        return jerr('Заявка не найдена.',404)
+    if not is_admin(uid) or (kind == '626' and not (is_senior(uid) or row['curator']==uid)):
+        return jerr('Недостаточно прав.',403)
+    if row['status'] not in ('new','curator','approved') or (kind == '626' and studio_started(row)):
+        return jerr('Менять время можно только до выдачи оборудования / начала брони 626.')
+    reason = clean_text(body.get('reason'),500)
+    if not reason:
+        return jerr('Напишите, что нужно поменять во времени.')
+    try:
+        await notify(row['user_id'], f"По {'заявке ID' if kind=='req' else 'брони 626 №'} {ref} нужно изменить время.\n{reason}\nОткройте заявку и нажмите «Изменить время». После изменения мы согласуем её заново.",
+                     reply_markup=request_button(ref,kind=kind),strict=True)
+    except Exception:
+        return jerr('Не удалось доставить просьбу пользователю. Повторите отправку.',502)
+    with db() as c:
+        c.execute('INSERT INTO time_changes VALUES(?,?,?,?,?) ON CONFLICT(kind,ref) DO UPDATE SET reason=excluded.reason,requested_by=excluded.requested_by,requested_at=excluded.requested_at',
+                  (kind,ref,reason,uid,now_str()))
+    _push_hist(table,ref,row['status'],'просим изменить время: '+reason)
+    _log_action(uid,table,ref,'request_time')
+    return web.json_response(boot_payload(uid))
+
+
+@auth
+async def api_booking_time(request, body, uid):
+    kind, ref = body.get('kind'), body.get('id')
+    if kind not in ('req','626'):
+        return jerr('Неизвестный тип заявки.')
+    table = 'requests' if kind=='req' else 'b626'
+    with db() as c:
+        row = c.execute(f'SELECT * FROM {table} WHERE id=?',(ref,)).fetchone()
+    if not row:
+        return jerr('Заявка не найдена.',404)
+    pending = time_change(kind,ref)
+    if not is_senior(uid) and not (row['user_id']==uid and (pending or row['status']=='new')):
+        return jerr('Изменить время может владелец по просьбе администратора или старший.',403)
+    if row['status'] not in ('new','curator','approved') or (kind=='626' and studio_started(row)):
+        return jerr('Время уже начатой или завершённой заявки изменить нельзя.')
+    d1,d2,t1,t2 = (body.get(k) or '' for k in ('d1','d2','t1','t2'))
+    if kind=='req':
+        error=validate_request_window(d1,d2,t1,t2)
+        old=(row['dfrom_iso'],row['dto_iso'],row['tfrom'],row['tto'])
+    else:
+        slot,error=validate_626_window(d1,t1+'–'+t2)
+        old=(row['day'],row['day'],*(_slot_bounds(row['slot']) or ('','')))
+        d2=d1
+    if error:
+        return jerr(error)
+    goal=clean_text(body.get('goal',row['goal']),100) if kind=='626' else ''
+    needs=body.get('needs',json.loads(row['needs'])) if kind=='626' else []
+    if kind=='626' and ('goal' in body or 'needs' in body) and not is_senior(uid):
+        return jerr('Детали брони меняют только старшие.',403)
+    if kind=='626' and (not goal or not isinstance(needs,list) or len(needs)>10 or any(not isinstance(n,str) or len(n)>200 for n in needs)):
+        return jerr('Проверьте цель и дополнительное оборудование.')
+    if (d1,d2,t1,t2)==old and (kind!='626' or (goal==row['goal'] and needs==json.loads(row['needs']))):
+        return jerr('Выберите новое время или дату.')
+    async with BOOKING_LOCK:
+        if kind=='req':
+            if inventory_is_active():
+                return jerr('Во время инвентаризации нельзя менять заявки.',423)
+            error=check_availability(json.loads(row['items']),d1,d2,t1,t2,exclude_rid=ref)
+            if error:
+                return jerr(error)
+            with db() as c:
+                c.execute('UPDATE requests SET dfrom_iso=?,dto_iso=?,tfrom=?,tto=?,dfrom=?,dto=? WHERE id=?',
+                          (d1,d2,t1,t2,datetime.strptime(d1,'%Y-%m-%d').strftime('%d.%m')+', '+t1,
+                           datetime.strptime(d2,'%Y-%m-%d').strftime('%d.%m')+', '+t2,ref))
+        else:
+            if studio_conflict(d1,slot,exclude_bid=ref):
+                return jerr('На это время аудитория уже занята.')
+            with db() as c:
+                c.execute('UPDATE b626 SET day=?,slot=?,goal=?,needs=? WHERE id=?',(d1,slot,goal,json.dumps(needs,ensure_ascii=False),ref))
+        reset_booking_review(kind,ref)
+    _log_action(uid,table,ref,'edit_time')
+    recipients={row['user_id'],row['curator'],pending['requested_by'] if pending else None,ADMIN_CHAT_ID}-{None,0}
+    for recipient in recipients:
+        await notify(recipient,f"Время {'заявки ID' if kind=='req' else 'брони 626 №'} {ref} изменено: {d1} {t1} → {d2} {t2}. Нужно повторное согласование.")
+    with db() as c:
+        updated=c.execute(f'SELECT * FROM {table} WHERE id=?',(ref,)).fetchone()
+    await send_or_update_card(table,updated)
+    return web.json_response(boot_payload(uid))
 
 
 PHOTO_MAX = 5
@@ -2185,13 +2310,15 @@ async def api_req_update(request, body, uid):
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     if not r:
         return jerr("Заявка не найдена.", 404)
-    if r["user_id"] != uid or r["status"] not in ("new", "curator"):
+    if (r["user_id"] != uid and not is_senior(uid)) or r["status"] not in (("new", "curator", "approved") if is_senior(uid) else ("new", "curator")):
         return jerr("Эту заявку уже нельзя изменить или отменить.")
     d1, d2, t1, t2 = body.get("d1") or "", body.get("d2") or "", body.get("t1") or "", body.get("t2") or ""
     err = validate_request_window(d1, d2, t1, t2)
     if err:
         return jerr(err)
-    items, err = validate_items(uid, body.get("items"), bool(body.get("media")))
+    if time_change('req',rid) and (d1,d2,t1,t2)==(r['dfrom_iso'],r['dto_iso'],r['tfrom'],r['tto']):
+        return jerr('Администратор попросил изменить время. Выберите новую дату или время.')
+    items, err = validate_items(r['user_id'], body.get("items"), bool(body.get("media")), allow_restricted=is_senior(uid))
     if err:
         return jerr(err)
     event = clean_text(body.get("event"), 100)
@@ -2206,8 +2333,12 @@ async def api_req_update(request, body, uid):
                       (json.dumps(items, ensure_ascii=False), body.get("from", ""), body.get("to", ""), event,
                        clean_text(body.get("comment"), 500), int(bool(body.get("media"))), int(bool(body.get("pw")) or r["pw"]), d1, d2, t1, t2, rid))
     _push_hist("requests", rid, r["status"], "данные обновлены")
+    reset_booking_review('req', rid)
+    _log_action(uid, 'requests', rid, 'edit')
     if r["curator"]:
         await notify(r["curator"], f"✏️ В заявке ID {rid} изменены данные — проверьте даты и оборудование.")
+    if uid!=r['user_id']:
+        await notify(r['user_id'],f'В заявке ID {rid} старший изменил данные. Заявка направлена на повторное согласование.')
     with db() as c:
         row = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
     await send_or_update_card("requests", row)
@@ -2705,12 +2836,12 @@ async def api_req_action(request, body, uid):
     elif not is_admin(uid):
         return jerr("Недостаточно прав.", 403)
     elif action == "curator":
-        if r["curator"] or r["status"] not in ("new", "issued", "ret"):
+        if r["curator"] or r["status"] not in ("approved", "issued", "ret") or time_change('req', rid):
             return jerr("Эту заявку сейчас нельзя принять в кураторство.")
-        new_status = "curator" if r["status"] == "new" else r["status"]
+        new_status = r["status"]
         with db() as c:
             c.execute("UPDATE requests SET status=?, curator=? WHERE id=?", (new_status, uid, rid))
-        _push_hist("requests", rid, new_status, "новый куратор")
+        _push_hist("requests", rid, "curator" if new_status == "approved" else new_status, "новый куратор")
         _log_action(uid, "requests", rid, "curator")
         await notify(
             owner,
@@ -2718,18 +2849,26 @@ async def api_req_action(request, body, uid):
             "Откройте Оборудыш, чтобы посмотреть детали.",
         )
     elif action == "uncurator":
-        if r["curator"] != uid or r["status"] not in ("curator", "approved", "issued", "ret"):
+        if not curator_or_senior or not r['curator'] or r["status"] not in ("curator", "approved", "issued", "ret"):
             return jerr("Снять кураторство может только текущий куратор активной заявки.")
-        new_status = "new" if r["status"] in ("curator", "approved") else r["status"]
+        new_status = "new" if r["status"] == "curator" else r["status"]
         with db() as c:
             c.execute("UPDATE requests SET status=?, curator=NULL WHERE id=?", (new_status, rid))
+            if new_status in ("new", "approved"):
+                c.execute("DELETE FROM admin_offers WHERE ref=?", (rid,))
+                c.execute("DELETE FROM offer_escalations WHERE ref=?", (rid,))
         _push_hist("requests", rid, new_status, "куратор снял себя")
         await notify(owner, f"По заявке ID {rid} куратор снял себя.")
         if ADMIN_CHAT_ID and bot is not None:
             await notify(ADMIN_CHAT_ID, f"Заявка ID {rid} снова без куратора — возьмите её в работу.")
     elif action in ("approved", "rejected"):
-        if not curator_or_senior or (r["status"] != "curator" and not (action == "rejected" and is_senior(uid) and r["status"] in ("new", "approved"))):
-            return jerr("Согласовать или отклонить заявку может только её куратор или старший.", 403)
+        if action == 'approved':
+            if r['status'] not in ('new', 'curator'):
+                return jerr('Эта заявка уже согласована или завершена.')
+            if time_change('req', rid):
+                return jerr('Дождитесь изменения времени пользователем.')
+        elif r['status'] not in ('new', 'curator', 'approved') or not (curator_or_senior or r['status']=='new'):
+            return jerr('Эту заявку сейчас нельзя отклонить.',403)
         if action == "rejected" and not comment:
             return jerr("Укажите причину отказа.")
         new_status = "approved" if action == "approved" else "rejected"
@@ -2738,7 +2877,10 @@ async def api_req_action(request, body, uid):
         _push_hist("requests", rid, new_status, comment if action == "rejected" else "")
         _log_action(uid, "requests", rid, action)
         if action == "approved":
-            await notify(owner, f"✅ Заявка ID {rid} согласована. Получение: {r['dfrom']}.")
+            with db() as c:
+                c.execute('DELETE FROM admin_offers WHERE ref=?',(rid,))
+                c.execute('DELETE FROM offer_escalations WHERE ref=?',(rid,))
+            await notify(owner, f"✅ Заявка ID {rid} согласована. Получение: {r['dfrom']}. Дождитесь назначения куратора.")
         else:
             await notify(
                 owner,
@@ -2748,7 +2890,7 @@ async def api_req_action(request, body, uid):
     elif action == "issue":
         if inventory_is_active():
             return jerr("Во время инвентаризации оборудование нельзя выдавать.", 423)
-        if r["status"] != "approved" or not curator_or_senior:
+        if r["status"] != "approved" or not curator_or_senior or time_change('req',rid):
             return jerr("Выдать оборудование может только куратор заявки или старший.", 403)
         raw_items = body.get("items") if body.get("items") is not None else json.loads(r["items"])
         items, err = validate_items(uid, raw_items, allow_restricted=True)
@@ -2877,6 +3019,10 @@ async def api_626_action(request, body, uid):
             return jerr("Брони 626 согласуют только старшие администраторы.", 403)
         if b["status"] != "new":
             return jerr("Решение по этой брони уже принято.")
+        if action == 'approved' and time_change('626',bid):
+            return jerr('Дождитесь изменения времени пользователем.')
+        if action == 'rejected' and not comment:
+            return jerr('Укажите причину отказа.')
         with db() as c:
             c.execute("UPDATE b626 SET status=? WHERE id=?", (action, bid))
         _push_hist("b626", bid, action, comment if action == "rejected" else "")
@@ -2903,7 +3049,7 @@ async def api_626_action(request, body, uid):
     elif action == "curator":
         if not is_admin(uid):
             return jerr("Недостаточно прав.", 403)
-        if b["status"] not in ("approved", "ret") or b["curator"]:
+        if b["status"] not in ("approved", "ret") or b["curator"] or time_change('626',bid):
             return jerr("Куратором можно стать только у согласованной свободной брони.")
         with db() as c:
             c.execute("UPDATE b626 SET curator=? WHERE id=?", (uid, bid))
@@ -3232,14 +3378,18 @@ def admin_activity(limit=None):
     data = {}
     for row in rows:
         name = _disp_user(row["admin_id"])
-        item = data.setdefault(name, {"name": name, "curated": 0, "issued": 0, "returned": 0, "rejected": 0, "studio": 0})
+        item = data.setdefault(row['admin_id'], {"name": name if name!='админ' else f"ID {row['admin_id']}", "curated": 0, "issued": 0, "returned": 0, "rejected": 0, "studio": 0})
+        item.setdefault('approved',0)
+        if row['action']=='approved' and row['kind'] in ('requests','b626'):
+            item['approved'] += 1
         if row["kind"] == "requests":
             if row["action"] == "curator": item["curated"] += 1
             elif row["action"] == "issue": item["issued"] += 1
             elif row["action"] == "return_closed": item["returned"] += 1
             elif row["action"] == "rejected": item["rejected"] += 1
         elif row["kind"] == "b626":
-            item["studio"] += 1
+            if row['action']!='approved':
+                item["studio"] += 1
     result = sorted(data.values(), key=lambda item: (-item["curated"], -item["issued"], item["name"]))
     return result[:limit] if limit else result
 
@@ -3352,7 +3502,7 @@ async def api_stats(request, body, uid):
         m = b["day"][5:7] + "." + b["day"][:4] if b["day"] else "?"
         months626[m] = months626.get(m, 0) + 1
     admin_stats = admin_activity(12)
-    admins = {a["name"]: a["curated"] + a["issued"] + a["returned"] + a["rejected"] + a["studio"] for a in admin_stats}
+    admins = {a["name"]: a["curated"] + a['approved'] + a["issued"] + a["returned"] + a["rejected"] + a["studio"] for a in admin_stats}
 
     # подписи "лучший по..." для статистики
     best_curator = max(admin_stats, key=lambda a: a["curated"]) if admin_stats else None
@@ -3382,10 +3532,10 @@ async def api_stats(request, body, uid):
             lines.append(f"- {m}: {cnt}")
         lines.append("")
         lines.append("## Активность админов")
-        lines.append("| Админ | Курир. | Выдал | Принял | Откл. |")
-        lines.append("|-------|-------|-------|-------|------|")
+        lines.append("| Админ | Курир. | Согласовал | Выдал | Принял | Откл. |")
+        lines.append("|-------|-------|------------|-------|-------|------|")
         for a in admin_stats:
-            lines.append(f"| {a['name']} | {a['curated']} | {a['issued']} | {a['returned']} | {a['rejected']} |")
+            lines.append(f"| {a['name']} | {a['curated']} | {a['approved']} | {a['issued']} | {a['returned']} | {a['rejected']} |")
         lines.append("")
         # подписи лучших
         if best_curator:
@@ -3551,9 +3701,11 @@ async def daily_digest(award_score: bool = False) -> None:
 
     totals = {}
     for row in actions:
-        stats = totals.setdefault(row["admin_id"], {"k": 0, "v": 0, "p": 0, "o": 0, "a": 0})
-        key = ({"curator": "k", "issue": "v", "return_closed": "p", "rejected": "o"}.get(row["action"])
+        stats = totals.setdefault(row["admin_id"], {"k": 0, "s": 0, "v": 0, "p": 0, "o": 0, "a": 0})
+        key = ({"curator": "k", "approved": "s", "issue": "v", "return_closed": "p", "rejected": "o"}.get(row["action"])
                if row["kind"] == "requests" else ("a" if row["kind"] == "b626" else None))
+        if row['kind']=='b626' and row['action']=='approved':
+            key='s'
         if key:
             stats[key] += row["n"]
     admin_text = "_\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0439 \u0441\u0435\u0433\u043e\u0434\u043d\u044f \u043d\u0435 \u0431\u044b\u043b\u043e_\n"
@@ -3562,6 +3714,7 @@ async def daily_digest(award_score: bool = False) -> None:
         name = _disp_user_from(users, best_id)
         admin_text = (f"*{md_escape(name)}*\n"
                       f"\u041a\u0443\u0440\u0438\u0440\u043e\u0432\u0430\u043b: {best['k']} \u00b7 \u0412\u044b\u0434\u0430\u043b: {best['v']} \u00b7 "
+                      f"Согласовал: {best['s']} · "
                       f"\u041f\u0440\u0438\u043d\u044f\u043b: {best['p']} \u00b7 \u041e\u0442\u043a\u0430\u0437\u0430\u043b: {best['o']} \u00b7 626: {best['a']}\n")
         if award_score:
             enqueue_score(f"daily_admin:{today}", best_id, "daily_admin", today,
@@ -3622,7 +3775,7 @@ def expire_admin_offers(rid, now_ts=None):
     with db() as c:
         c.execute(
             """UPDATE admin_offers SET answer='ignored'
-               WHERE ref=? AND answer='' AND sent_at>0 AND sent_at<=?""",
+               WHERE ref=? AND COALESCE(answer,'')='' AND sent_at>0 AND sent_at<=?""",
             (rid, current - OFFER_RESPONSE_SECONDS),
         )
 
@@ -3634,7 +3787,7 @@ def offer_status_summary():
         refs = c.execute(
             """SELECT DISTINCT r.id, r.dfrom_iso, r.tfrom
                FROM requests r JOIN admin_offers o ON o.ref=r.id
-               WHERE r.status='new' AND r.curator IS NULL ORDER BY r.id"""
+               WHERE r.status='approved' AND r.curator IS NULL ORDER BY r.id"""
         ).fetchall()
     result = []
     for ref in refs:
@@ -3647,17 +3800,22 @@ def offer_status_summary():
             escalated = bool(c.execute(
                 "SELECT 1 FROM offer_escalations WHERE ref=?", (ref["id"],)
             ).fetchone())
-        eligible = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
-        offers = [row for row in offers if row["admin_id"] in eligible]
         started = min((row["sent_at"] for row in offers if row["sent_at"]), default=0)
         result.append({
             "id": ref["id"],
             "dfrom_iso": ref["dfrom_iso"],
             "tfrom": ref["tfrom"],
-            "declined": sum(row["answer"] == "no" for row in offers),
-            "ignored": sum(row["answer"] == "ignored" for row in offers),
-            "waiting": sum(row["answer"] == "" for row in offers),
+            "declined": sum((row["answer"] or "") == "no" for row in offers),
+            "ignored": sum((row["answer"] or "") == "ignored" for row in offers),
+            "waiting": sum((row["answer"] or "") == "" for row in offers),
             "undelivered": sum(not row["sent"] for row in offers),
+            "declined_names": [
+                _disp_user(row["admin_id"]) for row in offers if (row["answer"] or "") == "no"
+            ],
+            "ignored_names": [
+                _disp_user(row["admin_id"]) for row in offers
+                if (row["answer"] or "") == "ignored"
+            ],
             "deadline": started + OFFER_RESPONSE_SECONDS if started else 0,
             "escalated": escalated,
         })
@@ -3675,28 +3833,69 @@ async def _escalate_offers(rid):
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         offers = c.execute("SELECT * FROM admin_offers WHERE ref=?", (rid,)).fetchall()
         done = c.execute("SELECT 1 FROM offer_escalations WHERE ref=?", (rid,)).fetchone()
-    eligible = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
-    offers = [o for o in offers if o["admin_id"] in eligible]
-    if not r or r["status"] != "new" or r["curator"] or done or not offers or any(o["answer"] not in ("no", "ignored") for o in offers):
+    if not r or r["status"] != "approved" or r["curator"] or done or not offers or any((o["answer"] or "") not in ("no", "ignored") for o in offers):
+        return
+    if time_change('req',rid):
         return
     import html
-    mentions = " ".join(f'<a href="tg://user?id={sid}">{html.escape(_disp_user(sid))}</a>' for sid in sorted(SENIOR_ADMIN_IDS))
+    declined = [_disp_user(row["admin_id"]) for row in offers if row["answer"] == "no"]
+    ignored = [_disp_user(row["admin_id"]) for row in offers if row["answer"] == "ignored"]
+    declined_text = ", ".join(html.escape(name) for name in declined) or "нет"
+    ignored_text = ", ".join(html.escape(name) for name in ignored) or "нет"
+    # Явно отмечаем двух ответственных даже если бот ещё не видел их username.
+    fixed_mentions = "@misterfrukt @Kyuller"
+    known_mentions = " ".join(
+        f'<a href="tg://user?id={sid}">{html.escape(_disp_user(sid))}</a>'
+        for sid in sorted(SENIOR_ADMIN_IDS)
+        if _disp_user(sid).lstrip("@").lower() not in {"misterfrukt", "kyuller"}
+    )
+    mentions = fixed_mentions + ((" " + known_mentions) if known_mentions else "")
     if bot is None or not ADMIN_CHAT_ID:
         return
-    await bot.send_message(ADMIN_CHAT_ID,
+    message_text = (
         f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
         "Отказавшиеся и не ответившие больше не учитываются. Предлагается отклонить заявку с причиной.\n"
-        + mentions + "\nОткройте заявку для принятия решения.", parse_mode="HTML", reply_markup=request_button(rid, admin=True))
+        f"Отказались ({len(declined)}): {declined_text}\n"
+        f"Проигнорировали ({len(ignored)}): {ignored_text}\n"
+        + mentions + "\nОткройте заявку для принятия решения."
+    )
+    try:
+        await bot.send_message(
+            ADMIN_CHAT_ID, message_text, parse_mode="HTML",
+            reply_markup=request_button(rid, admin=True),
+        )
+    except Exception as exc:
+        log.warning("Offer escalation HTML delivery failed for %s: %s", rid, exc)
+        senior_names = "@misterfrukt @Kyuller"
+        configured_names = ", ".join(_disp_user(sid) for sid in sorted(SENIOR_ADMIN_IDS))
+        if configured_names:
+            senior_names += ", " + configured_names
+        plain_text = (
+            f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
+            "Предлагается отклонить заявку с причиной.\n"
+            f"Отказались ({len(declined)}): {', '.join(declined) or 'нет'}\n"
+            f"Проигнорировали ({len(ignored)}): {', '.join(ignored) or 'нет'}\n"
+            f"Старшие: {senior_names or 'не настроены'}"
+        )
+        await bot.send_message(
+            ADMIN_CHAT_ID, plain_text, reply_markup=request_button(rid, admin=True)
+        )
     with db() as c:
         c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
 
 
 async def offer_unclaimed_request(r):
-    if bot is None:
+    if bot is None or r['status']!='approved' or r['curator'] or time_change('req',r['id']):
         return
     rid = r["id"]
     admins = ADMIN_IDS | EXTRA_ADMIN_IDS | SENIOR_ADMIN_IDS
     with db() as c:
+        stale_accept = c.execute(
+            "SELECT 1 FROM admin_offers WHERE ref=? AND answer='yes'", (rid,)
+        ).fetchone()
+        if stale_accept:
+            c.execute("DELETE FROM admin_offers WHERE ref=?", (rid,))
+            c.execute("DELETE FROM offer_escalations WHERE ref=?", (rid,))
         existing_started = c.execute(
             "SELECT MIN(sent_at) started FROM admin_offers WHERE ref=? AND sent_at>0", (rid,)
         ).fetchone()["started"]
@@ -3721,7 +3920,7 @@ async def offer_unclaimed_request(r):
     for row in pending:
         with db() as c:
             current = c.execute("SELECT status,curator FROM requests WHERE id=?", (rid,)).fetchone()
-        if not current or current["status"] != "new" or current["curator"]:
+        if not current or current["status"] != "approved" or current["curator"]:
             return
         aid = row["admin_id"]
         if aid not in admins:
@@ -3740,6 +3939,24 @@ async def offer_unclaimed_request(r):
         except Exception as exc:
             log.warning("Admin offer delivery failed for %s: %s", aid, exc)
     await escalate_offers(rid)
+
+
+async def process_expired_offer_campaigns():
+    """Завершить опросы независимо от created_ts исходной заявки."""
+    cutoff = time.time() - OFFER_RESPONSE_SECONDS
+    with db() as c:
+        refs = c.execute(
+            """SELECT DISTINCT r.id
+               FROM requests r JOIN admin_offers o ON o.ref=r.id
+               WHERE r.status='approved' AND r.curator IS NULL
+                 AND o.sent_at>0 AND o.sent_at<=?""",
+            (cutoff,),
+        ).fetchall()
+    for row in refs:
+        try:
+            await escalate_offers(row["id"])
+        except Exception as exc:
+            log.warning("Expired offer escalation failed for %s: %s", row["id"], exc)
 
 
 @dp.callback_query(F.data.startswith("offer:"))
@@ -3761,7 +3978,7 @@ async def answer_admin_offer(callback):
         with db() as c:
             r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
             offer = c.execute("SELECT * FROM admin_offers WHERE ref=? AND admin_id=?", (rid, uid)).fetchone()
-            if not r or not offer or r["status"] != "new" or r["curator"]:
+            if not r or not offer or r["status"] != "approved" or r["curator"] or time_change('req',rid):
                 await callback.answer("Заявка уже обработана или назначена", show_alert=True)
                 return
             expired = offer["answer"] == "ignored" or bool(
@@ -3776,7 +3993,7 @@ async def answer_admin_offer(callback):
             else:
                 c.execute("UPDATE admin_offers SET answer=? WHERE ref=? AND admin_id=?", (answer, rid, uid))
                 if answer == "yes":
-                    c.execute("UPDATE requests SET status='curator',curator=? WHERE id=? AND status='new' AND curator IS NULL", (uid, rid))
+                    c.execute("UPDATE requests SET curator=? WHERE id=? AND status='approved' AND curator IS NULL", (uid, rid))
         if expired:
             await escalate_offers(rid)
             await callback.answer("Время ответа истекло", show_alert=True)
@@ -3797,6 +4014,7 @@ async def answer_admin_offer(callback):
 async def run_checks() -> None:
     now = datetime.now(MSK)
     ts = time.time()
+    await process_expired_offer_campaigns()
     with db() as c:
         rows = c.execute("SELECT * FROM requests WHERE status IN ('new','curator','approved','issued')").fetchall()
     for r in rows:
@@ -3855,7 +4073,7 @@ async def run_checks() -> None:
                              reply_markup=request_button(rid, admin=True))
                 notif["cur_return_1"] = 1; changed = True
 
-        if r["status"] == "new" and not r["curator"] and r["created_ts"] and ts - r["created_ts"] >= 36 * 3600:
+        if r["status"] == "approved" and not r["curator"] and not time_change("req",rid) and r["created_ts"] and ts - r["created_ts"] >= 36 * 3600:
             try:
                 await offer_unclaimed_request(r)
             except Exception as exc:
@@ -3973,11 +4191,17 @@ async def scheduler_loop() -> None:
         await asyncio.sleep(_seconds_to_next_check())
 
 
+@auth
+async def api_media_trip(request, body, uid):
+    return await MEDIA_TRIP.handle(body, uid)
+
+
 async def api_dev_tick(request: web.Request):
     """Ручной прогон планировщика - только в DEV-режиме, для тестов."""
     if not DEV_USER_ID:
         raise web.HTTPNotFound()
     await run_checks()
+    await MEDIA_TRIP.tick()
     return web.json_response({"ok": True})
 
 
@@ -4142,7 +4366,12 @@ async def cmd_offerstatus(message: Message) -> None:
     """Скрытая статистика ответов на заявки без куратора."""
     if not is_senior(message.from_user.id):
         return
-    rows = offer_status_summary()
+    try:
+        rows = offer_status_summary()
+    except Exception as exc:
+        log.exception("offerstatus failed: %s", exc)
+        await message.answer("Не удалось прочитать опросы. Ошибка записана в журнал бота.")
+        return
     if not rows:
         await message.answer("Активных опросов администраторов нет.")
         return
@@ -4161,8 +4390,11 @@ async def cmd_offerstatus(message: Message) -> None:
         )
         lines.append(
             f"ID {row['id']} · выдача {row['dfrom_iso']} {row['tfrom']}\n"
-            f"Отказались: {row['declined']} · проигнорировали: {row['ignored']} · "
-            f"ожидаем: {row['waiting']} · недоставлено: {row['undelivered']}\n{state}"
+            f"Отказались: {row['declined']}"
+            + (f" — {', '.join(row['declined_names'])}" if row["declined_names"] else "")
+            + f"\nПроигнорировали: {row['ignored']}"
+            + (f" — {', '.join(row['ignored_names'])}" if row["ignored_names"] else "")
+            + f"\nОжидаем: {row['waiting']} · недоставлено: {row['undelivered']}\n{state}"
         )
     lines.append(
         f"Итого: отказались {declined}, проигнорировали {ignored}, ожидаем {waiting}."
@@ -4375,6 +4607,9 @@ async def main() -> None:
     # base64-фото в JSON: поднимаем лимит тела запроса (дефолт aiohttp - 1 МБ)
     app = web.Application(client_max_size=32 * 1024 * 1024)
     app.router.add_post("/api/me", api_me)
+    app.router.add_post("/api/media-trip", api_media_trip)
+    app.router.add_post('/api/booking/request-time',api_time_change)
+    app.router.add_post('/api/booking/time',api_booking_time)
     app.router.add_post("/api/revision", api_revision)
     app.router.add_post("/api/register", api_register)
     app.router.add_post("/api/agree", api_agree)
@@ -4417,6 +4652,7 @@ async def main() -> None:
     log.info("Статика+API: http://localhost:%s -> %s", PORT, WEBAPP_DIR)
 
     sched = asyncio.get_event_loop().create_task(scheduler_loop())
+    trip_sched = asyncio.get_event_loop().create_task(MEDIA_TRIP.loop())
     scores = asyncio.get_event_loop().create_task(score_worker())
 
     if dev_mode:
@@ -4426,6 +4662,7 @@ async def main() -> None:
             await asyncio.Event().wait()
         finally:
             sched.cancel()
+            trip_sched.cancel()
             scores.cancel()
             await runner.cleanup()
         return
@@ -4446,6 +4683,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         sched.cancel()
+        trip_sched.cancel()
         scores.cancel()
         await runner.cleanup()
 

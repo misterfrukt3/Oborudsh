@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20260906-20260724-time">
+<link rel="stylesheet" href="style.css?v=20261002-admin">
 </head>
 <body>
 
@@ -130,13 +130,19 @@ function launchRequestTarget(){
     const match = String(TG_START_PARAM).match(/^request_(\d+)_(user|admin)$/);
     if(match){ id=Number(match[1]); mode=match[2]; }
   }
-  return TG_QUERY.get("open")==="request" || id ? {id,mode} : null;
+  return TG_QUERY.get("open")==="request" || id ? {id,mode,kind:TG_QUERY.get('kind')||'req'} : null;
 }
 function openLaunchRequest(d){
   const target = launchRequestTarget();
+  if(target?.kind==='626'){
+    if(!bookings626.some(b=>b.id===target.id))return false;
+    if(target.mode==='admin'&&d.isSenior)role='senior';
+    else role='user';
+    resetTo('studioDetail',{id:target.id});return true;
+  }
   if(!target || !target.id || !requests.some(r=>r.id===target.id)) return false;
   if(target.mode==="admin" && d.isAdmin){
-    role = "admin";
+    role = d.isSenior?'senior':"admin";
     resetTo("adminReq", {id:target.id});
   }else{
     role = "user";
@@ -198,11 +204,11 @@ function timePickerHtml({title="Время",fromId,fromLabel,fromValue,fromTarge
     <span class="time-parts">
       <input class="time-part" data-part="hour" type="text" inputmode="numeric" maxlength="2"
         aria-label="${label}: часы" placeholder="00" value="${parts[0]}"
-        oninput="setTimePart('${target}',this)" onblur="timePartBlur()">
+        oninput="setTimePart('${target}',this);advanceTimePart(this)" onblur="timePartBlur()">
       <span class="time-colon">:</span>
       <input class="time-part" data-part="minute" type="text" inputmode="numeric" maxlength="2"
         aria-label="${label}: минуты" placeholder="00" value="${parts[1]}"
-        oninput="setTimePart('${target}',this)" onblur="timePartBlur()">
+        oninput="setTimePart('${target}',this);advanceTimePart(this)" onblur="timePartBlur()">
     </span>
   </div>`;
   };
@@ -223,6 +229,8 @@ function setTimeTarget(target,value){
   else if(target==="wiz.t2") wiz.t2=value;
   else if(target==="wiz626.from") wiz626.from=value;
   else if(target==="wiz626.to") wiz626.to=value;
+  else if(target==="timeEdit.t1") timeEdit.t1=value;
+  else if(target==="timeEdit.t2") timeEdit.t2=value;
 }
 function setTimePart(target,input){
   input.value=input.value.replace(/\D/g,"").slice(0,2);
@@ -235,15 +243,24 @@ function setTimePart(target,input){
   setTimeTarget(target,valid?hour.padStart(2,"0")+":"+minute.padStart(2,"0"):"");
   const button=document.querySelector(".mainbtn");
   if(button){
-    button.disabled=target.startsWith("wiz626")
+    button.disabled=target.startsWith('timeEdit') ? !(timeEdit.t1&&timeEdit.t2&&timeEdit.d1&&timeEdit.d2) : target.startsWith("wiz626")
       ?!(wiz626.day&&wiz626.from&&wiz626.to&&wiz626.goal.trim()&&!studioTimeError()&&!studioBusyConflict())
       :!(wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!dateBlock());
   }
 }
+function advanceTimePart(input){
+  if(input.value.length!==2) return;
+  const max=input.dataset.part==="hour"?23:59;
+  if(Number(input.value)>max) return;
+  const parts=[...document.querySelectorAll(".time-part")];
+  const next=parts[parts.indexOf(input)+1];
+  if(next){ next.focus(); next.select(); }
+}
 function timePartBlur(){
   setTimeout(()=>{
+    if(document.activeElement?.tagName==='BUTTON')return;
     if(!document.activeElement||!document.activeElement.classList.contains("time-part")) render();
-  },0);
+  },120);
 }
 /* фото оборудования: локальный файл prototype/img/<Короткое имя>.avif (точно как в каталоге).
    Нет файла — остаётся SVG-иконка категории. */
@@ -330,7 +347,7 @@ const ST = {
   ret:{l:"Возврат на проверке",c:"var(--violet)"}, closed:{l:"Закрыта",c:"var(--hint)"},
   rejected:{l:"Отклонена",c:"var(--destructive)"}, canceled:{l:"Отменена",c:"var(--destructive)"},
 };
-const FLOW = ["new","curator","approved","issued","ret","closed"];
+const FLOW = ["new","approved","curator","issued","ret","closed"];
 const ST626 = {
   new:{l:"Ждёт согласования",c:"var(--info)"}, approved:{l:"Согласована",c:"var(--warn)"},
   ret:{l:"Сдача на проверке",c:"var(--violet)"}, closed:{l:"Завершена",c:"var(--hint)"},
@@ -545,7 +562,9 @@ function nextStep(o,studio=false){
   if(o.status==="issued"){action="Отправьте фото сдачи";deadline="Вернуть до: "+end;}
   if(o.status==="ret"){action="Ожидайте проверки сдачи";deadline="Срок возврата: "+end;}
   if(role!=="user"){
-    if(!o.curator)action=studio&&o.status==="new"?"Согласуйте или отклоните бронь":"Возьмите в кураторство";
+    if(o.timeChange)action='Ожидайте изменения времени';
+    else if(o.status==='new')action=studio?'Согласуйте или отклоните бронь':'Согласуйте или отклоните заявку';
+    else if(!o.curator)action="Возьмите в кураторство";
     else if(o.status==="curator")action="Согласуйте или отклоните заявку";
     else if(o.status==="ret")action="Проверьте фото и примите возврат";
     else if(o.status==="approved"&&!studio)action="Выдайте "+start;
@@ -835,6 +854,7 @@ SCREENS.home = () => {
         <div class="grow"><b>Забронировать оборудование</b><span>каталог · календарь · корзина</span></div>
         <span style="font-size:18px">›</span>
       </div>
+      ${(!SRV || SRV.mediaTrip?.allowed)?`<div class="action-big" onclick="navTo('mediaTrip')"><span class="ic">${uic('box',24)}</span><div class="grow"><b>Медиа выезд</b><span>команды · блоки · рентал</span></div><span class="chev">›</span></div>`:''}
       <div class="row" style="gap:8px;align-items:stretch">
         <div class="action-half" onclick="navTo('studio')"><span class="ic">${uic("studio",21)}</span><b>Студия 626</b></div>
         <div class="action-half" onclick="navTo('rules',{readonly:true})"><span class="ic">${uic("book",21)}</span><b>Регламент</b></div>
@@ -875,7 +895,7 @@ SCREENS.home = () => {
       </div>
 
       ${(!SRV || SRV.isAdmin) ? (()=>{
-        const noCur = requests.filter(r=>!r.curator && ["new","issued","ret"].includes(r.status)).length;
+        const noCur = requests.filter(r=>!r.curator && ["new","approved","issued","ret"].includes(r.status)).length;
         const unread = requests.reduce((a,r)=>a+(r.unread||0),0) + bookings626.reduce((a,b)=>a+(b.unread||0),0);
         const adminAttn = noCur + unread;
         const seniorAttn = (verifQueue?verifQueue.length:0) + requests.filter(r=>r.escalated&&r.status==="ret").length + bookings626.filter(b=>b.status==="new").length;
@@ -1316,7 +1336,7 @@ function submitWizard(){
       event:wiz.event.trim(), comment:wiz.comment.trim(), media:wiz.media};
     if(wiz.editId) body.id = wiz.editId;
     api(wiz.editId?"request/update":"request/create", body)
-      .then(d=>{ _busy=false; applyBoot(d); if(!wiz.editId)clearDraft(); resetTo("home"); toast(wiz.editId?"✅ Изменения сохранены":"✅ Заявка отправлена — карточка ушла админам."); })
+      .then(d=>{ _busy=false; applyBoot(d); if(!wiz.editId)clearDraft(); resetTo(wiz.editId&&role==='senior'?'allRequests':'home'); toast(wiz.editId?"✅ Изменения сохранены — нужно повторное согласование":"✅ Заявка отправлена — карточка ушла админам."); })
       .catch(e=>{ _busy=false; render(); toast("⚠️ "+e.message); });
     return;
   }
@@ -1366,7 +1386,7 @@ function repeatReq(id){
 SCREENS.reqDetail = ({id}) => {
   const r = requests.find(x=>x.id===id);
   const term = ["rejected","canceled"].includes(r.status);
-  const idx = FLOW.indexOf(r.status);
+  const idx = r.status==='approved'&&r.curator?FLOW.indexOf('curator'):FLOW.indexOf(r.status);
   const tl = term
     ? r.history.map((h,i)=>`<div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===r.history.length-1?"color:var(--destructive)":""}">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")
     : FLOW.map((st,i)=>{
@@ -1398,6 +1418,7 @@ SCREENS.reqDetail = ({id}) => {
         <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+escHtml(i[0])+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
       </div>
       <div class="sec-label">Статус</div>
+      ${timeChangeBanner('req',r)}
       <div class="card"><div class="tl">${tl}</div></div>
       ${chat}
       ${editable?`<div class="btnrow" style="margin-top:14px">
@@ -1660,12 +1681,14 @@ SCREENS.studioDetail = ({id}) => {
       <div class="card"><div class="tl">${tl}</div></div>
       ${chat}
       ${["new","approved"].includes(b.status)&&isSeniorNow()?`<button class="btn-sm danger" onclick="seniorCancel626(${b.id})">Отменить с причиной</button>`:""}
+      ${timeChangeBanner('626',b)}
+      ${bookingAdminControls('626',b)}
       ${["approved","ret"].includes(b.status)?(b.curator?(myCur(b)||isSeniorNow()?`<button class="btn-sm" onclick="release626(${b.id})">Сменить куратора</button>`:""):((SRV?SRV.isAdmin:role!=="user")?`<button class="btn-sm" onclick="take626(${b.id})">Стать куратором</button>`:"")):""}
       ${(b.me && ["new","approved"].includes(b.status))?`<div class="btnrow" style="margin-top:14px">
         ${b.status==="approved"?'<button class="btn-sm ok grow" style="padding:12px" onclick="handover626('+b.id+')">Сдать аудиторию</button>':""}
         ${!studioStarted(b)?`<button class="btn-sm danger grow" style="padding:12px" onclick="cancel626(${b.id})">Отменить бронь</button>`:""}
       </div>`:""}
-      ${(b.status==="ret" && (myCur(b) || (SRV?SRV.isSenior:role!=="user")))?mainBtn("Завершить бронь","close626("+b.id+")"):""}`,
+      ${(b.status==="ret" && (myCur(b) || isSeniorNow()))?mainBtn("Завершить бронь","close626("+b.id+")"):""}`,
     after: ()=>markRead("626", b.id)
   };
 };
@@ -1743,7 +1766,7 @@ function cancel626(id){
 
 /* ================= АДМИН ================= */
 SCREENS.adminHub = () => {
-  const noCur = requests.filter(r=>!r.curator && ["new","issued","ret"].includes(r.status)); // заявки без куратора: новые или переданные после снятия куратора
+  const noCur = requests.filter(r=>!r.curator && ["new","approved","issued","ret"].includes(r.status));
   const mine = requests.filter(r=>myCur(r) && !["closed","rejected","canceled"].includes(r.status));
   const hist = requests.filter(r=>myCur(r) && ["closed","rejected","canceled"].includes(r.status)); // что обработал
   const hist626 = bookings626.filter(b=>myCur(b) && ["closed","rejected","canceled"].includes(b.status));
@@ -1760,6 +1783,7 @@ SCREENS.adminHub = () => {
         <div class="hud">без куратора: <b>${noCur.length}</b> · мои: <b>${mine.length}</b></div></div>
       </div>
       <div class="admin-tools">
+        <div class="list-item" onclick="navTo('equipmentState')"><div class="emoji-badge">${uic('box',19)}</div><div class="grow">Что сейчас с оборудованием<div class="sub">выдано · очередь на выдачу</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="adminWeek=0;navTo('adminCalendar')"><div class="emoji-badge">${uic("chart",19)}</div><div class="grow">Недельный календарь<div class="sub">все задачи команды</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('equipmentUnits')"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Паспорта экземпляров<div class="sub">состояние и история</div></div><span class="chev">›</span></div>
         ${inventory&&inventory.active&&inventory.isParticipant?'<div class="list-item inventory-tool" onclick="navTo(\'inventoryHub\')"><div class="emoji-badge">'+uic("doc",19)+'</div><div class="grow">Инвентаризация<div class="sub">продолжить проверку категорий</div></div><span class="chev">›</span></div>':""}
@@ -1820,7 +1844,9 @@ function adminTasks(){
   requests.forEach(r=>{
     if(["closed","rejected","canceled"].includes(r.status))return;
     let action="",day=r.d1Iso;
-    if(!r.curator)action="Взять в кураторство";
+    if(r.timeChange)action='Ожидаем изменения времени';
+    else if(r.status==='new')action='Согласовать';
+    else if(!r.curator)action="Взять в кураторство";
     else if(r.status==="curator")action="Согласовать";
     else if(r.status==="approved")action="Выдать";
     else if(["issued","ret"].includes(r.status)){action="Принять возврат";day=r.d2Iso;}
@@ -1880,13 +1906,15 @@ function take626(id){
 SCREENS.adminReq = ({id}) => {
   const r = requests.find(x=>x.id===id);
   let actions = "";
-  if(r.status==="new" || (!r.curator && (r.status==="issued" || r.status==="ret"))){
-    actions = mainBtn("Стать куратором","adminAct("+id+",'curator')");
-  } else if(r.status==="curator" && myCur(r)){
+  if(r.status==='new'){
+    actions=mainBtn('Согласовать заявку',"adminAct("+id+",'approved')",'',!!r.timeChange);
+  } else if(!r.curator && ['approved','issued','ret'].includes(r.status)){
+    actions = isSeniorNow()&&r.status==='approved'?mainBtn('Выдать оборудование','openIssue('+id+')','',!!r.timeChange):mainBtn("Стать куратором","adminAct("+id+",'curator')",'',!!r.timeChange);
+  } else if(r.status==="curator" && (myCur(r)||isSeniorNow())){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="row" style="gap:8px"><button class="mainbtn" style="background:var(--ok);color:#fff" onclick="adminAct('+id+',\'approved\')">🟡 Согласовано</button><button class="mainbtn destructive" style="flex:0 0 38%" onclick="rejReqModal('+id+')">Отклонить</button></div><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
   } else if(r.status==="curator"){
     actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+escHtml(r.curator)+'</span></div></div>';
-  } else if(r.status==="approved" && myCur(r)){
+  } else if(r.status==="approved" && (myCur(r)||isSeniorNow())){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><button class="mainbtn" onclick="openIssue('+id+')">🟢 Выдать оборудование</button><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
   } else if(r.status==="approved"){
     actions = '<div class="mainbtn-wrap"><div class="card" style="pointer-events:auto;text-align:center"><span class="sub">Куратор: '+escHtml(r.curator)+'</span></div></div>';
@@ -1899,11 +1927,12 @@ SCREENS.adminReq = ({id}) => {
       : '<button class="mainbtn" onclick="openIssue('+id+',true)">Принять возврат</button>';
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto">'+accept + ((myCur(r) && !r.escalated)?'<button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button>':'')+'</div></div>';
   }
+  if(r.timeChange)actions=mainBtn('Ожидаем изменения времени','', 'secondary',true);
   const chat = `
     <div class="sec-label">Переписка с заявителем</div>
     <div class="card">
       <div class="chat">${r.chat.map(m=>chatMsg(m,true)).join("")||'<p class="sub">Сообщений пока нет. Когда пользователь напишет — вам придёт уведомление от бота.</p>'}</div>
-      ${(myCur(r) || (r.escalated && isSeniorNow()))?`<div class="row" style="margin-top:10px">
+      ${(myCur(r) || isSeniorNow())?`<div class="row" style="margin-top:10px">
         <input type="text" id="achat-inp" maxlength="1000" placeholder="Сообщение заявителю…">
         <button class="btn-sm primary" onclick="sendAdminChat(${r.id})">➤</button>
       </div>`:""}
@@ -1932,6 +1961,8 @@ SCREENS.adminReq = ({id}) => {
         <div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span>
         <div class="t">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")}</div></div>
       ${chat}
+      ${timeChangeBanner('req',r)}
+      ${bookingAdminControls('req',r)}
       <p class="sub" style="padding:0 4px">Каждое действие отправляет пользователю уведомление и обновляет карточку в админ-канале.</p>`,
     mainbtn: actions,
     after: ()=>markRead("req", id)
@@ -1955,16 +1986,16 @@ function adminAct(id, st, reason){
     : "⛔ Отклонено. Уведомление ушло.";
   if(SRV){
     const body = {id, action:st}; if(reason) body.comment = reason;
-    if(st==="uncurator"){ srvDo("request/action",body,()=>{ resetTo("adminHub"); toast(toastFor); }); return; }
+    if(st==="uncurator"){ srvDo("request/action",body,()=>{ resetTo(role==='senior'?'allRequests':"adminHub"); toast(toastFor); }); return; }
     srvDo("request/action",body,()=>{ render(); toast(toastFor); });
     return;
   }
   const r = requests.find(x=>x.id===id);
   const tm = "02.07, "+new Date().toTimeString().slice(0,5);
   if(st==="curator"){ r.curator="@you"; }
-  if(st==="uncurator"){ r.curator=null; if(["curator","approved"].includes(r.status)){ r.status="new"; } r.history.push(["new",tm+" · куратор снял себя"]); resetTo("adminHub"); toast(toastFor); return; }
+  if(st==="uncurator"){ r.curator=null; if(r.status==='curator')r.status='new'; r.history.push([r.status,tm+" · куратор снял себя"]); resetTo(role==='senior'?'allRequests':'adminHub'); toast(toastFor); return; }
   if(st==="rejected"){ r.status="rejected"; r.history.push(["rejected",tm+(reason?" · "+reason:"")]); render(); toast(toastFor); return; }
-  r.status=st; r.history.push([st,tm]); render();
+  if(st!=='curator')r.status=st; r.history.push([st,tm]); render();
   toast(st==="curator" ? "Вы куратор заявки ID "+id+". Переписка открыта." : "🟡 Согласовано.");
 }
 function rejReqModal(id){
@@ -2194,6 +2225,8 @@ SCREENS.seniorHub = () => {
       </div>
 
       <div class="sec-label">⏳ 626 · ждут согласования</div>
+      <div class="list-item" onclick="navTo('allRequests')"><div class="emoji-badge">${uic('book',19)}</div><div class="grow">Все заявки<div class="sub">оборудование и 626 · активные и завершённые</div></div><span class="chev">›</span></div>
+      <div class="list-item" onclick="navTo('equipmentState')"><div class="emoji-badge">${uic('box',19)}</div><div class="grow">Что сейчас с оборудованием<div class="sub">выдано · очередь на выдачу</div></div><span class="chev">›</span></div>
       ${s626new.map(b=>`
         <div class="card">
           <div class="row"><div class="grow"><b style="font-size:14px">${escHtml(b.goal)}</b>
@@ -2224,7 +2257,7 @@ SCREENS.seniorHub = () => {
         <div class="list-item" onclick="startBroadcast()"><div class="emoji-badge">${uic("mega",19)}</div><div class="grow">Массовая рассылка</div><span class="chev">›</span></div>
         <div class="list-item" onclick="openStats(true)"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Статистика</div><span class="chev">›</span></div>
       </div>
-      <p class="sub" style="padding:4px">Заявки на оборудование обрабатывают админы в своей панели — переключите роль, чтобы посмотреть.</p>
+      <p class="sub" style="padding:4px">В разделе «Все заявки» можно согласовать, изменить и выдать оборудование, а также управлять бронями 626.</p>
       <div style="margin-top:10px"><button class="mainbtn secondary" onclick="setRole('user')">‹ Режим пользователя</button></div>`,
   };
 };
@@ -2296,6 +2329,7 @@ SCREENS.stats = () => {
       <div style="font-weight:600;margin-bottom:6px">${a.name}</div>
       <div class="row" style="gap:6px;flex-wrap:wrap">
         <span class="pill" style="background:var(--ok)">Курировал: ${a.curated||0}</span>
+        <span class="pill" style="background:var(--warn)">Согласовал: ${a.approved||0}</span>
         <span class="pill" style="background:var(--info)">Выдал: ${a.issued||0}</span>
         <span class="pill" style="background:var(--teal)">Принял: ${a.returned||0}</span>
 <span class="pill" style="background:${a.rejected > 0 ? 'var(--destructive)' : 'var(--ok)'}">Откл.: ${a.rejected || 0}</span>      </div>
@@ -2756,6 +2790,9 @@ document.addEventListener("visibilitychange",()=>{
   else if(SRV){startRealtime();refreshLive();}
 });
 window.addEventListener("beforeunload",stopRealtime);
+</script>
+<script src="admin-requests.js?v=20261002-admin"></script>
+<script>
 if(IN_TG){
   document.body.classList.add("in-tg");
   if(TG){ TG.ready(); TG.expand(); }
@@ -2787,5 +2824,6 @@ if(IN_TG){
   }
 }
 </script>
+<script src="media-trip.js?v=20261002-trip"></script>
 </body>
 </html>

@@ -98,7 +98,7 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(self.call(main.api_req_action,{'id':ref,'action':'rejected','comment':'Некому выдать'},3).status,200)
 
     def test_offers_are_durable_and_all_declines_escalate_once(self):
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         fake=type('FakeBot',(),{'send_message':AsyncMock()})()
         with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
             with main.db() as c:r=c.execute('SELECT * FROM requests WHERE id=?',(ref,)).fetchone()
@@ -113,7 +113,7 @@ class WorkflowTest(unittest.TestCase):
 
     def test_only_first_accepting_admin_becomes_curator(self):
         from types import SimpleNamespace
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         with main.db() as c:
             c.executemany("INSERT INTO admin_offers(ref,admin_id,sent) VALUES(?,?,1)",[(ref,2),(ref,3)])
         callbacks=[SimpleNamespace(from_user=SimpleNamespace(id=uid),data=f"offer:yes:{ref}",answer=AsyncMock()) for uid in (2,3)]
@@ -127,7 +127,7 @@ class WorkflowTest(unittest.TestCase):
 
     def test_unanswered_offers_expire_after_six_hours_and_escalate(self):
         import time
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         old = time.time() - main.OFFER_RESPONSE_SECONDS - 1
         with main.db() as c:
             c.executemany(
@@ -142,11 +142,68 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(answers,{2:'no',3:'ignored'})
         self.assertEqual(fake.send_message.await_count,1)
         self.assertIn('за 6 часов',fake.send_message.call_args.args[1])
+        self.assertIn('Проигнорировали (1)',fake.send_message.call_args.args[1])
+
+    def test_scheduler_finishes_expired_campaign_without_created_timestamp(self):
+        import time
+        ref,_=self.request(status="approved")
+        old=time.time()-main.OFFER_RESPONSE_SECONDS-1
+        with main.db() as c:
+            c.execute('UPDATE requests SET created_ts=0 WHERE id=?',(ref,))
+            c.executemany(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at,answer) VALUES(?,?,1,?,?)",
+                [(ref,2,old,'no'),(ref,3,old,'')],
+            )
+        fake=type('FakeBot',(),{'send_message':AsyncMock()})()
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
+            asyncio.run(main.process_expired_offer_campaigns())
+        self.assertEqual(fake.send_message.await_count,1)
+        with main.db() as c:
+            self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
+
+    def test_failed_channel_delivery_does_not_break_offer_processing(self):
+        import time
+        ref,_=self.request(status="approved")
+        old=time.time()-main.OFFER_RESPONSE_SECONDS-1
+        with main.db() as c:
+            c.execute(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at) VALUES(?,?,1,?)",
+                (ref,2,old),
+            )
+        fake=type('FakeBot',(),{'send_message':AsyncMock(side_effect=RuntimeError('channel unavailable'))})()
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
+            asyncio.run(main.process_expired_offer_campaigns())
+        with main.db() as c:
+            self.assertEqual(c.execute('SELECT answer FROM admin_offers WHERE ref=?',(ref,)).fetchone()['answer'],'ignored')
+            self.assertIsNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
+
+    def test_plain_escalation_fallback_marks_delivery_complete(self):
+        import time
+        ref,_=self.request(status="approved")
+        old=time.time()-main.OFFER_RESPONSE_SECONDS-1
+        with main.db() as c:
+            c.execute(
+                "INSERT INTO admin_offers(ref,admin_id,sent,sent_at) VALUES(?,?,1,?)",
+                (ref,2,old),
+            )
+        calls=[]
+        async def send_message(*args,**kwargs):
+            calls.append((args,kwargs))
+            if kwargs.get('parse_mode')=='HTML':
+                raise RuntimeError('bad HTML')
+        fake=type('FakeBot',(),{})()
+        fake.send_message=send_message
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
+            asyncio.run(main.process_expired_offer_campaigns())
+        self.assertEqual(len(calls),2)
+        self.assertNotIn('parse_mode',calls[1][1])
+        with main.db() as c:
+            self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
 
     def test_late_offer_button_cannot_assign_curator(self):
         import time
         from types import SimpleNamespace
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         with main.db() as c:
             c.execute(
                 "INSERT INTO admin_offers(ref,admin_id,sent,sent_at) VALUES(?,?,1,?)",
@@ -158,13 +215,13 @@ class WorkflowTest(unittest.TestCase):
         with main.db() as c:
             row=c.execute('SELECT status,curator FROM requests WHERE id=?',(ref,)).fetchone()
             answer=c.execute('SELECT answer FROM admin_offers WHERE ref=? AND admin_id=2',(ref,)).fetchone()['answer']
-        self.assertEqual((row['status'],row['curator']),('new',None))
+        self.assertEqual((row['status'],row['curator']),('approved',None))
         self.assertEqual(answer,'ignored')
         self.assertIn('истекло',callback.answer.call_args.args[0])
 
     def test_offer_status_counts_declined_ignored_and_waiting(self):
         import time
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         now=time.time()
         with main.db() as c:
             c.executemany(
@@ -179,17 +236,30 @@ class WorkflowTest(unittest.TestCase):
         from types import SimpleNamespace
         message=SimpleNamespace(from_user=SimpleNamespace(id=3),answer=AsyncMock())
         rows=[{'id':15,'dfrom_iso':'2030-06-02','tfrom':'10:00','declined':2,
-               'ignored':3,'waiting':1,'undelivered':0,'deadline':0,'escalated':True}]
-        with patch.object(main,'is_senior',return_value=True),patch.object(main,'offer_status_summary',return_value=rows):
+               'ignored':3,'waiting':1,'undelivered':0,'declined_names':['@one','@two'],
+               'ignored_names':['@three','@four','@five'],'deadline':0,'escalated':True}]
+        with patch.object(main,'is_senior',return_value=True),patch.object(main,'process_expired_offer_campaigns',new=AsyncMock()),patch.object(main,'offer_status_summary',return_value=rows):
             asyncio.run(main.cmd_offerstatus(message))
         output=message.answer.call_args.args[0]
         self.assertIn('Отказались: 2',output)
-        self.assertIn('проигнорировали: 3',output)
+        self.assertIn('Проигнорировали: 3',output)
+        self.assertIn('@three',output)
         self.assertIn('вопрос об отклонении поднят',output)
+
+    def test_returned_to_queue_starts_a_fresh_offer_campaign(self):
+        ref,_=self.request(status='approved',curator=2)
+        with main.db() as c:
+            c.execute("INSERT INTO admin_offers(ref,admin_id,sent,sent_at,answer) VALUES(?,?,1,1,'yes')",(ref,2))
+            c.execute("INSERT INTO offer_escalations(ref) VALUES(?)",(ref,))
+        with patch.object(main,'is_admin',return_value=True),patch.object(main,'is_senior',return_value=False):
+            self.assertEqual(self.call(main.api_req_action,{'id':ref,'action':'uncurator'},2).status,200)
+        with main.db() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) n FROM admin_offers WHERE ref=?',(ref,)).fetchone()['n'],0)
+            self.assertEqual(c.execute('SELECT COUNT(*) n FROM offer_escalations WHERE ref=?',(ref,)).fetchone()['n'],0)
 
     def test_invitation_threshold_is_36_hours(self):
         import time
-        ref,_=self.request()
+        ref,_=self.request(status="approved")
         with patch.object(main,'offer_unclaimed_request',new=AsyncMock()) as offer,patch.object(main,'notify',new=AsyncMock()),patch.object(main,'weekly_backup'),patch.object(main,'daily_digest',new=AsyncMock()),patch.object(main,'monthly_digest',new=AsyncMock()):
             with main.db() as c:c.execute('UPDATE requests SET created_ts=? WHERE id=?',(time.time()-35*3600,ref))
             asyncio.run(main.run_checks());self.assertEqual(offer.await_count,0)
