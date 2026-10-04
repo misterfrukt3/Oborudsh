@@ -1,5 +1,11 @@
 # Оборудыш: запуск Mini App в Telegram и деплой
 
+## Новые версии через GitHub с Mac — 04.10.2026
+
+Разработка продолжается в `/Users/aleksejdavydov/Projects/Оборудыш`, выпуск — в `misterfrukt3/Oborudsh`, ветка `main`. Разработчик сам делает проверки, commit и push; порядок — [GITHUB_MAC.md](GITHUB_MAC.md).
+
+Для существующего серверного checkout обновлять код через `git pull --ff-only origin main` в `/opt/oborudka`. Если checkout отсутствует или есть локальные изменения, сначала разобрать перенос с разработчиком; не клонировать поверх рабочей папки и не применять reset/clean. `.env`, SQLite, справочники и пользовательские данные сохраняются на сервере. Дальнейшие шаги — в разделе «Главное» ниже.
+
 ## Обновление 04.10.2026 — удаление команд медиа-выезда
 
 - Заменить `bot/media_trip.py`, `prototype/media-trip.js` и `prototype/index.html`.
@@ -68,7 +74,7 @@ echo "Резервная копия: /opt/oborudka-backups/$stamp"
 
 ```bash
 cd /opt/oborudka
-git pull
+git pull --ff-only origin main
 ```
 
 Если файлы загружаются вручную через WinSCP/SFTP, замените их по тем же путям внутри `/opt/oborudka`. Папку `prototype/fonts/` переносите целиком.
