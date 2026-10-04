@@ -2,7 +2,7 @@
 const MT_STATUS={new:'Подана',assembling:'Собирается',ready:'Готова к выдаче',issued:'Выдана',returned:'Возвращена',rejected:'Отказ',canceled:'Отменена'};
 const MT_NEEDS=['Камера (видео)','Камера (фото)','Звук','Свет (маленький)','Свет (большой)','Штатив','Стабилизатор','Другое'];
 let mtDraft={needs:{},wanted:{},purpose:''}, mtTab='active';
-let mtDemo={allowed:true,canManage:true,canConfigure:true,team:null,teams:[],blocks:[],items:[],requests:[],needs:MT_NEEDS,
+let mtDemo={allowed:true,canManage:true,canConfigure:true,team:null,teams:[],deletedTeams:[],blocks:[],items:[],requests:[],needs:MT_NEEDS,
   settings:{testing:true,staff:[],place:'',channel:0},currentBlock:null,unsent:0};
 function mtData(){return SRV?SRV.mediaTrip:mtDemo;}
 function mtTime(ts){return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ts*1000));}
@@ -118,10 +118,15 @@ SCREENS.mediaTripSettings=()=>{
 };
 SCREENS.mediaTripTeams=()=>{
   const d=mtData();if(!d?.canManage)return {body:'<div class="card sub">Недостаточно прав.</div>'};
-  return {body:`<h1 class="big">Команды выезда</h1>${d.teams.map(t=>`<div class="card"><b>Команда ${t.number}</b><p class="sub">Куратор: ${escHtml(t.members.find(m=>m.id===t.curator)?.name||String(t.curator))}</p><div class="mt-actions">${mtButton('Участники и код',`navTo('mediaTripMembers',{number:${t.number}})`,'')}${mtButton('Сменить куратора',`$('mt-team-number').value=${t.number};$('mt-curator').value=${t.curator}`,'')}</div></div>`).join('')}
+  return {body:`<h1 class="big">Команды выезда</h1>${d.teams.map(t=>`<div class="card"><b>Команда ${t.number}</b><p class="sub">Куратор: ${escHtml(t.members.find(m=>m.id===t.curator)?.name||String(t.curator))}</p><div class="mt-actions">${mtButton('Участники и код',`navTo('mediaTripMembers',{number:${t.number}})`,'')}${mtButton('Сменить куратора',`$('mt-team-number').value=${t.number};$('mt-curator').value=${t.curator}`,'')}${mtButton('Удалить команду',`mtDeleteTeam(${t.number})`,'danger')}</div></div>`).join('')}
     <div class="sec-label">Добавить / изменить команду</div>${mtField('Номер команды','mt-team-number','','number','min="1" max="999"')}${mtField('Telegram ID или @username куратора','mt-curator')}`,
     mainbtn:mainBtn('Сохранить команду',"mtDo({action:'team',number:$('mt-team-number').value,curator:$('mt-curator').value})")};
 };
+function mtDeleteTeam(number){
+  if(!mtData()?.canManage)return;
+  const history=mtData().requests.some(r=>r.team===number)?' История заявок сохранится; её номер останется занят.':'';
+  confirmModal(`Удалить команду ${number}?`,'Участники смогут вступить в другую команду.'+history+' Команду с активными заявками можно удалить после их отмены или возврата оборудования.',()=>mtDo({action:'delete_team',number}));
+}
 SCREENS.mediaTripMembers=({number})=>{
   const d=mtData(),t=d?.teams?.find(t=>t.number===number);
   if(!t||!t.code)return {body:'<div class="card sub">Недостаточно прав.</div>'};
@@ -151,7 +156,16 @@ function mtEditItem(id){const i=mtData().items.find(i=>i.id===id);$('mt-item-id'
 function mtDemoDo(b){
   const d=mtDemo,nextId=list=>Math.max(0,...list.map(x=>x.id||0))+1;
   if(b.action==='settings'){d.settings={...b,staff:String(b.staff).split(/[ ,]+/).filter(Boolean),channel:Number(b.channel)};}
-  else if(b.action==='team'){const number=Number(b.number),curator=Number(b.curator);if(!number||!curator)throw Error('Укажите номер команды и Telegram ID куратора.');let t=d.teams.find(t=>t.number===number);if(t)t.curator=curator;else d.teams.push({number,curator,code:'demo-'+number,members:[{id:curator,name:'Куратор'}]});}
+  else if(b.action==='team'){const number=Number(b.number),curator=Number(b.curator);if(!number||!curator)throw Error('Укажите номер команды и Telegram ID куратора.');if(d.deletedTeams.includes(number))throw Error('Номер удалённой команды сохранён в истории. Выберите другой номер.');let t=d.teams.find(t=>t.number===number);if(t)t.curator=curator;else d.teams.push({number,curator,code:'demo-'+number+'-'+crypto.randomUUID(),members:[{id:curator,name:'Куратор'}]});}
+  else if(b.action==='delete_team'){
+    if(!d.canManage)throw Error('Доступно только команде рентала.');
+    const number=Number(b.number);
+    if(!d.teams.some(t=>t.number===number))throw Error('Команда не найдена.');
+    if(d.requests.some(r=>r.team===number&&['new','assembling','ready','issued'].includes(r.status)))throw Error('У команды есть активные заявки. Сначала отмените их или примите возврат оборудования.');
+    if(d.requests.some(r=>r.team===number))d.deletedTeams.push(number);
+    d.teams=d.teams.filter(t=>t.number!==number);
+    if(d.team===number)d.team=null;
+  }
   else if(b.action==='members'){const t=d.teams.find(t=>t.number===b.number);if(b.remove)t.members=t.members.filter(m=>m.id!==b.remove);else String(b.members).split(/[ ,]+/).filter(Boolean).forEach(id=>{if(!t.members.some(m=>m.id===Number(id)))t.members.push({id:Number(id),name:'Участник '+id});});}
   else if(b.action==='join'){const t=d.teams.find(t=>t.code===b.code);if(!t)throw Error('Неверный код команды.');d.team=t.number;}
   else if(b.action==='block'){const start=Date.parse(b.start+':00+03:00')/1000,end=Date.parse(b.end+':00+03:00')/1000;if(!start||end<=start)throw Error('Проверьте начало и конец блока.');const v={id:Number(b.id)||nextId(d.blocks),kind:b.kind,start,end};const old=d.blocks.find(x=>x.id===v.id);if(old)Object.assign(old,v);else d.blocks.push(v);}

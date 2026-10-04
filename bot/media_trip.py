@@ -27,7 +27,8 @@ class MediaTrip:
         with self.db() as c:
             c.executescript('''
             CREATE TABLE IF NOT EXISTS trip_settings(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS trip_teams(number INTEGER PRIMARY KEY, curator INTEGER NOT NULL, code TEXT UNIQUE NOT NULL);
+            CREATE TABLE IF NOT EXISTS trip_teams(number INTEGER PRIMARY KEY, curator INTEGER NOT NULL, code TEXT UNIQUE NOT NULL,
+                deleted INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS trip_members(uid INTEGER PRIMARY KEY, team INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS trip_blocks(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS trip_items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, total INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1);
@@ -40,6 +41,8 @@ class MediaTrip:
             CREATE TABLE IF NOT EXISTS trip_outbox(key TEXT PRIMARY KEY, recipient INTEGER NOT NULL, text TEXT NOT NULL,
                 ref INTEGER, guard TEXT NOT NULL DEFAULT '', sent INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0, retry REAL NOT NULL DEFAULT 0, expires REAL NOT NULL DEFAULT 0);
             ''')
+            if 'deleted' not in {r['name'] for r in c.execute('PRAGMA table_info(trip_teams)')}:
+                c.execute('ALTER TABLE trip_teams ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
             if 'expires' not in {r['name'] for r in c.execute('PRAGMA table_info(trip_outbox)')}:
                 c.execute('ALTER TABLE trip_outbox ADD COLUMN expires REAL NOT NULL DEFAULT 0')
             c.execute('INSERT OR IGNORE INTO trip_settings VALUES(1,?)', (json.dumps(
@@ -85,7 +88,7 @@ class MediaTrip:
         with self.db() as c:
             member = c.execute('SELECT team FROM trip_members WHERE uid=?', (uid,)).fetchone()
             team = member[0] if member else None
-            teams = [dict(r) for r in c.execute('SELECT * FROM trip_teams ORDER BY number')
+            teams = [dict(r) for r in c.execute('SELECT * FROM trip_teams WHERE deleted=0 ORDER BY number')
                      if manage or r['number'] == team]
             for t in teams:
                 t['members'] = [{'id': n, 'name': self.c['_disp_user'](n)} for n in sorted(self.members(c, t['number']))]
@@ -164,7 +167,7 @@ class MediaTrip:
             return self.c['jerr']('Режим пока доступен только участникам тестирования.', 403)
         action = body.get('action')
         manage = self.manager(uid, s)
-        if action in ('team', 'block', 'item') and not manage:
+        if action in ('team', 'delete_team', 'block', 'item') and not manage:
             return self.c['jerr']('Доступно только команде рентала.', 403)
         with self.db() as c:
             if action == 'settings':
@@ -184,15 +187,30 @@ class MediaTrip:
                 cur = self.ids([body['curator']])
                 if number < 1 or number > 999 or len(cur) != 1:
                     raise ValueError('Укажите номер команды и куратора.')
-                c.execute('INSERT INTO trip_teams VALUES(?,?,?) ON CONFLICT(number) DO UPDATE SET curator=excluded.curator',
+                old = c.execute('SELECT deleted FROM trip_teams WHERE number=?', (number,)).fetchone()
+                if old and old['deleted']:
+                    raise ValueError('Номер удалённой команды сохранён в истории. Выберите другой номер.')
+                c.execute('INSERT INTO trip_teams(number,curator,code) VALUES(?,?,?) ON CONFLICT(number) DO UPDATE SET curator=excluded.curator',
                           (number, cur[0], secrets.token_urlsafe(8)))
                 existing = c.execute('SELECT team FROM trip_members WHERE uid=?', (cur[0],)).fetchone()
                 if existing and existing[0] != number:
                     raise ValueError('Куратор уже состоит в другой команде.')
                 c.execute('INSERT OR REPLACE INTO trip_members VALUES(?,?)', (cur[0], number))
+            elif action == 'delete_team':
+                number = int(body['number'])
+                if not c.execute('SELECT 1 FROM trip_teams WHERE number=? AND deleted=0', (number,)).fetchone():
+                    raise ValueError('Команда не найдена.')
+                if c.execute("SELECT 1 FROM trip_requests WHERE team=? AND status IN ('new','assembling','ready','issued')", (number,)).fetchone():
+                    raise ValueError('У команды есть активные заявки. Сначала отмените их или примите возврат оборудования.')
+                c.execute('DELETE FROM trip_members WHERE team=?', (number,))
+                if c.execute('SELECT 1 FROM trip_requests WHERE team=?', (number,)).fetchone():
+                    # Keep the number reserved so a new team cannot inherit this team's history.
+                    c.execute('UPDATE trip_teams SET deleted=1 WHERE number=?', (number,))
+                else:
+                    c.execute('DELETE FROM trip_teams WHERE number=?', (number,))
             elif action == 'members':
                 number = int(body['number'])
-                t = c.execute('SELECT * FROM trip_teams WHERE number=?', (number,)).fetchone()
+                t = c.execute('SELECT * FROM trip_teams WHERE number=? AND deleted=0', (number,)).fetchone()
                 if not t or not (manage or t['curator'] == uid):
                     return self.c['jerr']('Добавлять участников может рентал или куратор команды.', 403)
                 people = self.ids(body.get('members', []))
@@ -207,7 +225,7 @@ class MediaTrip:
                         raise ValueError('Сначала назначьте другого куратора.')
                     c.execute('DELETE FROM trip_members WHERE uid=? AND team=?', (person, number))
             elif action == 'join':
-                t = c.execute('SELECT * FROM trip_teams WHERE code=?', (str(body.get('code', '')).strip(),)).fetchone()
+                t = c.execute('SELECT * FROM trip_teams WHERE code=? AND deleted=0', (str(body.get('code', '')).strip(),)).fetchone()
                 if not t:
                     raise ValueError('Неверный код команды.')
                 old = c.execute('SELECT team FROM trip_members WHERE uid=?', (uid,)).fetchone()

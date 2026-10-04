@@ -55,6 +55,94 @@ class MediaTripTest(unittest.TestCase):
         self.assertEqual(self.call(dict(action='block', kind='task', start='2030-01-01T10:00', end='2030-01-01T11:00'), 1).status, 403)
         self.assertEqual(self.call(dict(action='settings', testing=False, staff=[], place='', channel=0)).status, 400)
 
+    def test_delete_empty_team_releases_members_and_invalidates_code(self):
+        self.setup_trip()
+        self.call(dict(action='members', number=1, members=[2]), 1)
+        with main.db() as c:
+            code = c.execute('SELECT code FROM trip_teams WHERE number=1').fetchone()[0]
+        for uid in (1, 2, 1122855409):
+            self.assertEqual(self.call(dict(action='delete_team', number=1), uid).status, 403)
+        self.assertEqual(self.call(dict(action='delete_team', number=999)).status, 400)
+        self.assertEqual(self.call(dict(action='delete_team', number='bad')).status, 400)
+        before = main.db_revision()
+        self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 200)
+        self.assertNotEqual(before, main.db_revision())
+        self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['teams'], [])
+        for uid in (1, 2):
+            self.assertIsNone(main.MEDIA_TRIP.payload(uid)['team'])
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+        self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 400)
+        self.assertEqual(self.call(dict(action='team', number=1, curator=1)).status, 200)
+        with main.db() as c:
+            self.assertNotEqual(code, c.execute('SELECT code FROM trip_teams WHERE number=1').fetchone()[0])
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+        self.assertEqual(self.call(dict(action='team', number=2, curator=2)).status, 200)
+
+    def test_delete_team_blocks_every_active_status_including_overdue_issue(self):
+        block, item = self.setup_trip()
+        self.create(block)
+        ref = self.ref()
+        for status in ('new', 'assembling', 'ready', 'issued'):
+            if status != 'new':
+                self.assertEqual(self.change(ref, status, kit=[[item, 1]]).status, 200)
+            if status == 'issued':
+                with main.db() as c:
+                    c.execute('UPDATE trip_blocks SET start=?,end=? WHERE id=?',
+                              (time.time()-7200, time.time()-3600, block))
+            with self.subTest(status=status):
+                response = self.call(dict(action='delete_team', number=1))
+                self.assertEqual(response.status, 400)
+                self.assertIn('активные заявки', json.loads(response.text)['error'])
+                self.assertEqual(main.MEDIA_TRIP.payload(1)['team'], 1)
+                self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['requests'][0]['status'], status)
+        self.assertEqual(self.change(ref, 'returned').status, 200)
+        self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 200)
+
+    def test_delete_team_preserves_terminal_requests_and_reserves_history_number(self):
+        block, item = self.setup_trip()
+        for status in ('canceled', 'rejected', 'returned'):
+            self.create(block)
+            ref = self.ref()
+            if status == 'canceled':
+                self.assertEqual(self.call(dict(action='request', id=ref, status=status), 1).status, 200)
+            elif status == 'rejected':
+                self.assertEqual(self.change(ref, status, reason='Нет камеры').status, 200)
+            else:
+                for target in ('assembling', 'ready', 'issued', 'returned'):
+                    self.assertEqual(self.change(ref, target, kit=[[item, 1]]).status, 200)
+        before = main.MEDIA_TRIP.payload(self.admin)['requests']
+        with main.db() as c:
+            code = c.execute('SELECT code FROM trip_teams WHERE number=1').fetchone()[0]
+        self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 200)
+        self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['requests'], before)
+        self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['teams'], [])
+        self.assertEqual(main.MEDIA_TRIP.payload(1)['requests'], [])
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+        self.assertEqual(self.call(dict(action='members', number=1, members=[2])).status, 403)
+        self.assertEqual(self.call(dict(action='members', number=1, members=[2]), 1).status, 403)
+        self.assertEqual(self.call(dict(action='team', number=1, curator=2)).status, 400)
+        self.assertEqual(self.call(dict(action='team', number=2, curator=1)).status, 200)
+        self.assertEqual(main.MEDIA_TRIP.payload(1)['requests'], [])
+
+    def test_delete_team_available_to_testers_in_testing_mode(self):
+        self.assertEqual(self.call(dict(action='team', number=1, curator=self.admin)).status, 200)
+        self.assertEqual(self.call(dict(action='delete_team', number=1), 1).status, 403)
+        self.assertEqual(self.call(dict(action='delete_team', number=1), 1122855409).status, 200)
+
+    def test_team_deletion_migration_preserves_existing_teams(self):
+        # This fixture uses only the temporary database from CoreRulesTest.setUp.
+        with main.db() as c:
+            c.execute('DROP TABLE trip_teams')
+            c.execute('CREATE TABLE trip_teams(number INTEGER PRIMARY KEY, curator INTEGER NOT NULL, code TEXT UNIQUE NOT NULL)')
+            c.execute("INSERT INTO trip_teams VALUES(1,?,'legacy-code')", (self.admin,))
+            c.execute('INSERT INTO trip_members VALUES(?,1)', (self.admin,))
+        main.MEDIA_TRIP.schema()
+        main.MEDIA_TRIP.schema()
+        team = main.MEDIA_TRIP.payload(self.admin)['teams'][0]
+        self.assertEqual((team['number'], team['curator'], team['code']), (1, self.admin, 'legacy-code'))
+        self.assertEqual(team['members'][0]['id'], self.admin)
+        self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 200)
+
     def test_one_active_request_nearest_block_and_full_lifecycle(self):
         block, item = self.setup_trip()
         with main.db() as c:
@@ -149,6 +237,13 @@ class MediaTripTest(unittest.TestCase):
                     payload=await response.json()
                     self.assertTrue(payload['mediaTrip']['canManage'])
                     self.assertNotEqual(before,payload['revision'])
+                    before = payload['revision']
+                    response = await client.post('/api/media-trip', json={'action':'delete_team','number':1})
+                    self.assertEqual(response.status, 200)
+                    payload = await response.json()
+                    self.assertEqual(payload['mediaTrip']['teams'], [])
+                    self.assertIsNone(payload['mediaTrip']['team'])
+                    self.assertNotEqual(before, payload['revision'])
         asyncio.run(scenario())
 
 
