@@ -125,6 +125,29 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT curator FROM requests WHERE id=?',(ref,)).fetchone()['curator'],2)
         self.assertIn('уже обработана',callbacks[1].answer.call_args.args[0])
 
+    def test_channel_escalation_uses_request_link_and_is_not_repeated(self):
+        ref,_=self.request(status='approved')
+        with main.db() as c:
+            c.execute("INSERT INTO admin_offers(ref,admin_id,sent,answer) VALUES(?,2,1,'no')",(ref,))
+        async def send_message(chat_id,text,**kwargs):
+            button=kwargs['reply_markup'].inline_keyboard[0][0]
+            if chat_id < 0 and button.web_app is not None:
+                raise RuntimeError('Bad Request: BUTTON_TYPE_INVALID')
+        fake=type('FakeBot',(),{'send_message':AsyncMock(side_effect=send_message)})()
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_CHAT_ID',-100123),patch.object(main,'BOT_USERNAME','oborudka_test_bot'):
+            asyncio.run(main.escalate_offers(ref))
+            asyncio.run(main.escalate_offers(ref))
+        self.assertEqual(fake.send_message.await_count,1)
+        button=fake.send_message.call_args.kwargs['reply_markup'].inline_keyboard[0][0]
+        self.assertEqual(button.url,f'https://t.me/oborudka_test_bot?startapp=request_{ref}_admin')
+        self.assertIsNone(button.web_app)
+        with main.db() as c:
+            self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
+        with patch.object(main,'WEBAPP_URL','https://example.com/app'):
+            private_button=main.request_button(ref,admin=True).inline_keyboard[0][0]
+        self.assertIsNone(private_button.url)
+        self.assertIn(f'requestId={ref}',private_button.web_app.url)
+
     def test_unanswered_offers_expire_after_six_hours_and_escalate(self):
         import time
         ref,_=self.request(status="approved")
@@ -189,11 +212,14 @@ class WorkflowTest(unittest.TestCase):
         calls=[]
         async def send_message(*args,**kwargs):
             calls.append((args,kwargs))
+            button=kwargs['reply_markup'].inline_keyboard[0][0]
+            self.assertIsNone(button.web_app)
+            self.assertEqual(button.url,f'https://t.me/oborudka_test_bot?startapp=request_{ref}_admin')
             if kwargs.get('parse_mode')=='HTML':
                 raise RuntimeError('bad HTML')
         fake=type('FakeBot',(),{})()
         fake.send_message=send_message
-        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
+        with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',-100123),patch.object(main,'BOT_USERNAME','oborudka_test_bot'):
             asyncio.run(main.process_expired_offer_campaigns())
         self.assertEqual(len(calls),2)
         self.assertNotIn('parse_mode',calls[1][1])

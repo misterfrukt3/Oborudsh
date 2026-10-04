@@ -1374,6 +1374,16 @@ def deeplink_kb() -> InlineKeyboardMarkup:
     ]])
 
 
+def channel_request_button(request_id: int) -> InlineKeyboardMarkup:
+    """В канале открываем админскую карточку через startapp, без web_app."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="Открыть заявку",
+            url=f"https://t.me/{BOT_USERNAME}?startapp=request_{request_id}_admin",
+        ),
+    ]])
+
+
 ST_LABEL = tx.STATUS_LABELS
 
 
@@ -3862,7 +3872,7 @@ async def _escalate_offers(rid):
     try:
         await bot.send_message(
             ADMIN_CHAT_ID, message_text, parse_mode="HTML",
-            reply_markup=request_button(rid, admin=True),
+            reply_markup=channel_request_button(rid),
         )
     except Exception as exc:
         log.warning("Offer escalation HTML delivery failed for %s: %s", rid, exc)
@@ -3878,7 +3888,7 @@ async def _escalate_offers(rid):
             f"Старшие: {senior_names or 'не настроены'}"
         )
         await bot.send_message(
-            ADMIN_CHAT_ID, plain_text, reply_markup=request_button(rid, admin=True)
+            ADMIN_CHAT_ID, plain_text, reply_markup=channel_request_button(rid)
         )
     with db() as c:
         c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
