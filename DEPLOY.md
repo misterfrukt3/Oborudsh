@@ -19,8 +19,11 @@ cd /srv/oborudka
 ```
 
 ```bash
-git init -b main
+git init
+git symbolic-ref HEAD refs/heads/main
 ```
+
+На сервере установлен Git без поддержки `git init -b`; отдельная команда `symbolic-ref` задаёт `main` и совместима с этой версией.
 
 ```bash
 git remote add origin https://github.com/misterfrukt3/Oborudsh.git
