@@ -147,7 +147,7 @@ BOT_TOKEN, WEBAPP_URL, PORT=8737, ADMIN_CHAT_ID (канал), ADMIN_IDS, SENIOR_
 
 ## Release context (16.07.2026)
 
-- Один production-бот, один сервис `/opt/oborudka`, одна SQLite и одна Google-таблица. Второй сервис не создавать.
+- Один production-бот, один сервис `/srv/oborudka`, одна SQLite и одна Google-таблица. Второй сервис не создавать.
 - Runtime — Python 3.10+ в отдельном venv проекта; `aiogram==3.29.1`.
 - `ENABLE_PRODUCTION_ROLE=0` скрывает production до отдельного включения.
 - `equipment_units` хранит паспорта; `requests.issued_by/returned_by` заполняются только для новых действий после обновления.

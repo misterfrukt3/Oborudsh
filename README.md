@@ -31,4 +31,4 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest -v test_core.py
 ```
 
-Production использует один сервис `/opt/oborudka`; не создавайте второй бот или вторую базу. `ENABLE_PRODUCTION_ROLE=0` временно скрывает роль production. Google Sheets можно оставить выключенным — начисления сохранятся локально.
+Production использует один сервис `/srv/oborudka`; не создавайте второй бот или вторую базу. `ENABLE_PRODUCTION_ROLE=0` временно скрывает роль production. Google Sheets можно оставить выключенным — начисления сохранятся локально.

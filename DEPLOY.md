@@ -4,9 +4,9 @@
 
 Разработка продолжается в `/Users/aleksejdavydov/Projects/Оборудыш`, выпуск — в `misterfrukt3/Oborudsh`, ветка `main`. Разработчик сам делает проверки, commit и push; порядок — [GITHUB_MAC.md](GITHUB_MAC.md).
 
-Это отдельный процесс Оборудыша. Используются только его репозиторий, `/opt/oborudka`, `oborudka.service` и SQLite; настройки и скрипты ТехСценария сюда не переносятся.
+Это отдельный процесс Оборудыша. Используются только его репозиторий, `/srv/oborudka`, `oborudka.service` и SQLite; настройки и скрипты ТехСценария сюда не переносятся.
 
-Для существующего серверного checkout обновлять код через `git pull --ff-only origin main` в `/opt/oborudka`. Если checkout отсутствует или есть локальные изменения, сначала разобрать перенос с разработчиком; не клонировать поверх рабочей папки и не применять reset/clean. `.env`, SQLite, справочники и пользовательские данные сохраняются на сервере. Дальнейшие шаги — в разделе «Главное» ниже.
+Для существующего серверного checkout обновлять код через `git pull --ff-only origin main` в `/srv/oborudka`. Если checkout отсутствует или есть локальные изменения, сначала разобрать перенос с разработчиком; не клонировать поверх рабочей папки и не применять reset/clean. `.env`, SQLite, справочники и пользовательские данные сохраняются на сервере. Дальнейшие шаги — в разделе «Главное» ниже.
 
 ## Обновление 04.10.2026 — удаление команд медиа-выезда
 
@@ -26,7 +26,7 @@
 
 ## Главное: как обновить уже работающего Оборудыша на VPS
 
-Ниже — порядок для текущей схемы: один каталог `/opt/oborudka`, один сервис `oborudka.service`, одна база `bot/oborudka.db` и один боевой бот.
+Ниже — порядок для текущей схемы: один каталог `/srv/oborudka`, один сервис `oborudka.service`, одна база `bot/oborudka.db` и один боевой бот.
 
 ### Что подготовить на компьютере
 
@@ -59,13 +59,13 @@ sudo systemctl status oborudka
 ### 2. Обязательно сохранить текущую версию и базу
 
 ```bash
-cd /opt/oborudka
+cd /srv/oborudka
 stamp=$(date +%Y%m%d-%H%M%S)
-sudo mkdir -p /opt/oborudka-backups/$stamp
-sudo cp bot/oborudka.db /opt/oborudka-backups/$stamp/oborudka.db
-sudo cp bot/main.py bot/requirements.txt /opt/oborudka-backups/$stamp/
-sudo cp -a prototype /opt/oborudka-backups/$stamp/prototype
-echo "Резервная копия: /opt/oborudka-backups/$stamp"
+sudo mkdir -p /srv/oborudka-backups/$stamp
+sudo cp bot/oborudka.db /srv/oborudka-backups/$stamp/oborudka.db
+sudo cp bot/main.py bot/requirements.txt /srv/oborudka-backups/$stamp/
+sudo cp -a prototype /srv/oborudka-backups/$stamp/prototype
+echo "Резервная копия: /srv/oborudka-backups/$stamp"
 ```
 
 Не удаляйте `bot/oborudka.db`: в ней находятся пользователи, заявки, переписки и очередь начислений.
@@ -75,16 +75,16 @@ echo "Резервная копия: /opt/oborudka-backups/$stamp"
 Если проект на VPS подключён к Git и изменения уже опубликованы:
 
 ```bash
-cd /opt/oborudka
+cd /srv/oborudka
 git pull --ff-only origin main
 ```
 
-Если файлы загружаются вручную через WinSCP/SFTP, замените их по тем же путям внутри `/opt/oborudka`. Папку `prototype/fonts/` переносите целиком.
+Если файлы загружаются вручную через WinSCP/SFTP, замените их по тем же путям внутри `/srv/oborudka`. Папку `prototype/fonts/` переносите целиком.
 
 После копирования проверьте наличие основных файлов:
 
 ```bash
-cd /opt/oborudka
+cd /srv/oborudka
 ls -l bot/main.py bot/requirements.txt prototype/index.html prototype/style.css
 ls -l prototype/fonts/
 ```
@@ -94,7 +94,7 @@ ls -l prototype/fonts/
 Команда ниже обновляет только окружение Оборудыша. Python и библиотеки остальных ботов она не меняет.
 
 ```bash
-cd /opt/oborudka
+cd /srv/oborudka
 bot/venv/bin/python -m pip install --upgrade pip
 bot/venv/bin/pip install -r bot/requirements.txt
 bot/venv/bin/python --version
@@ -103,7 +103,7 @@ bot/venv/bin/python --version
 Нужен Python 3.10 или новее. Если `bot/venv` ещё не существует, сначала создайте его отдельным Python 3.10+:
 
 ```bash
-cd /opt/oborudka
+cd /srv/oborudka
 python3.10 -m venv bot/venv
 bot/venv/bin/pip install -r bot/requirements.txt
 ```
@@ -115,7 +115,7 @@ bot/venv/bin/pip install -r bot/requirements.txt
 Откройте существующий файл:
 
 ```bash
-sudo nano /opt/oborudka/bot/.env
+sudo nano /srv/oborudka/bot/.env
 ```
 
 Добавьте отсутствующие строки:
@@ -176,19 +176,19 @@ sudo journalctl -u oborudka -n 100 --no-pager
 Посмотрите имя последней резервной папки:
 
 ```bash
-ls -lt /opt/oborudka-backups
+ls -lt /srv/oborudka-backups
 ```
 
 Затем подставьте её имя вместо `ИМЯ_КОПИИ`:
 
 ```bash
 sudo systemctl stop oborudka
-cd /opt/oborudka
-sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/oborudka.db bot/oborudka.db
-sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/main.py bot/main.py
-sudo cp /opt/oborudka-backups/ИМЯ_КОПИИ/requirements.txt bot/requirements.txt
+cd /srv/oborudka
+sudo cp /srv/oborudka-backups/ИМЯ_КОПИИ/oborudka.db bot/oborudka.db
+sudo cp /srv/oborudka-backups/ИМЯ_КОПИИ/main.py bot/main.py
+sudo cp /srv/oborudka-backups/ИМЯ_КОПИИ/requirements.txt bot/requirements.txt
 sudo mv prototype "prototype.failed-$(date +%Y%m%d-%H%M%S)"
-sudo cp -a /opt/oborudka-backups/ИМЯ_КОПИИ/prototype ./prototype
+sudo cp -a /srv/oborudka-backups/ИМЯ_КОПИИ/prototype ./prototype
 bot/venv/bin/pip install -r bot/requirements.txt
 sudo systemctl start oborudka
 sudo systemctl status oborudka
@@ -296,8 +296,8 @@ cd "D:\Media BMSTU\Оборудыш\bot"
 
 ```bash
 sudo apt update && sudo apt install -y python3-venv git
-# файлы проекта → /opt/oborudka (git clone или scp папок bot/ и prototype/)
-cd /opt/oborudka/bot
+# файлы проекта → /srv/oborudka (git clone или scp папок bot/ и prototype/)
+cd /srv/oborudka/bot
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 cp .env.example .env && nano .env
@@ -314,8 +314,8 @@ Description=Oborudka bot + Mini App static
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/oborudka/bot
-ExecStart=/opt/oborudka/bot/venv/bin/python main.py
+WorkingDirectory=/srv/oborudka/bot
+ExecStart=/srv/oborudka/bot/venv/bin/python main.py
 Restart=always
 RestartSec=5
 
@@ -354,7 +354,7 @@ sudo systemctl reload caddy
 
 ### Обновление прототипа на сервере
 
-Заменить файлы в `/opt/oborudka/prototype/` (index.html, catalog.js, img/) — рестарт не нужен, статика читается с диска на каждый запрос.
+Заменить файлы в `/srv/oborudka/prototype/` (index.html, catalog.js, img/) — рестарт не нужен, статика читается с диска на каждый запрос.
 
 ---
 
@@ -420,7 +420,7 @@ sudo nginx -t && sudo nginx -s reload
 
 ## Final single-service release procedure
 
-Use one directory `/opt/oborudka`, one systemd unit `oborudka.service`, port `8737`, one bot token, one database and one Google Sheet.
+Use one directory `/srv/oborudka`, one systemd unit `oborudka.service`, port `8737`, one bot token, one database and one Google Sheet.
 
 ### Isolated Python 3.10+
 
@@ -429,13 +429,13 @@ Do not upgrade or replace the server's system Python. Install a side-by-side int
 ```bash
 sudo apt update
 sudo apt install -y python3.10 python3.10-venv
-cd /opt/oborudka
+cd /srv/oborudka
 python3.10 -m venv bot/venv
 bot/venv/bin/python -m pip install --upgrade pip
 bot/venv/bin/pip install -r bot/requirements.txt
 ```
 
-The service must keep `ExecStart=/opt/oborudka/bot/venv/bin/python main.py`. Other bots and `/usr/bin/python3` are untouched.
+The service must keep `ExecStart=/srv/oborudka/bot/venv/bin/python main.py`. Other bots and `/usr/bin/python3` are untouched.
 
 ### Google Sheets
 
@@ -473,7 +473,7 @@ Always stop and back up before replacing the backend:
 
 ```bash
 sudo systemctl stop oborudka
-cd /opt/oborudka
+cd /srv/oborudka
 stamp=$(date +%Y%m%d-%H%M%S)
 mkdir -p backup/releases/$stamp
 cp bot/oborudka.db backup/releases/$stamp/oborudka.db

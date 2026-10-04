@@ -25,6 +25,7 @@
 
 ## Mac и выпуск через GitHub (04.10.2026)
 
+- Владелец подтвердил серверную папку `/srv/oborudka`; обновлять существующий проект именно там. Старые упоминания `/opt` не использовать и папку не переносить. Сервис остаётся `oborudka.service`.
 - Эта настройка относится только к Оборудышу. ТехСценарий — пример процесса обновления, отдельный проект; не менять его, не объединять репозитории, конфигурации, сервисы или данные без отдельного запроса.
 - Рабочая папка остаётся `/Users/aleksejdavydov/Projects/Оборудыш`, `origin` — `https://github.com/misterfrukt3/Oborudsh.git`, ветка `main`. После завершённой пачки правок разработчик сам проверяет, коммитит и отправляет изменения в `origin/main`, затем сообщает hash и инструкции выкладки. Не включать чужие незавершённые правки в коммит.
 - Порядок описан в `GITHUB_MAC.md`. Получение новых версий — `git pull --ff-only origin main` в существующей папке; повторное клонирование, hard reset, clean и force push не применять для обновления.
@@ -211,7 +212,7 @@ BOT_TOKEN, WEBAPP_URL, PORT=8737, ADMIN_CHAT_ID (канал), ADMIN_IDS, SENIOR_
 
 ## Release context (16.07.2026)
 
-- There is one production bot, one `/opt/oborudka` service, one SQLite database and one Google spreadsheet. Local DEV mode is the test environment; do not create a second bot/service.
+- There is one production bot, one `/srv/oborudka` service, one SQLite database and one Google spreadsheet. Local DEV mode is the test environment; do not create a second bot/service.
 - Runtime is Python 3.10+ in the project venv. Never replace `/usr/bin/python3` or modify venvs of other bots. `aiogram==3.29.1` is pinned in `bot/requirements.txt`.
 - `production` remains implemented but is temporarily hidden. `ENABLE_PRODUCTION_ROLE=0` removes it from registration, verification, user management and visible copy, and API assignment is rejected. Set the flag to `1` and restart to restore it.
 - Frontend polling uses lightweight `/api/revision`; `/api/me` is loaded only when the database revision changes. Polling pauses while the Mini App is hidden.
