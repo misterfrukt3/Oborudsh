@@ -123,6 +123,49 @@ class OctoberUpdatesTest(unittest.TestCase):
                 sync.assert_not_called()
                 message.answer.assert_not_awaited()
 
+    def test_membersync_reports_department_addition_change_and_removal_without_role_change(self):
+        for previous, current, expected in [
+            (['Видео'], ['Видео', 'СММ'], 'Отделы: Видео → Видео, СММ'),
+            (['Видео'], ['Фото'], 'Отделы: Видео → Фото'),
+            (['Видео', 'СММ'], ['Видео'], 'Отделы: Видео, СММ → Видео'),
+            ([], ['Видео'], 'Отделы: нет → Видео'),
+            (['Видео'], [], 'Отделы: Видео → нет'),
+        ]:
+            with self.subTest(previous=previous, current=current):
+                with main.db() as c:
+                    c.execute("UPDATE users SET username='tester',role='активист',orgs=?,deps=? WHERE id=1",
+                              (json.dumps(['Media BMSTU']), json.dumps(previous)))
+                member = dict(self.member(), deps=current)
+                with patch.object(main, 'MEMBERS_SHEET_ID', 'test'), patch.object(main, '_members_snapshot', return_value={'x': [member]}), patch.dict(main._MEMBERS_CACHE, error=''):
+                    for text in ['/membersync', '/membersync apply']:
+                        message = SimpleNamespace(from_user=SimpleNamespace(id=9), chat=SimpleNamespace(type='private'), answer=AsyncMock(), text=text)
+                        with patch.object(main, 'is_senior', return_value=True), patch.object(main, 'sse_broadcast', new=AsyncMock()):
+                            asyncio.run(main.cmd_membersync(message))
+                        response = '\n'.join(call.args[0] for call in message.answer.await_args_list)
+                        self.assertIn(expected, response)
+                        self.assertNotIn('Роль: активист → активист', response)
+                        if text == '/membersync':
+                            self.assertEqual(json.loads(main.get_user(1)['deps']), previous)
+                    self.assertEqual(json.loads(main.get_user(1)['deps']), current)
+                    self.assertEqual(main.sync_registered_members()['changed'], [])
+
+    def test_membersync_reports_each_changed_field_and_ignores_list_reordering(self):
+        with main.db() as c:
+            c.execute("UPDATE users SET username='tester',orgs=?,deps=? WHERE id=1",
+                      (json.dumps(['Media BMSTU']), json.dumps(['Видео'])))
+        member = self.member(name='New User Name')
+        member['deps'] = ['Фото', 'СММ']
+        member['orgs'] = ['Media BMSTU', 'Студсовет']
+        with patch.object(main, 'MEMBERS_SHEET_ID', 'test'), patch.object(main, '_members_snapshot', return_value={'x': [member]}), patch.dict(main._MEMBERS_CACHE, error=''):
+            changes = main.sync_registered_members(True)['changed']
+            self.assertEqual(len(changes), 1)
+            for expected in ['ФИО: Test User Name → New User Name', 'Роль: стажёр → активист',
+                             'Отделы: Видео → Фото, СММ', 'Организации: Media BMSTU → Media BMSTU, Студсовет']:
+                self.assertIn(expected, changes[0])
+            member['deps'].reverse()
+            member['orgs'].reverse()
+            self.assertEqual(main.sync_registered_members()['changed'], [])
+
 
 class TripUpdatesTest(unittest.TestCase):
     setUp = test_core.CoreRulesTest.setUp

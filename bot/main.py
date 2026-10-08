@@ -2178,12 +2178,19 @@ def sync_registered_members(apply=False):
                 continue
             member = _merge_members(matches)
             report['matched'] += 1
-            changed = (user['name'] != member['name'] or user['role'] != member['role']
-                       or set(json.loads(user['orgs'] or '[]')) != set(member['orgs'])
-                       or set(json.loads(user['deps'] or '[]')) != set(member['deps']))
-            if not changed:
+            changes = []
+            for key, label in [('name', 'ФИО'), ('role', 'Роль')]:
+                if user[key] != member[key]:
+                    changes.append(f"{label}: {user[key] or 'не указано'} → {member[key] or 'не указано'}")
+            for key, label in [('deps', 'Отделы'), ('orgs', 'Организации')]:
+                previous = json.loads(user[key] or '[]')
+                if set(previous) != set(member[key]):
+                    before = ', '.join(previous) or 'нет'
+                    after = ', '.join(member[key]) or 'нет'
+                    changes.append(f'{label}: {before} → {after}')
+            if not changes:
                 continue
-            report['changed'].append(f"{member['name']} (ID {user['id']}): {user['role']} → {member['role']}")
+            report['changed'].append(f"{member['name']} (ID {user['id']})\n" + '\n'.join(changes))
             if apply:
                 c.execute('UPDATE users SET name=?,role=?,orgs=?,deps=? WHERE id=?',
                           (member['name'], member['role'], json.dumps(member['orgs'], ensure_ascii=False),
