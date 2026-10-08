@@ -45,7 +45,7 @@ const assert=require('node:assert/strict');
    role='senior';resetTo('adminReq',{id:requests.find(r=>r.status==='new').id});
  });
  await page.waitForTimeout(450);
- assert.equal(await page.getByRole('button',{name:'Отклонить с причиной',exact:true}).count(),1);
+ assert.equal(await page.getByRole('button',{name:'Отменить с причиной',exact:true}).count(),1);
  await page.screenshot({path:'tests/senior-request-320.png',fullPage:true});
  await page.evaluate(()=>{
    SRV={};window.savedApi=api;api=async()=>{throw Error('Доставка временно недоступна');};

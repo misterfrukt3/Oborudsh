@@ -1388,10 +1388,10 @@ SCREENS.reqDetail = ({id}) => {
   const term = ["rejected","canceled"].includes(r.status);
   const idx = r.status==='approved'&&r.curator?FLOW.indexOf('curator'):FLOW.indexOf(r.status);
   const tl = term
-    ? r.history.map((h,i)=>`<div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===r.history.length-1?"color:var(--destructive)":""}">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")
+    ? r.history.map((h,i)=>`<div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===r.history.length-1?"color:var(--destructive)":""}">${ST[h[0]].l}</div><div class="d">${escHtml(h[1])}</div></div>`).join("")
     : FLOW.map((st,i)=>{
         const h = r.history.find(x=>x[0]===st);
-        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST[st].l}</div>${h?'<div class="d">'+h[1]+"</div>":""}</div>`;
+        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST[st].l}</div>${h?'<div class="d">'+escHtml(h[1])+"</div>":""}</div>`;
       }).join("");
   const editable = ["new","curator"].includes(r.status);
   const fact = (r.takenAt||r.returnedAt) ? `<div class="hud" style="margin-top:8px">факт: взял ${r.takenAt||"—"}${r.returnedAt?" · вернул "+r.returnedAt:""}</div>` : "";
@@ -1423,8 +1423,8 @@ SCREENS.reqDetail = ({id}) => {
       ${chat}
       ${editable?`<div class="btnrow" style="margin-top:14px">
         <button class="btn-sm grow" style="padding:12px" onclick="startEditReq(${r.id})">✏️ Редактировать</button>
-        <button class="btn-sm danger grow" style="padding:12px" onclick="cancelReq(${r.id})">Отменить заявку</button>
-      </div><p class="sub" style="margin-top:8px;padding:0 4px">Редактирование и отмена доступны до согласования.</p>`:""}
+      </div><p class="sub" style="margin-top:8px;padding:0 4px">Редактирование доступно до согласования.</p>`:""}
+      ${r.me&&['new','curator','approved'].includes(r.status)?`<button class="btn-sm danger" style="margin-top:14px" onclick="cancelReq(${r.id})">Отменить с причиной</button><p class="sub">Отмена доступна до выдачи оборудования.</p>`:''}
       ${r.status==="issued"?mainBtn("🔁 Сдать оборудование","startReturn("+r.id+")"):""}
       ${["closed","rejected","canceled"].includes(r.status)?mainBtn("🔁 Повторить заявку","repeatReq("+r.id+")","secondary"):""}`,
     after: ()=>markRead("req", id)
@@ -1442,13 +1442,19 @@ function sendChat(id){
   toast("🔔 Куратору "+(r.curator||"")+" ушло уведомление от бота");
 }
 function cancelReq(id){
-  confirmModal("Отменить заявку?","Оборудование освободится в календаре, карточка в админ-чате обновится.",()=>{
-    if(SRV){ srvDo("request/action",{id, action:"cancel"}, ()=>{ resetTo("home"); toast("Заявка ID "+id+" отменена"); }); return; }
+  cancelReasonModal('Отменить заявку',comment=>{
+    if(SRV){ srvDo("request/action",{id, action:"cancel",comment}, ()=>{ $('overlay').innerHTML='';resetTo("home"); toast("Заявка ID "+id+" отменена"); }); return; }
     const r = requests.find(x=>x.id===id);
-    r.status="canceled"; r.history.push(["canceled","02.07, "+new Date().toTimeString().slice(0,5)]);
-    resetTo("home"); toast("Заявка ID "+id+" отменена");
+    r.status="canceled"; r.history.push(["canceled",new Date().toLocaleString('ru-RU')+' · '+comment]);
+    $('overlay').innerHTML='';resetTo("home"); toast("Заявка ID "+id+" отменена");
   });
 }
+let cancelReasonSubmit=null;
+function cancelReasonModal(title,submit){
+  cancelReasonSubmit=submit;
+  $('overlay').innerHTML=`<div class="modal-veil"><div class="modal"><h3>${escHtml(title)}</h3><p>Укажите причину. Она сохранится в истории заявки.</p><textarea id="cancel-reason" rows="3" maxlength="500" placeholder="Причина отмены"></textarea><div class="acts"><button class="btn-sm" onclick="$('overlay').innerHTML=''">Назад</button><button class="btn-sm danger" onclick="submitCancelReason()">Подтвердить отмену</button></div></div></div>`;
+}
+function submitCancelReason(){const reason=$('cancel-reason').value.trim();if(!reason){toast('Укажите причину отмены');return;}cancelReasonSubmit(reason);}
 /* ---- реальные фото сдачи: файл с телефона -> сжатие до 1280px -> base64 на сервер ---- */
 let retPhotos = [], hoPhotos = [], appealPhotos = [], bcPhotos = [];
 function photoArr(kind){ return kind==="ret" ? retPhotos : kind==="ho" ? hoPhotos : kind==="appeal" ? appealPhotos : bcPhotos; }
@@ -1649,10 +1655,10 @@ SCREENS.studioDetail = ({id}) => {
   const term = ["rejected","canceled"].includes(b.status);
   const idx = FLOW626.indexOf(b.status);
   const tl = term
-    ? b.history.map((h,i)=>`<div class="tl-step ${i<b.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===b.history.length-1?"color:var(--destructive)":""}">${ST626[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")
+    ? b.history.map((h,i)=>`<div class="tl-step ${i<b.history.length-1?"done":"now"}"><span class="n"></span><div class="t" style="${i===b.history.length-1?"color:var(--destructive)":""}">${ST626[h[0]].l}</div><div class="d">${escHtml(h[1])}</div></div>`).join("")
     : FLOW626.map((st,i)=>{
         const h = b.history.find(x=>x[0]===st);
-        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST626[st].l}</div>${h?'<div class="d">'+h[1]+"</div>":""}</div>`;
+        return `<div class="tl-step ${i<idx?"done":i===idx?"now":"pending"}"><span class="n"></span><div class="t">${ST626[st].l}</div>${h?'<div class="d">'+escHtml(h[1])+"</div>":""}</div>`;
       }).join("");
   /* смотрю как куратор/админ (не владелец) — переписка идёт с заявителем, реплики зеркалим */
   const iCur = !b.me && (myCur(b) || (SRV?SRV.isAdmin:role!=="user"));
@@ -1680,13 +1686,12 @@ SCREENS.studioDetail = ({id}) => {
       <div class="sec-label">Статус</div>
       <div class="card"><div class="tl">${tl}</div></div>
       ${chat}
-      ${["new","approved"].includes(b.status)&&isSeniorNow()?`<button class="btn-sm danger" onclick="seniorCancel626(${b.id})">Отменить с причиной</button>`:""}
+      ${["new","approved"].includes(b.status)&&(isSeniorNow()||(!studioStarted(b)&&(b.me||myCur(b))))?`<button class="btn-sm danger" onclick="cancel626(${b.id})">Отменить с причиной</button>`:""}
       ${timeChangeBanner('626',b)}
       ${bookingAdminControls('626',b)}
       ${["approved","ret"].includes(b.status)?(b.curator?(myCur(b)||isSeniorNow()?`<button class="btn-sm" onclick="release626(${b.id})">Сменить куратора</button>`:""):((SRV?SRV.isAdmin:role!=="user")?`<button class="btn-sm" onclick="take626(${b.id})">Стать куратором</button>`:"")):""}
       ${(b.me && ["new","approved"].includes(b.status))?`<div class="btnrow" style="margin-top:14px">
         ${b.status==="approved"?'<button class="btn-sm ok grow" style="padding:12px" onclick="handover626('+b.id+')">Сдать аудиторию</button>':""}
-        ${!studioStarted(b)?`<button class="btn-sm danger grow" style="padding:12px" onclick="cancel626(${b.id})">Отменить бронь</button>`:""}
       </div>`:""}
       ${(b.status==="ret" && (myCur(b) || isSeniorNow()))?mainBtn("Завершить бронь","close626("+b.id+")"):""}`,
     after: ()=>markRead("626", b.id)
@@ -1744,9 +1749,7 @@ function studioStarted(b){
   return !Number.isFinite(start)||Date.now()>=start;
 }
 function seniorCancel626(id){
-  const comment=prompt("Причина отмены брони 626:");if(!comment||!comment.trim())return;
-  if(SRV){srvDo("626/action",{id,action:"cancel",comment:comment.trim()},()=>{render();toast("Бронь отменена");});return;}
-  bookings626.find(b=>b.id===id).status="canceled";render();
+  cancel626(id);
 }
 function release626(id){
   confirmModal("Сменить куратора 626?","Бронь сохранится. После снятия текущего куратора другой администратор сможет взять её в работу.",()=>{
@@ -1755,12 +1758,12 @@ function release626(id){
   });
 }
 function cancel626(id){
-  if(studioStarted(bookings626.find(b=>b.id===id))){toast("Бронь началась — отправьте фотографии сдачи");render();return;}
-  confirmModal("Отменить бронь 626?","Слот освободится в графике.",()=>{
-    if(SRV){ srvDo("626/action",{id, action:"cancel"}, ()=>{ resetTo("home"); toast("Бронь 626 отменена"); }); return; }
+  if(!isSeniorNow()&&studioStarted(bookings626.find(b=>b.id===id))){toast("Бронь началась — отправьте фотографии сдачи");render();return;}
+  cancelReasonModal('Отменить бронь 626',comment=>{
+    if(SRV){ srvDo("626/action",{id, action:"cancel",comment}, ()=>{ $('overlay').innerHTML='';render();toast("Бронь 626 отменена"); }); return; }
     const b = bookings626.find(x=>x.id===id);
-    b.status="canceled"; b.history.push(["canceled","02.07, "+new Date().toTimeString().slice(0,5)]);
-    resetTo("home"); toast("Бронь 626 отменена");
+    b.status="canceled"; b.history.push(["canceled",new Date().toLocaleString('ru-RU')+' · '+comment]);
+    $('overlay').innerHTML='';render();toast("Бронь 626 отменена");
   });
 }
 
@@ -1939,7 +1942,7 @@ SCREENS.adminReq = ({id}) => {
     </div>`;
   return {
     body:`
-      ${isSeniorNow() && ["new","curator","approved"].includes(r.status)?`<button class="btn-sm danger" style="margin-bottom:12px" onclick="rejReqModal(${id})">Отклонить с причиной</button>`:""}
+      ${["new","curator","approved"].includes(r.status)&&(isSeniorNow()||myCur(r)||!r.curator||r.status==='new')?`<button class="btn-sm danger" style="margin-bottom:12px" onclick="rejReqModal(${id})">Отменить с причиной</button>`:""}
       <div class="card">
         <div class="row" style="margin-bottom:8px">
           <div class="grow"><div class="hud">ID <b>${r.id}</b> · создана ${r.history[0][1]}</div>
@@ -1959,7 +1962,7 @@ SCREENS.adminReq = ({id}) => {
       <div class="sec-label">История</div>
       <div class="card"><div class="tl">${r.history.map((h,i)=>`
         <div class="tl-step ${i<r.history.length-1?"done":"now"}"><span class="n"></span>
-        <div class="t">${ST[h[0]].l}</div><div class="d">${h[1]}</div></div>`).join("")}</div></div>
+        <div class="t">${ST[h[0]].l}</div><div class="d">${escHtml(h[1])}</div></div>`).join("")}</div></div>
       ${chat}
       ${timeChangeBanner('req',r)}
       ${bookingAdminControls('req',r)}
@@ -2007,7 +2010,7 @@ function rejReqModal(id){
         <input type="text" id="rejreq-reason" maxlength="200" placeholder="Например: неполный комплект">
         <div class="acts">
           <button class="btn-sm" onclick="$('overlay').innerHTML=''">Отмена</button>
-          <button class="btn-sm danger" onclick="const rr=$('rejreq-reason')?$('rejreq-reason').value.trim():'';$('overlay').innerHTML='';adminAct(${id},'rejected',rr)">Отклонить</button>
+          <button class="btn-sm danger" onclick="const rr=$('rejreq-reason')?$('rejreq-reason').value.trim():'';if(!rr){toast('Укажите причину отказа');return;}adminAct(${id},'rejected',rr);$('overlay').innerHTML='';">Отклонить</button>
         </div></div></div>`;
 }
 /* Теоретические номера экземпляров: система предлагает минимальный свободный,
@@ -2824,6 +2827,6 @@ if(IN_TG){
   }
 }
 </script>
-<script src="media-trip.js?v=20261004-trip-teams"></script>
+<script src="media-trip.js?v=20261008-members-access"></script>
 </body>
 </html>

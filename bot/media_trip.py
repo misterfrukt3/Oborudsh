@@ -7,7 +7,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-TESTERS = {1896340090, 1122855409, 5027289530, 849637263, 566220990, 489836280}
+DEFAULT_STAFF = [1896340090, 5027289530]
 NEEDS = ['Камера (видео)', 'Камера (фото)', 'Звук', 'Свет (маленький)',
          'Свет (большой)', 'Штатив', 'Стабилизатор', 'Другое']
 ACTIVE = ('new', 'assembling', 'ready', 'issued')
@@ -46,7 +46,11 @@ class MediaTrip:
             if 'expires' not in {r['name'] for r in c.execute('PRAGMA table_info(trip_outbox)')}:
                 c.execute('ALTER TABLE trip_outbox ADD COLUMN expires REAL NOT NULL DEFAULT 0')
             c.execute('INSERT OR IGNORE INTO trip_settings VALUES(1,?)', (json.dumps(
-                dict(testing=True, staff=[], place='', channel=0), ensure_ascii=False),))
+                dict(testing=False, staff=DEFAULT_STAFF, place='', channel=0, access_version=2), ensure_ascii=False),))
+            settings = json.loads(c.execute('SELECT data FROM trip_settings WHERE id=1').fetchone()[0])
+            if settings.get('access_version', 0) < 2:
+                settings.update(testing=False, staff=settings.get('staff') or DEFAULT_STAFF, access_version=2)
+                c.execute('UPDATE trip_settings SET data=? WHERE id=1', (json.dumps(settings, ensure_ascii=False),))
 
     def settings(self):
         with self.db() as c:
@@ -55,11 +59,29 @@ class MediaTrip:
     def allowed(self, uid, settings=None):
         s = settings or self.settings()
         user = self.c['get_user'](uid)
-        return not (user and user['verified'] == 'blocked') and (not s['testing'] or uid in TESTERS)
+        if user and user['verified'] == 'blocked':
+            return False
+        if uid in s['staff']:
+            return True
+        with self.db() as c:
+            return bool(c.execute('SELECT 1 FROM trip_members m JOIN trip_teams t ON t.number=m.team WHERE m.uid=? AND t.deleted=0', (uid,)).fetchone())
 
     def manager(self, uid, settings=None):
         s = settings or self.settings()
-        return self.allowed(uid, s) and (uid in s['staff'] or (s['testing'] and uid in TESTERS))
+        return uid in s['staff'] and self.allowed(uid, s)
+
+    def channel(self, settings):
+        return settings['channel'] or self.c['ADMIN_CHAT_ID']
+
+    def enqueue_new(self, c, r, block, settings):
+        needs = ', '.join(f'{k} × {v}' for k, v in json.loads(r['needs']).items())
+        wanted = ', '.join(f"{self.item_name(c, i)} × {q}" for i, q in json.loads(r['wanted']))
+        self.enqueue(c, f"new:{r['id']}", [self.channel(settings)],
+                     f"Медиа выезд · заявка №{r['id']} · команда {r['team']}\nБлок: {self.fmt(block['start'])} — {self.fmt(block['end'])}\n{needs}\n{wanted}\nЗадача: {r['purpose']}")
+
+    def item_name(self, c, ident):
+        row = c.execute('SELECT name FROM trip_items WHERE id=?', (ident,)).fetchone()
+        return row[0] if row else f'Позиция {ident}'
 
     def current_block(self, now=None):
         now = time.time() if now is None else now
@@ -103,9 +125,9 @@ class MediaTrip:
                 r['history'] = [dict(h) for h in c.execute('SELECT uid,status,stamp FROM trip_history WHERE ref=? ORDER BY id', (r['id'],))]
             unsent = c.execute('SELECT COUNT(*) FROM trip_outbox WHERE sent=0').fetchone()[0] if manage else 0
         block = self.current_block()
-        return dict(allowed=True, canManage=manage, canConfigure=uid in TESTERS, team=team,
+        return dict(allowed=True, canManage=manage, canConfigure=manage, team=team,
                     teams=teams, blocks=blocks, items=items, requests=reqs, needs=NEEDS,
-                    currentBlock=block['id'] if block else None, settings=s if manage or uid in TESTERS else {'place': s['place']},
+                    currentBlock=block['id'] if block else None, settings=s if manage else {'place': s['place']},
                     unsent=unsent)
 
     def ids(self, value):
@@ -164,23 +186,22 @@ class MediaTrip:
     def mutate(self, body, uid):
         s = self.settings()
         if not self.allowed(uid, s):
-            return self.c['jerr']('Режим пока доступен только участникам тестирования.', 403)
+            return self.c['jerr']('Доступно только добавленным участникам команд и сотрудникам рентала.', 403)
         action = body.get('action')
         manage = self.manager(uid, s)
         if action in ('team', 'delete_team', 'block', 'item') and not manage:
             return self.c['jerr']('Доступно только команде рентала.', 403)
         with self.db() as c:
             if action == 'settings':
-                if uid not in TESTERS and not manage:
+                if not manage:
                     return self.c['jerr']('Недостаточно прав.', 403)
                 staff = self.ids(body.get('staff', []))
-                testing = bool(body.get('testing', True))
-                if not testing and not staff:
+                if not staff:
                     raise ValueError('Перед открытием режима назначьте команду рентала.')
                 channel = int(body.get('channel', 0))
                 if channel > 0:
                     raise ValueError('Укажите ID канала или группы, начиная с минуса.')
-                s = dict(testing=testing, staff=staff, channel=channel, place=str(body.get('place', '')).strip()[:300])
+                s = dict(testing=False, staff=staff, channel=channel, place=str(body.get('place', '')).strip()[:300], access_version=2)
                 c.execute('UPDATE trip_settings SET data=? WHERE id=1', (json.dumps(s, ensure_ascii=False),))
             elif action == 'team':
                 number = int(body['number'])
@@ -225,13 +246,7 @@ class MediaTrip:
                         raise ValueError('Сначала назначьте другого куратора.')
                     c.execute('DELETE FROM trip_members WHERE uid=? AND team=?', (person, number))
             elif action == 'join':
-                t = c.execute('SELECT * FROM trip_teams WHERE code=? AND deleted=0', (str(body.get('code', '')).strip(),)).fetchone()
-                if not t:
-                    raise ValueError('Неверный код команды.')
-                old = c.execute('SELECT team FROM trip_members WHERE uid=?', (uid,)).fetchone()
-                if old and old[0] != t['number']:
-                    raise ValueError('Вы уже в другой команде. Обратитесь к ренталу.')
-                c.execute('INSERT OR IGNORE INTO trip_members VALUES(?,?)', (uid, t['number']))
+                return self.c['jerr']('Участников добавляет куратор команды или сотрудник рентала.', 403)
             elif action == 'block':
                 kind, start, end = body['kind'], self.stamp(body['start']), self.stamp(body['end'])
                 ident = int(body.get('id', 0))
@@ -259,6 +274,8 @@ class MediaTrip:
                 else:
                     c.execute('INSERT INTO trip_items(name,total) VALUES(?,?)', (name, total))
             elif action == 'create':
+                if not self.channel(s):
+                    raise ValueError('Канал заявок не настроен. Обратитесь к сотруднику рентала.')
                 member = c.execute('SELECT team FROM trip_members WHERE uid=?', (uid,)).fetchone()
                 block = self.current_block()
                 if not member:
@@ -277,9 +294,7 @@ class MediaTrip:
                 ref = c.execute('INSERT INTO trip_requests(team,block,author,needs,purpose,wanted,created) VALUES(?,?,?,?,?,?,?)',
                                 (member[0], block['id'], uid, json.dumps(needs, ensure_ascii=False), purpose, json.dumps(wanted), time.time())).lastrowid
                 c.execute('INSERT INTO trip_history(ref,uid,status,stamp) VALUES(?,?,?,?)', (ref, uid, 'new', time.time()))
-                need_text = ', '.join(f'{k} × {v}' for k, v in needs.items())
-                wanted_text = ', '.join(f"{c.execute('SELECT name FROM trip_items WHERE id=?', (i,)).fetchone()[0]} × {q}" for i, q in wanted)
-                self.enqueue(c, f'new:{ref}', [s['channel']], f'Медиа выезд · заявка №{ref} · команда {member[0]}\nБлок: {self.fmt(block["start"])} — {self.fmt(block["end"])}\n{need_text}\n{wanted_text}\nЗадача: {purpose}')
+                self.enqueue_new(c, c.execute('SELECT * FROM trip_requests WHERE id=?', (ref,)).fetchone(), block, s)
             elif action == 'request':
                 ref, target = int(body['id']), body['status']
                 r = c.execute('SELECT r.*,b.start,b.end FROM trip_requests r JOIN trip_blocks b ON b.id=r.block WHERE r.id=?', (ref,)).fetchone()
@@ -323,7 +338,7 @@ class MediaTrip:
                         text += '\n' + reason
                     self.enqueue(c, f'status:{ref}:{target}', self.members(c, r['team']), text, ref, target,
                                  r['end'] if target == 'ready' else 0)
-                    self.enqueue(c, f'channel:{ref}:{target}', [s['channel']], text, ref,
+                    self.enqueue(c, f'channel:{ref}:{target}', [self.channel(s)], text, ref,
                                  target if target == 'ready' else '', r['end'] if target == 'ready' else 0)
             else:
                 raise ValueError('Неизвестное действие.')
@@ -334,6 +349,9 @@ class MediaTrip:
         s = self.settings()
         async with self.lock:
             with self.db() as c:
+                # Recover active requests created while no destination channel was configured.
+                for r in c.execute("SELECT r.*,b.start,b.end FROM trip_requests r JOIN trip_blocks b ON b.id=r.block WHERE r.status IN ('new','assembling','ready','issued')").fetchall():
+                    self.enqueue_new(c, r, r, s)
                 eligible = lambda ids: [i for i in ids if self.allowed(i, s)]
                 for b in c.execute('SELECT * FROM trip_blocks WHERE start>? AND start<=?', (now, now + 1800)).fetchall():
                     people = eligible([r[0] for r in c.execute('SELECT uid FROM trip_members')])
@@ -344,7 +362,7 @@ class MediaTrip:
                         self.enqueue(c, f'return:{r["id"]}', eligible(self.members(c, r['team'])),
                                      f'Медиа выезд · команда {r["team"]}: пора вернуть оборудование по заявке №{r["id"]}. Срок: {self.fmt(r["end"])}.', r['id'], 'issued', r['end'])
                     if now >= r['end']:
-                        self.enqueue(c, f'overdue:{r["id"]}', [s['channel']],
+                        self.enqueue(c, f'overdue:{r["id"]}', [self.channel(s)],
                                      f'Медиа выезд: команда {r["team"]} ещё не вернула оборудование по заявке №{r["id"]}. Блок закончился {self.fmt(r["end"])}.', r['id'], 'issued')
         bot = self.c['bot']
         if bot is None:

@@ -3,7 +3,7 @@ const MT_STATUS={new:'Подана',assembling:'Собирается',ready:'Г�
 const MT_NEEDS=['Камера (видео)','Камера (фото)','Звук','Свет (маленький)','Свет (большой)','Штатив','Стабилизатор','Другое'];
 let mtDraft={needs:{},wanted:{},purpose:''}, mtTab='active';
 let mtDemo={allowed:true,canManage:true,canConfigure:true,team:null,teams:[],deletedTeams:[],blocks:[],items:[],requests:[],needs:MT_NEEDS,
-  settings:{testing:true,staff:[],place:'',channel:0},currentBlock:null,unsent:0};
+  settings:{testing:false,staff:[1896340090,5027289530],place:'',channel:0},currentBlock:null,unsent:0};
 function mtData(){return SRV?SRV.mediaTrip:mtDemo;}
 function mtTime(ts){return new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ts*1000));}
 function mtInputTime(ts){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Moscow',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(ts*1000)).replace(' ','T');}
@@ -14,7 +14,7 @@ function mtField(label,id,value='',type='text',extra=''){
   return `<label class="mt-field"><span>${label}</span><input id="${id}" type="${type}" value="${escAttr(String(value))}" ${extra}></label>`;
 }
 function mtButton(label,fn,cls='primary'){return `<button class="btn-sm ${cls}" onclick="${fn}">${label}</button>`;}
-function mtGate(){const d=mtData();return d?.allowed?null:{body:'<div class="card sub">Режим пока доступен только участникам тестирования.</div>'};}
+function mtGate(){const d=mtData();return d?.allowed?null:{body:'<div class="card sub">Доступно только добавленным участникам команд и сотрудникам рентала. Обратитесь к куратору команды.</div>'};}
 function mtNotify(text){toast(text);}
 async function mtDo(body,after){
   if(_busy)return;
@@ -40,11 +40,10 @@ SCREENS.mediaTrip=()=>{
   const d=mtData(),block=mtCurrent(),team=d.teams.find(t=>t.number===d.team),active=d.requests.filter(r=>r.team===d.team&&['new','assembling','ready','issued'].includes(r.status));
   const onBlock=active.some(r=>r.block===block?.id);
   return {body:`<h1 class="big">Медиа выезд</h1><p class="sub">Оборудование для вашей команды на время блока.</p>
-    ${d.settings.testing?'<div class="mt-note">Тестирование · доступ ограничен</div>':''}
     ${d.canManage?`<div class="mt-actions">${mtButton('Панель рентала',"navTo('mediaTripRental')")}</div>`:''}
     ${d.canManage||d.canConfigure?`<div class="mt-actions">${mtButton('Настройки выезда',"navTo('mediaTripSettings')",'')}</div>`:''}
     ${team?`<div class="card"><b>Команда ${team.number}</b><p class="sub">Куратор: ${escHtml(team.members.find(m=>m.id===team.curator)?.name||String(team.curator))}</p><p class="sub">Участников: ${team.members.length}</p>${team.code?mtButton('Добавить участников',`navTo('mediaTripMembers',{number:${team.number}})`,''):''}</div>`:
-      `<div class="card"><b>Присоединиться к команде</b><p class="sub">Получите код у куратора.</p>${mtField('Код команды','mt-code','','text','autocomplete="off"')}${mtButton('Вступить',"mtDo({action:'join',code:$('mt-code').value})")}</div>`}
+      '<div class="card sub">Вы управляете ренталом. Для подачи заявки добавьте себя в команду через список участников.</div>'}
     <div class="sec-label">${block&&block.start<Date.now()/1000?'Текущий блок':'Ближайший блок'}</div>
     ${block?`<div class="card"><b>${mtKind(block)}</b><div class="hud">${mtTime(block.start)} — ${mtTime(block.end)}</div><p class="sub">Всё оборудование нужно вернуть к концу блока.</p>
       ${team&&!onBlock?mtButton('Подать заявку','mtOpenRequest()'):onBlock?'<p class="sub">У команды уже есть активная заявка на этот блок.</p>':''}</div>`:'<div class="card sub">Расписание ещё не задано.</div>'}
@@ -110,15 +109,15 @@ SCREENS.mediaTripSettings=()=>{
   const d=mtData();if(!d.canManage&&!d.canConfigure)return {body:'<div class="card sub">Недостаточно прав.</div>'};
   const s=d.settings;
   return {body:`<h1 class="big">Настройки выезда</h1><p class="sub">Расписание и сроки — по московскому времени.</p>
-    <label class="mt-check"><input id="mt-testing" type="checkbox" ${s.testing?'checked':''}> Только тестировщики</label><p class="sub">После отключения участники смогут вступать по коду команды. Панель рентала будет доступна только назначенным сотрудникам.</p>
+    <p class="sub">Медиа выезд доступен добавленным участникам команд. Сотрудники рентала управляют командами и заявками.</p>
     ${mtField('Команда рентала: ID или @username через запятую','mt-staff',(s.staff||[]).join(', '))}<p class="sub">По @username можно добавить тех, кто уже открывал бота. По Telegram ID — заранее.</p>
-    ${mtField('ID отдельного канала выезда','mt-channel',s.channel||'','text','inputmode="numeric" placeholder="-100…"')}<p class="sub">Добавьте бота администратором канала с правом отправки сообщений. Участники должны запустить бота для личных напоминаний.</p>
+    ${mtField('ID отдельного канала выезда','mt-channel',s.channel||'','text','inputmode="numeric" placeholder="-100…"')}<p class="sub">Если поле пустое, сообщения идут в основной канал заявок. Добавьте бота администратором канала с правом отправки сообщений. Участники должны запустить бота для личных напоминаний.</p>
     ${mtField('Фиксированное место выдачи','mt-place',s.place,'text','maxlength="300"')}`,
-    mainbtn:mainBtn('Сохранить настройки',"mtDo({action:'settings',testing:$('mt-testing').checked,staff:$('mt-staff').value,channel:$('mt-channel').value||0,place:$('mt-place').value})")};
+    mainbtn:mainBtn('Сохранить настройки',"mtDo({action:'settings',staff:$('mt-staff').value,channel:$('mt-channel').value||0,place:$('mt-place').value})")};
 };
 SCREENS.mediaTripTeams=()=>{
   const d=mtData();if(!d?.canManage)return {body:'<div class="card sub">Недостаточно прав.</div>'};
-  return {body:`<h1 class="big">Команды выезда</h1>${d.teams.map(t=>`<div class="card"><b>Команда ${t.number}</b><p class="sub">Куратор: ${escHtml(t.members.find(m=>m.id===t.curator)?.name||String(t.curator))}</p><div class="mt-actions">${mtButton('Участники и код',`navTo('mediaTripMembers',{number:${t.number}})`,'')}${mtButton('Сменить куратора',`$('mt-team-number').value=${t.number};$('mt-curator').value=${t.curator}`,'')}${mtButton('Удалить команду',`mtDeleteTeam(${t.number})`,'danger')}</div></div>`).join('')}
+  return {body:`<h1 class="big">Команды выезда</h1>${d.teams.map(t=>`<div class="card"><b>Команда ${t.number}</b><p class="sub">Куратор: ${escHtml(t.members.find(m=>m.id===t.curator)?.name||String(t.curator))}</p><div class="mt-actions">${mtButton('Участники',`navTo('mediaTripMembers',{number:${t.number}})`,'')}${mtButton('Сменить куратора',`$('mt-team-number').value=${t.number};$('mt-curator').value=${t.curator}`,'')}${mtButton('Удалить команду',`mtDeleteTeam(${t.number})`,'danger')}</div></div>`).join('')}
     <div class="sec-label">Добавить / изменить команду</div>${mtField('Номер команды','mt-team-number','','number','min="1" max="999"')}${mtField('Telegram ID или @username куратора','mt-curator')}`,
     mainbtn:mainBtn('Сохранить команду',"mtDo({action:'team',number:$('mt-team-number').value,curator:$('mt-curator').value})")};
 };
@@ -130,7 +129,7 @@ function mtDeleteTeam(number){
 SCREENS.mediaTripMembers=({number})=>{
   const d=mtData(),t=d?.teams?.find(t=>t.number===number);
   if(!t||!t.code)return {body:'<div class="card sub">Недостаточно прав.</div>'};
-  return {body:`<h1 class="big">Команда ${number}</h1><div class="card"><b>Код вступления</b><div class="mt-code">${escHtml(t.code)}</div><p class="sub">Участник открывает «Медиа выезд» и вводит этот код.</p></div>
+  return {body:`<h1 class="big">Команда ${number}</h1><p class="sub">Добавленные участники увидят кнопку «Медиа выезд» на главном экране.</p>
     ${t.members.map(m=>`<div class="mt-member"><span>${escHtml(m.name)}<small>ID ${m.id}${m.id===t.curator?' · куратор':''}</small></span>${m.id!==t.curator?mtButton('Убрать',`mtDo({action:'members',number:${number},remove:${m.id}})`,'danger'):''}</div>`).join('')}
     ${mtField('Добавить участников: ID или @username через запятую','mt-members')}`,
     mainbtn:mainBtn('Добавить участников',`mtDo({action:'members',number:${number},members:$('mt-members').value})`)};
@@ -156,7 +155,7 @@ function mtEditItem(id){const i=mtData().items.find(i=>i.id===id);$('mt-item-id'
 function mtDemoDo(b){
   const d=mtDemo,nextId=list=>Math.max(0,...list.map(x=>x.id||0))+1;
   if(b.action==='settings'){d.settings={...b,staff:String(b.staff).split(/[ ,]+/).filter(Boolean),channel:Number(b.channel)};}
-  else if(b.action==='team'){const number=Number(b.number),curator=Number(b.curator);if(!number||!curator)throw Error('Укажите номер команды и Telegram ID куратора.');if(d.deletedTeams.includes(number))throw Error('Номер удалённой команды сохранён в истории. Выберите другой номер.');let t=d.teams.find(t=>t.number===number);if(t)t.curator=curator;else d.teams.push({number,curator,code:'demo-'+number+'-'+crypto.randomUUID(),members:[{id:curator,name:'Куратор'}]});}
+  else if(b.action==='team'){const number=Number(b.number),curator=Number(b.curator);if(!number||!curator)throw Error('Укажите номер команды и Telegram ID куратора.');if(d.deletedTeams.includes(number))throw Error('Номер удалённой команды сохранён в истории. Выберите другой номер.');let t=d.teams.find(t=>t.number===number);if(t)t.curator=curator;else d.teams.push({number,curator,code:'demo-'+number+'-'+crypto.randomUUID(),members:[{id:curator,name:'Куратор'}]});if(curator===1896340090)d.team=number;}
   else if(b.action==='delete_team'){
     if(!d.canManage)throw Error('Доступно только команде рентала.');
     const number=Number(b.number);
@@ -167,7 +166,7 @@ function mtDemoDo(b){
     if(d.team===number)d.team=null;
   }
   else if(b.action==='members'){const t=d.teams.find(t=>t.number===b.number);if(b.remove)t.members=t.members.filter(m=>m.id!==b.remove);else String(b.members).split(/[ ,]+/).filter(Boolean).forEach(id=>{if(!t.members.some(m=>m.id===Number(id)))t.members.push({id:Number(id),name:'Участник '+id});});}
-  else if(b.action==='join'){const t=d.teams.find(t=>t.code===b.code);if(!t)throw Error('Неверный код команды.');d.team=t.number;}
+  else if(b.action==='join'){throw Error('Участников добавляет куратор команды или сотрудник рентала.');}
   else if(b.action==='block'){const start=Date.parse(b.start+':00+03:00')/1000,end=Date.parse(b.end+':00+03:00')/1000;if(!start||end<=start)throw Error('Проверьте начало и конец блока.');const v={id:Number(b.id)||nextId(d.blocks),kind:b.kind,start,end};const old=d.blocks.find(x=>x.id===v.id);if(old)Object.assign(old,v);else d.blocks.push(v);}
   else if(b.action==='item'){if(!b.name||Number(b.total)<1)throw Error('Укажите название и количество.');const v={id:Number(b.id)||nextId(d.items),name:b.name,total:Number(b.total),active:b.active===false?0:1},old=d.items.find(i=>i.id===v.id);if(old)Object.assign(old,v);else d.items.push(v);}
   else if(b.action==='create'){if(!d.team)throw Error('Сначала вступите в команду.');if(!b.purpose.trim()||(!Object.keys(b.needs).length&&!b.wanted.length))throw Error('Опишите задачу и выберите потребности.');if(d.requests.some(r=>r.team===d.team&&r.block===b.block&&['new','assembling','ready','issued'].includes(r.status)))throw Error('У команды уже есть активная заявка.');d.requests.unshift({id:nextId(d.requests),team:d.team,block:b.block,needs:b.needs,wanted:b.wanted,purpose:b.purpose,status:'new',kit:[],history:[]});}

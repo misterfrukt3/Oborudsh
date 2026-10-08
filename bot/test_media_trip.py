@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import main
 import test_core
-from media_trip import TESTERS
+from media_trip import DEFAULT_STAFF
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -39,17 +39,20 @@ class MediaTripTest(unittest.TestCase):
     def change(self, ref, status, **args):
         return self.call(dict(action='request', id=ref, status=status, **args))
 
-    def test_testers_gate_is_enforced_on_server(self):
+    def test_membership_gate_is_enforced_on_server(self):
         self.assertFalse(main.MEDIA_TRIP.payload(1)['allowed'])
         self.assertEqual(self.call(dict(action='join', code='none'), 1).status, 403)
         self.assertTrue(main.MEDIA_TRIP.payload(self.admin)['canManage'])
-        self.assertEqual(len(TESTERS), 6)
+        self.assertEqual(DEFAULT_STAFF, [1896340090, 5027289530])
+        self.assertFalse(main.MEDIA_TRIP.settings()['testing'])
+        self.assertFalse(main.MEDIA_TRIP.payload(1122855409)['allowed'])
 
     def test_membership_and_curator_permissions(self):
         self.setup_trip()
         with main.db() as c:
             code = c.execute('SELECT code FROM trip_teams WHERE number=1').fetchone()[0]
-        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 200)
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 403)
+        self.assertEqual(self.call(dict(action='members', number=1, members=[2]), 1).status, 200)
         self.assertEqual(self.call(dict(action='members', number=1, members=[3]), 2).status, 403)
         self.assertEqual(self.call(dict(action='members', number=1, members=[3]), 1).status, 200)
         self.assertEqual(self.call(dict(action='block', kind='task', start='2030-01-01T10:00', end='2030-01-01T11:00'), 1).status, 403)
@@ -69,13 +72,13 @@ class MediaTripTest(unittest.TestCase):
         self.assertNotEqual(before, main.db_revision())
         self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['teams'], [])
         for uid in (1, 2):
-            self.assertIsNone(main.MEDIA_TRIP.payload(uid)['team'])
-        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+            self.assertFalse(main.MEDIA_TRIP.payload(uid)['allowed'])
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 403)
         self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 400)
         self.assertEqual(self.call(dict(action='team', number=1, curator=1)).status, 200)
         with main.db() as c:
             self.assertNotEqual(code, c.execute('SELECT code FROM trip_teams WHERE number=1').fetchone()[0])
-        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 403)
         self.assertEqual(self.call(dict(action='team', number=2, curator=2)).status, 200)
 
     def test_delete_team_blocks_every_active_status_including_overdue_issue(self):
@@ -116,18 +119,19 @@ class MediaTripTest(unittest.TestCase):
         self.assertEqual(self.call(dict(action='delete_team', number=1)).status, 200)
         self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['requests'], before)
         self.assertEqual(main.MEDIA_TRIP.payload(self.admin)['teams'], [])
-        self.assertEqual(main.MEDIA_TRIP.payload(1)['requests'], [])
-        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 400)
+        self.assertFalse(main.MEDIA_TRIP.payload(1)['allowed'])
+        self.assertEqual(self.call(dict(action='join', code=code), 2).status, 403)
         self.assertEqual(self.call(dict(action='members', number=1, members=[2])).status, 403)
         self.assertEqual(self.call(dict(action='members', number=1, members=[2]), 1).status, 403)
         self.assertEqual(self.call(dict(action='team', number=1, curator=2)).status, 400)
         self.assertEqual(self.call(dict(action='team', number=2, curator=1)).status, 200)
         self.assertEqual(main.MEDIA_TRIP.payload(1)['requests'], [])
 
-    def test_delete_team_available_to_testers_in_testing_mode(self):
+    def test_former_testers_cannot_manage_teams(self):
         self.assertEqual(self.call(dict(action='team', number=1, curator=self.admin)).status, 200)
         self.assertEqual(self.call(dict(action='delete_team', number=1), 1).status, 403)
-        self.assertEqual(self.call(dict(action='delete_team', number=1), 1122855409).status, 200)
+        self.assertEqual(self.call(dict(action='delete_team', number=1), 1122855409).status, 403)
+        self.assertEqual(self.call(dict(action='delete_team', number=1), 5027289530).status, 200)
 
     def test_team_deletion_migration_preserves_existing_teams(self):
         # This fixture uses only the temporary database from CoreRulesTest.setUp.

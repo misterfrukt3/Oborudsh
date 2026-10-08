@@ -76,7 +76,7 @@ class WorkflowTest(unittest.TestCase):
             self.assertNotEqual(self.call(main.api_626_action,{'id':ref,'action':'cancel'}).status,200)
         future=self.studio(day='2030-06-02')
         with patch.object(main,'is_senior',return_value=False):
-            self.assertEqual(self.call(main.api_626_action,{'id':future,'action':'cancel'}).status,200)
+            self.assertEqual(self.call(main.api_626_action,{'id':future,'action':'cancel','comment':'Съёмка отменена'}).status,200)
 
     def test_senior_cancels_started_studio_only_with_reason(self):
         ref=self.studio()
@@ -108,8 +108,8 @@ class WorkflowTest(unittest.TestCase):
             asyncio.run(main.escalate_offers(ref));self.assertEqual(fake.send_message.await_count,2)
             with main.db() as c:c.execute("UPDATE admin_offers SET answer='no' WHERE ref=? AND admin_id=3",(ref,))
             asyncio.run(main.escalate_offers(ref));asyncio.run(main.escalate_offers(ref))
-            self.assertEqual(fake.send_message.await_count,3)
-            self.assertIn('tg://user?id=3',fake.send_message.call_args.args[1])
+            self.assertEqual(fake.send_message.await_count,4)
+            self.assertEqual({call.args[0] for call in fake.send_message.await_args_list[-2:]},set(main.OFFER_ESCALATION_RECIPIENTS))
 
     def test_only_first_accepting_admin_becomes_curator(self):
         from types import SimpleNamespace
@@ -125,7 +125,7 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(c.execute('SELECT curator FROM requests WHERE id=?',(ref,)).fetchone()['curator'],2)
         self.assertIn('уже обработана',callbacks[1].answer.call_args.args[0])
 
-    def test_channel_escalation_uses_request_link_and_is_not_repeated(self):
+    def test_private_escalation_uses_request_link_and_is_not_repeated(self):
         ref,_=self.request(status='approved')
         with main.db() as c:
             c.execute("INSERT INTO admin_offers(ref,admin_id,sent,answer) VALUES(?,2,1,'no')",(ref,))
@@ -137,10 +137,11 @@ class WorkflowTest(unittest.TestCase):
         with patch.object(main,'bot',fake),patch.object(main,'ADMIN_CHAT_ID',-100123),patch.object(main,'BOT_USERNAME','oborudka_test_bot'):
             asyncio.run(main.escalate_offers(ref))
             asyncio.run(main.escalate_offers(ref))
-        self.assertEqual(fake.send_message.await_count,1)
+        self.assertEqual(fake.send_message.await_count,2)
         button=fake.send_message.call_args.kwargs['reply_markup'].inline_keyboard[0][0]
-        self.assertEqual(button.url,f'https://t.me/oborudka_test_bot?startapp=request_{ref}_admin')
-        self.assertIsNone(button.web_app)
+        self.assertIsNone(button.url)
+        self.assertIn(f'requestId={ref}',button.web_app.url)
+        self.assertEqual({call.args[0] for call in fake.send_message.await_args_list},set(main.OFFER_ESCALATION_RECIPIENTS))
         with main.db() as c:
             self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
         with patch.object(main,'WEBAPP_URL','https://example.com/app'):
@@ -163,7 +164,7 @@ class WorkflowTest(unittest.TestCase):
         with main.db() as c:
             answers={row['admin_id']:row['answer'] for row in c.execute('SELECT admin_id,answer FROM admin_offers WHERE ref=?',(ref,))}
         self.assertEqual(answers,{2:'no',3:'ignored'})
-        self.assertEqual(fake.send_message.await_count,1)
+        self.assertEqual(fake.send_message.await_count,2)
         self.assertIn('за 6 часов',fake.send_message.call_args.args[1])
         self.assertIn('Проигнорировали (1)',fake.send_message.call_args.args[1])
 
@@ -180,7 +181,7 @@ class WorkflowTest(unittest.TestCase):
         fake=type('FakeBot',(),{'send_message':AsyncMock()})()
         with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',99):
             asyncio.run(main.process_expired_offer_campaigns())
-        self.assertEqual(fake.send_message.await_count,1)
+        self.assertEqual(fake.send_message.await_count,2)
         with main.db() as c:
             self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
 
@@ -213,16 +214,16 @@ class WorkflowTest(unittest.TestCase):
         async def send_message(*args,**kwargs):
             calls.append((args,kwargs))
             button=kwargs['reply_markup'].inline_keyboard[0][0]
-            self.assertIsNone(button.web_app)
-            self.assertEqual(button.url,f'https://t.me/oborudka_test_bot?startapp=request_{ref}_admin')
+            self.assertIsNone(button.url)
+            self.assertIn(f'requestId={ref}',button.web_app.url)
             if kwargs.get('parse_mode')=='HTML':
                 raise RuntimeError('bad HTML')
         fake=type('FakeBot',(),{})()
         fake.send_message=send_message
         with patch.object(main,'bot',fake),patch.object(main,'ADMIN_IDS',{2}),patch.object(main,'EXTRA_ADMIN_IDS',set()),patch.object(main,'SENIOR_ADMIN_IDS',{3}),patch.object(main,'ADMIN_CHAT_ID',-100123),patch.object(main,'BOT_USERNAME','oborudka_test_bot'):
             asyncio.run(main.process_expired_offer_campaigns())
-        self.assertEqual(len(calls),2)
-        self.assertNotIn('parse_mode',calls[1][1])
+        self.assertEqual(len(calls),4)
+        self.assertIsNone(calls[1][1]['parse_mode'])
         with main.db() as c:
             self.assertIsNotNone(c.execute('SELECT 1 FROM offer_escalations WHERE ref=?',(ref,)).fetchone())
 

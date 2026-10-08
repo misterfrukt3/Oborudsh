@@ -58,6 +58,7 @@ PORT = int(os.getenv("PORT", "8737"))
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or 0)
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 SENIOR_ADMIN_IDS = {int(x) for x in os.getenv("SENIOR_ADMIN_IDS", "").replace(" ", "").split(",") if x}
+OFFER_ESCALATION_RECIPIENTS = (1896340090, 5027289530)
 EXTRA_ADMIN_IDS = set()  # обычные админы, добавленные командой /addadmin (не из .env)
 WEBAPP_DIR = BASE.parent / "prototype"
 DB_PATH = BASE / "oborudka.db"
@@ -162,6 +163,8 @@ def workflow_schema():
         CREATE TABLE IF NOT EXISTS admin_offers(ref INTEGER, admin_id INTEGER, sent INTEGER DEFAULT 0,
             answer TEXT DEFAULT '', sent_at REAL DEFAULT 0, PRIMARY KEY(ref,admin_id));
         CREATE TABLE IF NOT EXISTS offer_escalations(ref INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS offer_escalation_receipts(ref INTEGER, recipient INTEGER,
+            PRIMARY KEY(ref,recipient));
         CREATE TABLE IF NOT EXISTS time_changes(kind TEXT,ref INTEGER,reason TEXT,
             requested_by INTEGER,requested_at TEXT,PRIMARY KEY(kind,ref));
         """)
@@ -1702,6 +1705,7 @@ def reset_booking_review(kind, ref):
         if kind == 'req':
             c.execute('DELETE FROM admin_offers WHERE ref=?', (ref,))
             c.execute('DELETE FROM offer_escalations WHERE ref=?', (ref,))
+            c.execute('DELETE FROM offer_escalation_receipts WHERE ref=?', (ref,))
     _push_hist(table,ref,'new','изменение данных → повторное согласование')
 
 
@@ -2138,6 +2142,53 @@ def _apply_sheet_member(uid: int, member: dict) -> None:
                 uid,
             ),
         )
+
+
+def sync_registered_members(apply=False):
+    """Refresh existing profiles from a fresh directory; never delete people or unblock them."""
+    if not MEMBERS_SHEET_ID:
+        raise ValueError('Не настроен лист «люди» (MEMBERS_SHEET_ID).')
+    directory = _members_snapshot(force=True)
+    if _MEMBERS_CACHE['error']:
+        raise ValueError('Свежий список недоступен. Изменения не применены; повторите позже.')
+    by_username = {}
+    for matches in directory.values():
+        for member in matches:
+            username = _norm_username(member['telegram'])
+            if username:
+                by_username.setdefault(username, []).append(member)
+    report = dict(checked=0, matched=0, changed=[], missing=[], ambiguous=[], blocked=0)
+    with db() as c:
+        for user in c.execute('SELECT * FROM users WHERE agreed=1 ORDER BY id').fetchall():
+            report['checked'] += 1
+            if user['verified'] == 'blocked':
+                report['blocked'] += 1
+                continue
+            matches = by_username.get(_norm_username(user['username']), [])
+            if matches and len({_norm_name(m['name']) for m in matches}) != 1:
+                report['ambiguous'].append(user['id'])
+                continue
+            if not matches:
+                matches = directory.get(_norm_name(user['name']), [])
+                if len(matches) > 1:
+                    report['ambiguous'].append(user['id'])
+                    continue
+            if not matches:
+                report['missing'].append(user['id'])
+                continue
+            member = _merge_members(matches)
+            report['matched'] += 1
+            changed = (user['name'] != member['name'] or user['role'] != member['role']
+                       or set(json.loads(user['orgs'] or '[]')) != set(member['orgs'])
+                       or set(json.loads(user['deps'] or '[]')) != set(member['deps']))
+            if not changed:
+                continue
+            report['changed'].append(f"{member['name']} (ID {user['id']}): {user['role']} → {member['role']}")
+            if apply:
+                c.execute('UPDATE users SET name=?,role=?,orgs=?,deps=? WHERE id=?',
+                          (member['name'], member['role'], json.dumps(member['orgs'], ensure_ascii=False),
+                           json.dumps(member['deps'], ensure_ascii=False), user['id']))
+    return report
 
 
 @auth
@@ -2821,13 +2872,15 @@ async def api_req_action(request, body, uid):
     curator_or_senior = r["curator"] == uid or is_senior(uid)
 
     if action == "cancel":
-        if uid != owner or r["status"] not in ("new", "curator"):
-            return jerr("Отменить заявку может только её владелец до согласования.")
+        if uid != owner or r["status"] not in ("new", "curator", "approved"):
+            return jerr("Отменить заявку может только её владелец до выдачи.", 403)
+        if not comment:
+            return jerr("Укажите причину отмены.")
         with db() as c:
             c.execute("UPDATE requests SET status='canceled' WHERE id=?", (rid,))
-        _push_hist("requests", rid, "canceled")
+        _push_hist("requests", rid, "canceled", comment)
         if r["curator"]:
-            await notify(r["curator"], f"Заявка ID {rid} отменена пользователем.")
+            await notify(r["curator"], f"Заявка ID {rid} отменена пользователем. Причина: {comment}")
     elif action == "userret":
         if uid == owner and r["status"] == "ret":
             return web.json_response(boot_payload(uid))
@@ -2867,6 +2920,7 @@ async def api_req_action(request, body, uid):
             if new_status in ("new", "approved"):
                 c.execute("DELETE FROM admin_offers WHERE ref=?", (rid,))
                 c.execute("DELETE FROM offer_escalations WHERE ref=?", (rid,))
+                c.execute("DELETE FROM offer_escalation_receipts WHERE ref=?", (rid,))
         _push_hist("requests", rid, new_status, "куратор снял себя")
         await notify(owner, f"По заявке ID {rid} куратор снял себя.")
         if ADMIN_CHAT_ID and bot is not None:
@@ -2877,7 +2931,7 @@ async def api_req_action(request, body, uid):
                 return jerr('Эта заявка уже согласована или завершена.')
             if time_change('req', rid):
                 return jerr('Дождитесь изменения времени пользователем.')
-        elif r['status'] not in ('new', 'curator', 'approved') or not (curator_or_senior or r['status']=='new'):
+        elif r['status'] not in ('new', 'curator', 'approved') or not (curator_or_senior or not r['curator'] or r['status']=='new'):
             return jerr('Эту заявку сейчас нельзя отклонить.',403)
         if action == "rejected" and not comment:
             return jerr("Укажите причину отказа.")
@@ -2890,6 +2944,7 @@ async def api_req_action(request, body, uid):
             with db() as c:
                 c.execute('DELETE FROM admin_offers WHERE ref=?',(rid,))
                 c.execute('DELETE FROM offer_escalations WHERE ref=?',(rid,))
+                c.execute('DELETE FROM offer_escalation_receipts WHERE ref=?',(rid,))
             await notify(owner, f"✅ Заявка ID {rid} согласована. Получение: {r['dfrom']}. Дождитесь назначения куратора.")
         else:
             await notify(
@@ -3001,14 +3056,17 @@ async def api_626_action(request, body, uid):
     owner = b["user_id"]
     curator_or_senior = b["curator"] == uid or is_senior(uid)
     if action == "cancel":
-        if b["status"] not in ("new", "approved") or (not is_senior(uid) and (uid != owner or studio_started(b))):
-            return jerr("Отменить бронь может только её владелец до начала.")
-        if is_senior(uid) and (studio_started(b) or uid != owner) and not comment:
+        can_cancel = is_senior(uid) or ((uid == owner or (is_admin(uid) and b['curator'] == uid)) and not studio_started(b))
+        if b["status"] not in ("new", "approved") or not can_cancel:
+            return jerr("Отменить бронь до начала может владелец или куратор, после начала — старший.", 403)
+        if not comment:
             return jerr("Укажите причину отмены.")
         with db() as c:
             c.execute("UPDATE b626 SET status='canceled' WHERE id=?", (bid,))
         _push_hist("b626", bid, "canceled", comment)
         await notify(owner, f"Бронь 626 №{bid} отменена. {comment}")
+        if b['curator'] and b['curator'] != owner:
+            await notify(b['curator'], f"Бронь 626 №{bid} отменена. Причина: {comment}")
     elif action == "handover":
         if uid == owner and b["status"] == "ret":
             return web.json_response(boot_payload(uid))
@@ -3808,7 +3866,7 @@ def offer_status_summary():
                 (ref["id"],),
             ).fetchall()
             escalated = bool(c.execute(
-                "SELECT 1 FROM offer_escalations WHERE ref=?", (ref["id"],)
+                "SELECT 1 FROM offer_escalation_receipts WHERE ref=? GROUP BY ref HAVING COUNT(*)=?", (ref["id"], len(OFFER_ESCALATION_RECIPIENTS))
             ).fetchone())
         started = min((row["sent_at"] for row in offers if row["sent_at"]), default=0)
         result.append({
@@ -3842,8 +3900,8 @@ async def _escalate_offers(rid):
     with db() as c:
         r = c.execute("SELECT * FROM requests WHERE id=?", (rid,)).fetchone()
         offers = c.execute("SELECT * FROM admin_offers WHERE ref=?", (rid,)).fetchall()
-        done = c.execute("SELECT 1 FROM offer_escalations WHERE ref=?", (rid,)).fetchone()
-    if not r or r["status"] != "approved" or r["curator"] or done or not offers or any((o["answer"] or "") not in ("no", "ignored") for o in offers):
+        delivered = {row['recipient'] for row in c.execute('SELECT recipient FROM offer_escalation_receipts WHERE ref=?', (rid,))}
+    if not r or r["status"] != "approved" or r["curator"] or not offers or any((o["answer"] or "") not in ("no", "ignored") for o in offers):
         return
     if time_change('req',rid):
         return
@@ -3852,46 +3910,38 @@ async def _escalate_offers(rid):
     ignored = [_disp_user(row["admin_id"]) for row in offers if row["answer"] == "ignored"]
     declined_text = ", ".join(html.escape(name) for name in declined) or "нет"
     ignored_text = ", ".join(html.escape(name) for name in ignored) or "нет"
-    # Явно отмечаем двух ответственных даже если бот ещё не видел их username.
-    fixed_mentions = "@misterfrukt @Kyuller"
-    known_mentions = " ".join(
-        f'<a href="tg://user?id={sid}">{html.escape(_disp_user(sid))}</a>'
-        for sid in sorted(SENIOR_ADMIN_IDS)
-        if _disp_user(sid).lstrip("@").lower() not in {"misterfrukt", "kyuller"}
-    )
-    mentions = fixed_mentions + ((" " + known_mentions) if known_mentions else "")
-    if bot is None or not ADMIN_CHAT_ID:
+    if bot is None:
         return
     message_text = (
         f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
         "Отказавшиеся и не ответившие больше не учитываются. Предлагается отклонить заявку с причиной.\n"
         f"Отказались ({len(declined)}): {declined_text}\n"
         f"Проигнорировали ({len(ignored)}): {ignored_text}\n"
-        + mentions + "\nОткройте заявку для принятия решения."
+        "Откройте заявку для принятия решения."
     )
-    try:
-        await bot.send_message(
-            ADMIN_CHAT_ID, message_text, parse_mode="HTML",
-            reply_markup=channel_request_button(rid),
-        )
-    except Exception as exc:
-        log.warning("Offer escalation HTML delivery failed for %s: %s", rid, exc)
-        senior_names = "@misterfrukt @Kyuller"
-        configured_names = ", ".join(_disp_user(sid) for sid in sorted(SENIOR_ADMIN_IDS))
-        if configured_names:
-            senior_names += ", " + configured_names
-        plain_text = (
-            f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
-            "Предлагается отклонить заявку с причиной.\n"
-            f"Отказались ({len(declined)}): {', '.join(declined) or 'нет'}\n"
-            f"Проигнорировали ({len(ignored)}): {', '.join(ignored) or 'нет'}\n"
-            f"Старшие: {senior_names or 'не настроены'}"
-        )
-        await bot.send_message(
-            ADMIN_CHAT_ID, plain_text, reply_markup=channel_request_button(rid)
-        )
-    with db() as c:
-        c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
+    plain_text = (
+        f"Никто из администраторов не взял заявку ID {rid} за 6 часов после рассылки. "
+        "Предлагается отклонить заявку с причиной.\n"
+        f"Отказались ({len(declined)}): {', '.join(declined) or 'нет'}\n"
+        f"Проигнорировали ({len(ignored)}): {', '.join(ignored) or 'нет'}"
+    )
+    for recipient in OFFER_ESCALATION_RECIPIENTS:
+        if recipient in delivered:
+            continue
+        try:
+            try:
+                await bot.send_message(recipient, message_text, parse_mode='HTML', reply_markup=request_button(rid, admin=True))
+            except Exception:
+                await bot.send_message(recipient, plain_text, parse_mode=None, reply_markup=request_button(rid, admin=True))
+        except Exception as exc:
+            log.warning('Offer escalation delivery failed for request %s, recipient %s: %s', rid, recipient, exc)
+            continue
+        with db() as c:
+            c.execute('INSERT OR IGNORE INTO offer_escalation_receipts VALUES(?,?)', (rid, recipient))
+        delivered.add(recipient)
+    if all(recipient in delivered for recipient in OFFER_ESCALATION_RECIPIENTS):
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO offer_escalations VALUES(?)", (rid,))
 
 
 async def offer_unclaimed_request(r):
@@ -3906,6 +3956,7 @@ async def offer_unclaimed_request(r):
         if stale_accept:
             c.execute("DELETE FROM admin_offers WHERE ref=?", (rid,))
             c.execute("DELETE FROM offer_escalations WHERE ref=?", (rid,))
+            c.execute("DELETE FROM offer_escalation_receipts WHERE ref=?", (rid,))
         existing_started = c.execute(
             "SELECT MIN(sent_at) started FROM admin_offers WHERE ref=? AND sent_at>0", (rid,)
         ).fetchone()["started"]
@@ -4411,6 +4462,39 @@ async def cmd_offerstatus(message: Message) -> None:
     )
     for chunk in _rich_chunks(lines, limit=3900):
         await message.answer(chunk)
+
+
+@dp.message(Command('membersync'))
+async def cmd_membersync(message: Message) -> None:
+    if not is_senior(message.from_user.id) or message.chat.type != 'private':
+        return
+    args = (message.text or '').split()[1:]
+    if args not in ([], ['apply']):
+        await message.answer('Проверить: /membersync\nПрименить: /membersync apply', parse_mode=None)
+        return
+    try:
+        async with ACTION_LOCK:
+            # Fetch outside the lock's synchronous transaction; no stale cached directory is applied.
+            report = await asyncio.to_thread(sync_registered_members, args == ['apply'])
+    except Exception:
+        log.exception('Member directory synchronization failed')
+        await message.answer('Не удалось получить свежий список «люди». Пользователи не изменены. Проверьте доступ бота к таблице.', parse_mode=None)
+        return
+    if args == ['apply']:
+        await sse_broadcast()
+    lines = ['Сверка с листом «люди»' + (' — применена.' if args else ' — предварительный просмотр.'),
+             f"Проверено: {report['checked']}. Найдено: {report['matched']}. Изменений: {len(report['changed'])}.",
+             f"Заблокированные пропущены: {report['blocked']}.",
+             'Обновляются роль, отделы, организации и ФИО. Заявки и статусы проверки сохраняются.']
+    lines.extend(report['changed'])
+    for key, label in [('missing', 'Не найдены'), ('ambiguous', 'Неоднозначные совпадения')]:
+        if report[key]:
+            lines.append(label + ' (без изменений): ' + ', '.join(map(str, report[key])))
+    lines.append('Новые участники добавляются при запуске бота и регистрации по свежему листу «люди».')
+    if not args:
+        lines.append('Применить изменения: /membersync apply')
+    for chunk in _rich_chunks(lines, limit=3900):
+        await message.answer(chunk, parse_mode=None)
 
 
 
