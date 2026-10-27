@@ -1,9 +1,10 @@
 const {chromium}=require('playwright');const assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const browser=await chromium.launch({headless:true,...(process.env.PW_CHANNEL?{channel:process.env.PW_CHANNEL}:{})});
  const page=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8745')?r.continue():r.abort());
+ await page.clock.install({time:new Date('2030-05-31T05:00:00Z')});
  await page.goto('http://127.0.0.1:8745');
  await page.evaluate(()=>{role='admin';resetTo('adminReq',{id:requests.find(r=>r.status==='new').id});});
  assert.equal(await page.getByRole('button',{name:'Стать куратором',exact:true}).count(),0);
@@ -16,8 +17,8 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  assert.match(await page.locator('#screen').innerText(),/Ожидаем изменения времени/);
  await page.evaluate(()=>{const id=stack.at(-1).params.id;requests.find(r=>r.id===id).me=true;role='user';resetTo('reqDetail',{id});});
   await page.getByRole('button',{name:'Изменить время',exact:true}).click();
- await page.locator('#edit-date-from').fill('2030-06-02');
- await page.locator('#edit-date-to').fill('2030-06-02');
+ await page.locator('#edit-date-from').fill('2030-06-04');
+ await page.locator('#edit-date-to').fill('2030-06-04');
  await page.getByRole('textbox',{name:'Получение: часы'}).fill('15');
  await page.getByRole('textbox',{name:'Получение: минуты'}).fill('00');
  await page.getByRole('textbox',{name:'Возврат: часы'}).fill('18');

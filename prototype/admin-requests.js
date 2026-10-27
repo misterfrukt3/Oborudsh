@@ -12,9 +12,10 @@ function bookingAdminControls(kind,o){
   return `<div class="booking-admin-actions">
     ${editable&&(kind==='req'||senior||myCur(o))?`<button class="btn-sm" onclick="requestBookingTime('${kind}',${o.id})">Попросить изменить время</button>`:''}
     ${senior&&editable?`<button class="btn-sm" onclick="openBookingTime('${kind}',${o.id})">Изменить ${kind==='req'?'даты и время':'бронь 626'}</button>`:''}
-    ${senior&&editable&&kind==='req'?`<button class="btn-sm" onclick="startEditReq(${o.id})">Изменить состав и детали</button>`:''}
+    ${kind==='req'&&['new','curator','approved','issued','ret'].includes(o.status)?`<button class="btn-sm" onclick="startEditReq(${o.id})">${editable?'Изменить состав и детали':'Изменить состав'}</button>`:''}
     ${senior&&kind==='req'&&!o.curator&&o.status==='approved'&&!o.timeChange?`<button class="btn-sm" onclick="adminAct(${o.id},'curator')">Стать куратором</button>`:''}
-    ${senior&&kind==='req'&&o.curator&&['curator','approved','issued','ret'].includes(o.status)?`<button class="btn-sm" onclick="adminAct(${o.id},'uncurator')">Снять куратора</button>`:''}
+    ${senior&&kind==='req'&&o.curator&&['new','curator','approved','issued','ret'].includes(o.status)?`<button class="btn-sm" onclick="adminAct(${o.id},'uncurator')">Снять куратора</button>`:''}
+    ${!senior&&kind==='req'&&o.status==='new'&&myCur(o)?`<button class="btn-sm" onclick="adminAct(${o.id},'uncurator')">Снять с себя кураторство</button>`:''}
     ${senior&&kind==='626'&&o.status==='new'?`<button class="btn-sm ok" ${o.timeChange?'disabled':''} onclick="dec626(${o.id},'approved')">Согласовать бронь</button><button class="btn-sm danger" onclick="rej626Modal(${o.id})">Отклонить с причиной</button>`:''}
   </div>`;
 }
@@ -48,6 +49,7 @@ SCREENS.bookingTime=()=>{
 };
 function saveBookingTime(){
   const e=timeEdit,body={kind:e.kind,id:e.id,d1:e.d1,d2:e.d2,t1:e.t1,t2:e.t2};
+  const error=e.kind==='req'?equipmentDateError(e.d1,e.d2,e.t1):studioDateError(e.d1,e.t1);if(error){toast(error);return;}
   if(e.kind==='626'&&isSeniorNow()){body.goal=e.goal;body.needs=e.needs.split('\n').map(n=>n.trim()).filter(Boolean);}
   if(SRV){srvDo('booking/time',body,()=>{goBack();toast('Сохранено — нужно повторное согласование');});return;}
   const o=(e.kind==='req'?requests:bookings626).find(o=>o.id===e.id);

@@ -21,6 +21,7 @@
   --text:#111418; --hint:#7d857f; --link:#0f8418;
   --btn:#43ed4e; --btn-text:#000000; --sep:#e4e7e4;
   --destructive:#e53935; --accent:#43ed4e;
+  --risk-bg:#d71920; --risk-border:#ff5358; --risk-text:#fff;
   --ok:#31b545; --warn:#e8a109; --info:#5aa7e0; --violet:#8c6fe6; --teal:#2aa79b;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   /* типографическая шкала — держим магические font-size в одном месте */
@@ -71,6 +72,9 @@ button:focus-visible,[role="checkbox"]:focus-visible{outline:2px solid var(--lin
 /* шапка Telegram Mini App */
 .tg-top{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:8px 14px 10px;background:var(--bg);border-bottom:1px solid var(--sep);min-height:48px}
 .tg-left{border:none;background:none;color:var(--link);font-family:inherit;font-size:var(--fs-md);cursor:pointer;flex:0 0 auto;display:flex;align-items:center;gap:2px;padding:4px 2px}
+.desktop-back{flex:0 0 auto;padding:8px 14px;background:var(--bg);border-bottom:1px solid var(--sep)}
+.desktop-back[hidden]{display:none}
+.desktop-back .tg-left{min-height:40px}
 .tg-mid{flex:1;text-align:center;min-width:0}
 .tg-mid b{font-size:var(--fs-md);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tg-mid span{font-size:var(--fs-xs);color:var(--hint)}
@@ -213,6 +217,7 @@ input::placeholder,textarea::placeholder{color:var(--hint)}
 /* предупреждение о комплекте */
 .kit-warn{border:1px solid color-mix(in srgb,var(--warn) 50%,transparent);background:color-mix(in srgb,var(--warn) 8%,var(--card));border-radius:var(--r-sm);padding:11px 13px;margin:10px 0;font-size:var(--fs-sm);line-height:1.45}
 .kit-warn b{color:var(--warn)}
+.admin-risk{background:var(--risk-bg);color:var(--risk-text);border:2px solid var(--risk-border);border-radius:var(--r-sm);padding:13px;margin:10px 0;font-size:var(--fs-sm);line-height:1.5}
 /* шторка */
 .sheet-veil{position:absolute;inset:0;background:rgba(0,0,0,.5);z-index:20;animation:fade .18s}
 @keyframes fade{from{opacity:0}}

@@ -53,29 +53,6 @@ class OctoberUpdatesTest(unittest.TestCase):
             ref = self.studio(curator=2)
             self.assertEqual(self.call(main.api_626_action, dict(id=ref, action='cancel', comment='Причина'), 2).status, 403)
 
-    def test_escalation_retries_only_failed_recipient_and_ignores_old_channel_receipt(self):
-        ref, _ = self.request(status='approved')
-        with main.db() as c:
-            c.execute("INSERT INTO admin_offers(ref,admin_id,answer) VALUES(?,2,'no')", (ref,))
-            c.execute('INSERT INTO offer_escalations VALUES(?)', (ref,))
-        failed = 5027289530
-        async def send(uid, *args, **kwargs):
-            if uid == failed:
-                raise RuntimeError('Recipient unavailable')
-        fake = SimpleNamespace(send_message=AsyncMock(side_effect=send))
-        with patch.object(main, 'bot', fake), patch.object(main, 'ADMIN_CHAT_ID', 0):
-            asyncio.run(main.escalate_offers(ref))
-            self.assertEqual([c.args[0] for c in fake.send_message.await_args_list], [1896340090, failed, failed])
-            self.assertFalse(main.offer_status_summary()[0]['escalated'])
-            fake.send_message.side_effect = None
-            fake.send_message.reset_mock()
-            asyncio.run(main.escalate_offers(ref))
-            asyncio.run(main.escalate_offers(ref))
-            self.assertEqual([c.args[0] for c in fake.send_message.await_args_list], [failed])
-            self.assertTrue(main.offer_status_summary()[0]['escalated'])
-        main.reset_booking_review('req', ref)
-        with main.db() as c:
-            self.assertEqual(c.execute('SELECT COUNT(*) FROM offer_escalation_receipts WHERE ref=?', (ref,)).fetchone()[0], 0)
 
     def member(self, name='Test User Name', username='tester', role='активист'):
         return dict(name=name, telegram=username, role=role, deps=['Видео'], orgs=['Media BMSTU'])

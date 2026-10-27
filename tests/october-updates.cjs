@@ -1,10 +1,11 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({headless:true,channel:'msedge'});
+ const browser=await chromium.launch({headless:true,...(process.env.PW_CHANNEL?{channel:process.env.PW_CHANNEL}:{})});
  const page=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',r=>r.request().url().startsWith('http://127.0.0.1:8745')?r.continue():r.abort());
+ await page.clock.install({time:new Date('2030-05-31T05:00:00Z')});
  await page.goto('http://127.0.0.1:8745');
  const id=await page.evaluate(()=>{const r=requests[0];r.status='approved';r.me=true;role='user';resetTo('reqDetail',{id:r.id});return r.id;});
  await page.getByRole('button',{name:'Отменить с причиной',exact:true}).click();
@@ -26,7 +27,7 @@ const assert=require('node:assert/strict');
    await page.getByRole('button',{name:'Отклонить',exact:true}).click();
    assert.equal(await page.evaluate(id=>requests.find(r=>r.id===id).status,id),'rejected');
  }
- const bid=await page.evaluate(()=>{const b=bookings626[0];b.when='2030-06-02';b.slot='10:00–11:00';b.status='approved';b.me=true;role='user';resetTo('studioDetail',{id:b.id});return b.id;});
+ const bid=await page.evaluate(()=>{const b=bookings626[0];b.when='2030-06-04';b.slot='10:00–11:00';b.status='approved';b.me=true;role='user';resetTo('studioDetail',{id:b.id});return b.id;});
  await page.getByRole('button',{name:'Отменить с причиной',exact:true}).click();
  await page.locator('#cancel-reason').fill('Аудитория больше не нужна');
  await page.getByRole('button',{name:'Подтвердить отмену',exact:true}).click();
@@ -36,7 +37,8 @@ const assert=require('node:assert/strict');
  await page.evaluate(()=>resetTo('mediaTrip'));
  assert.match(await page.locator('#screen').innerText(),/добавленным участникам/);
  await page.evaluate(()=>{SRV={isAdmin:false,isSenior:false,mediaTrip:{...structuredClone(mtDemo),allowed:true,canManage:false,canConfigure:false,team:1,teams:[{number:1,curator:1,members:[{id:1,name:'Участник'}]}]}};resetTo('home');});
- await page.getByText('Медиа выезд',{exact:true}).click();
+ assert.equal(await page.getByText('Медиа выезд',{exact:true}).count(),0);
+ await page.evaluate(()=>navTo('mediaTrip'));
  assert.match(await page.locator('#screen').innerText(),/Команда 1/);
  assert.equal(await page.getByText('Панель рентала',{exact:true}).count(),0);
  assert.equal(await page.locator('#mt-code').count(),0);

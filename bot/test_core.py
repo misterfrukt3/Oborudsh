@@ -95,15 +95,18 @@ class CoreRulesTest(unittest.TestCase):
             async def json(self):
                 return self.body
 
+        day = (main.datetime.now(main.MSK) + main.timedelta(days=2)).date()
+        while day.weekday() in (0, 6): day += main.timedelta(days=1)
+        day = day.isoformat()
         request_body = {
             "items": [[short, 1]],
-            "d1": "2030-06-02", "d2": "2030-06-02",
+            "d1": day, "d2": day,
             "t1": "08:17", "t2": "10:03",
             "from": "02.06, 08:17", "to": "02.06, 10:03",
             "event": "DEV E2E", "comment": "", "media": False,
         }
         studio_body = {
-            "day": "2030-06-02", "slot": "10:03–11:11",
+            "day": day, "slot": "10:03–11:11",
             "goal": "DEV E2E 626", "needs": [],
         }
         old_dev, old_bot, old_chat = main.DEV_USER_ID, main.bot, main.ADMIN_CHAT_ID
@@ -125,7 +128,7 @@ class CoreRulesTest(unittest.TestCase):
         self.assertTrue(studio_payload["ok"])
         self.assertEqual(studio_payload["bookings626"][0]["slot"], "10:03–11:11")
         self.assertEqual(
-            studio_payload["busy626"]["2030-06-02"],
+            studio_payload["busy626"][day],
             [{"from": "10:03", "to": "11:11"}],
         )
 

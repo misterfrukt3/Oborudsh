@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 import unittest
 from unittest.mock import AsyncMock,patch
 from urllib.parse import parse_qs,urlsplit
@@ -9,14 +10,23 @@ import test_core
 import test_workflows
 
 
+class JuneClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        value = cls(2030, 6, 1, 8, 0, tzinfo=main.MSK)
+        return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+
 class AdminRequestsTest(unittest.TestCase):
     setUp=test_core.CoreRulesTest.setUp
     tearDown=test_core.CoreRulesTest.tearDown
-    request=test_workflows.WorkflowTest.request
+    def request(self, **kwargs):
+        kwargs.setdefault('day','2030-06-04')
+        return test_workflows.WorkflowTest.request(self,**kwargs)
     studio=test_workflows.WorkflowTest.studio
 
     def call(self,handler,body,uid=2):
-        with patch.object(main,'is_admin',side_effect=lambda i:i in (2,3)),patch.object(main,'is_senior',side_effect=lambda i:i==3),patch.object(main,'boot_payload',return_value={'ok':True}),patch.object(main,'notify',new=AsyncMock()),patch.object(main,'send_or_update_card',new=AsyncMock()):
+        with patch.object(main,'datetime',JuneClock),patch.object(main,'is_admin',side_effect=lambda i:i in (2,3)),patch.object(main,'is_senior',side_effect=lambda i:i==3),patch.object(main,'boot_payload',return_value={'ok':True}),patch.object(main,'notify',new=AsyncMock()),patch.object(main,'send_or_update_card',new=AsyncMock()):
             return asyncio.run(handler.__wrapped__(None,body,uid))
 
     def state(self,table,ref):
@@ -49,7 +59,7 @@ class AdminRequestsTest(unittest.TestCase):
         self.assertEqual(self.call(main.api_time_change,body).status,200)
         self.assertEqual(main.time_change('req',ref)['reason'],body['reason'])
         self.assertNotEqual(self.call(main.api_req_action,{'id':ref,'action':'approved'}).status,200)
-        changed={'kind':'req','id':ref,'d1':'2030-06-02','d2':'2030-06-02','t1':'12:00','t2':'13:00'}
+        changed={'kind':'req','id':ref,'d1':'2030-06-04','d2':'2030-06-04','t1':'12:00','t2':'13:00'}
         self.assertEqual(self.call(main.api_booking_time,changed,1).status,200)
         self.assertIsNone(main.time_change('req',ref))
         self.assertEqual(self.state('requests',ref)['status'],'new')
@@ -57,7 +67,7 @@ class AdminRequestsTest(unittest.TestCase):
 
     def test_notification_failure_leaves_no_pending_request(self):
         ref,_=self.request()
-        with patch.object(main,'is_admin',return_value=True),patch.object(main,'notify',new=AsyncMock(side_effect=RuntimeError('offline'))):
+        with patch.object(main,'datetime',JuneClock),patch.object(main,'is_admin',return_value=True),patch.object(main,'notify',new=AsyncMock(side_effect=RuntimeError('offline'))):
             response=asyncio.run(main.api_time_change.__wrapped__(None,{'kind':'req','id':ref,'reason':'Перенесите время'},2))
         self.assertEqual(response.status,502)
         self.assertIsNone(main.time_change('req',ref))
@@ -66,7 +76,7 @@ class AdminRequestsTest(unittest.TestCase):
         ref,_=self.request(status='approved',curator=2)
         self.assertEqual(self.call(main.api_time_change,{'kind':'req','id':ref,'reason':'Позже'}).status,200)
         self.assertNotEqual(self.call(main.api_req_action,{'id':ref,'action':'issue'},3).status,200)
-        body={'kind':'req','id':ref,'d1':'2030-06-02','d2':'2030-06-02','t1':'12:00','t2':'13:00'}
+        body={'kind':'req','id':ref,'d1':'2030-06-04','d2':'2030-06-04','t1':'12:00','t2':'13:00'}
         self.assertEqual(self.call(main.api_booking_time,body,1).status,200)
         row=self.state('requests',ref)
         self.assertEqual((row['status'],row['curator'],row['tfrom']),('new',None,'12:00'))
@@ -74,7 +84,7 @@ class AdminRequestsTest(unittest.TestCase):
     def test_senior_edit_conflicts_terminal_and_member_permissions(self):
         ref,_=self.request(status='approved',curator=2)
         other,_=self.request(start='12:00',end='13:00')
-        body={'kind':'req','id':ref,'d1':'2030-06-02','d2':'2030-06-02','t1':'12:00','t2':'13:00'}
+        body={'kind':'req','id':ref,'d1':'2030-06-04','d2':'2030-06-04','t1':'12:00','t2':'13:00'}
         self.assertNotEqual(self.call(main.api_booking_time,body,3).status,200)
         self.assertEqual(self.state('requests',ref)['tfrom'],'10:00')
         body.update(t1='13:00',t2='14:00')
@@ -85,10 +95,10 @@ class AdminRequestsTest(unittest.TestCase):
         self.assertNotEqual(self.call(main.api_booking_time,body,3).status,200)
 
     def test_626_time_request_and_conflict_then_reapproval(self):
-        ref=self.studio(day='2030-06-02')
+        ref=self.studio(day='2030-06-04')
         with main.db() as c:c.execute("UPDATE b626 SET goal='Интервью' WHERE id=?",(ref,))
         self.assertEqual(self.call(main.api_time_change,{'kind':'626','id':ref,'reason':'Нужно позже'},3).status,200)
-        body={'kind':'626','id':ref,'d1':'2030-06-02','d2':'2030-06-02','t1':'12:00','t2':'13:00'}
+        body={'kind':'626','id':ref,'d1':'2030-06-04','d2':'2030-06-04','t1':'12:00','t2':'13:00'}
         self.assertEqual(self.call(main.api_booking_time,body,1).status,200)
         row=self.state('b626',ref)
         self.assertEqual((row['status'],row['curator'],row['slot']),('new',None,'12:00–13:00'))
@@ -96,13 +106,13 @@ class AdminRequestsTest(unittest.TestCase):
         self.assertNotEqual(self.call(main.api_626_action,{'id':ref,'action':'approved'},2).status,200)
 
     def test_626_senior_edits_details_without_changing_time(self):
-        ref=self.studio(day='2030-06-02')
-        body={'kind':'626','id':ref,'d1':'2030-06-02','t1':'10:00','t2':'11:00','goal':'Новая съёмка','needs':['Хромакей']}
+        ref=self.studio(day='2030-06-04')
+        body={'kind':'626','id':ref,'d1':'2030-06-04','t1':'10:00','t2':'11:00','goal':'Новая съёмка','needs':['Хромакей']}
         self.assertEqual(self.call(main.api_booking_time,body,3).status,200)
         self.assertEqual(self.state('b626',ref)['goal'],'Новая съёмка')
 
     def test_approval_statistics_and_studio_deep_link(self):
-        ref,_=self.request();bid=self.studio(day='2030-06-02',status='new',curator=None)
+        ref,_=self.request();bid=self.studio(day='2030-06-04',status='new',curator=None)
         self.call(main.api_req_action,{'id':ref,'action':'approved'},2)
         self.call(main.api_626_action,{'id':bid,'action':'approved'},3)
         stats=json.loads(self.call(main.api_stats,{},3).text)['stats']['adminStats']

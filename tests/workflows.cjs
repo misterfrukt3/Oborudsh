@@ -1,13 +1,14 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({headless:true,channel:"msedge"});
+ const browser=await chromium.launch({headless:true,...(process.env.PW_CHANNEL?{channel:process.env.PW_CHANNEL}:{})});
  const page=await browser.newPage({viewport:{width:320,height:740}});
  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:8745')?route.continue():route.abort());
+ await page.clock.install({time:new Date('2030-05-31T05:00:00Z')});
  await page.goto('http://127.0.0.1:8745');
  console.log(await page.evaluate(()=>({screen:stack,quoteNames:CATALOG.flatMap(c=>c.items).filter(i=>/["'<>]/.test(i.short)).map(i=>i.short)})));
- await page.evaluate(()=>{role='user';resetTo('home');startWizard(true);wiz.d1='2030-06-02';wiz.d2='2030-06-02';wiz.t1='10:00';wiz.t2='12:00';wiz.event='Test';saveDraft();});
+ await page.evaluate(()=>{role='user';resetTo('home');startWizard(true);wiz.d1='2030-06-04';wiz.d2='2030-06-04';wiz.t1='10:00';wiz.t2='12:00';wiz.event='Test';saveDraft();});
  await page.reload();
  assert.equal(await page.evaluate(()=>readDraft().event),'Test');
  await page.evaluate(()=>{startWizard();});
@@ -19,7 +20,7 @@ const assert=require('node:assert/strict');
    const div=document.createElement('div');div.innerHTML=`<button onclick="window.roundTrip='${escJs(tricky)}'">${escHtml(tricky)}</button>`;div.firstChild.click();
    if(window.roundTrip!==tricky||div.textContent!==tricky)throw Error('escaping failed');
    for(const short of names){
-     requests.unshift({id:989,items:[[short,1]],event:'Check',comment:'',d1Iso:'2030-06-02',d2Iso:'2030-06-02',t1:'10:00',t2:'12:00'});
+     requests.unshift({id:989,me:true,status:'new',items:[[short,1]],event:'Check',comment:'',d1Iso:'2030-06-04',d2Iso:'2030-06-04',t1:'10:00',t2:'12:00'});
      repeatReq(989);if(!Object.hasOwn(wiz.cart,short))throw Error('repeat name');
      startEditReq(989);if(!Object.hasOwn(wiz.cart,short))throw Error('edit name');
      requests.shift();
