@@ -4036,10 +4036,10 @@ async def run_checks() -> None:
         if changed:
             _set_notif("b626", b["id"], notif)
 
-    # Две сводки по Москве. Отметку сохраняем после успешной доставки.
+    # Повтор при сбое допустим только в час самой сводки, без позднего догоняния.
     today = now.strftime('%Y-%m-%d')
     if bot is not None and ADMIN_CHAT_ID:
-        period = 'morning' if 8 <= now.hour < 22 else ('evening' if now.hour >= 22 else None)
+        period = 'morning' if now.hour == 8 else ('evening' if now.hour == 22 else None)
         if period:
             key = 'digest_morning_date' if period == 'morning' else 'digest_date'
             if _meta_get(key) != today:

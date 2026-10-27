@@ -3,7 +3,7 @@ import asyncio
 import base64
 import json
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -228,6 +228,30 @@ class BookingPolicyTest(unittest.TestCase):
             digest.side_effect=None
             asyncio.run(main.run_checks())
             self.assertEqual(main._meta_get('digest_morning_date'),'2030-06-05')
+
+    def test_late_restart_does_not_send_missed_digest_outside_its_hour(self):
+        with patch.object(main,'bot',SimpleNamespace()),patch.object(main,'ADMIN_CHAT_ID',99),patch.object(main,'daily_digest',new=AsyncMock()) as digest,patch.object(main,'weekly_backup'):
+            for hour,minute in [(0,30),(7,59),(9,0),(12,0),(21,55),(23,0)]:
+                with self.subTest(hour=hour,minute=minute):
+                    Clock.current=datetime(2030,6,4,hour,minute,tzinfo=main.MSK)
+                    asyncio.run(main.run_checks())
+                    digest.assert_not_awaited()
+                    self.assertIsNone(main._meta_get('digest_morning_date'))
+                    self.assertIsNone(main._meta_get('digest_date'))
+
+    def test_evening_slot_uses_moscow_time_when_server_clock_is_cet(self):
+        cet=timezone(timedelta(hours=1))
+        with patch.object(main,'bot',SimpleNamespace()),patch.object(main,'ADMIN_CHAT_ID',99),patch.object(main,'daily_digest',new=AsyncMock()) as digest,patch.object(main,'weekly_backup'):
+            Clock.current=datetime(2030,6,4,18,55,tzinfo=cet)  # 20:55 Москва
+            asyncio.run(main.run_checks())
+            digest.assert_not_awaited()
+            Clock.current=datetime(2030,6,4,20,0,tzinfo=cet)  # 22:00 Москва
+            asyncio.run(main.run_checks())
+            digest.assert_awaited_once_with(award_score=True,period='evening')
+            asyncio.run(main.run_checks())
+            self.assertEqual(digest.await_count,1)
+            self.assertIsNone(main._meta_get('digest_morning_date'))
+            self.assertEqual(main._meta_get('digest_date'),'2030-06-04')
 
     def test_digest_lists_times_both_directions_curator_and_missed_issuance(self):
         Clock.current=datetime(2030,6,4,8,tzinfo=main.MSK)
