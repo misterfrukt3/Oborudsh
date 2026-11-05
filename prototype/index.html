@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20261105-admin">
+<link rel="stylesheet" href="style.css?v=20261105-layout">
 </head>
 <body>
 
@@ -26,6 +26,7 @@
   </div>
   <div class="desktop-back" id="desktop-back" hidden><button class="tg-left" onclick="tgLeft()">‹ Назад</button></div>
   <div class="screen" id="screen"></div>
+  <footer class="screen-actions" id="actions" aria-label="Действия экрана" hidden></footer>
   <div id="overlay"></div>
 </div>
 
@@ -543,6 +544,10 @@ function render(){
   const key=screenKey(s),same=key===_scrKey;
   const keep=screenScroll.get(key)||0;
   const out = SCREENS[s.name](s.params);
+  scr.dataset.screen=s.name;
+  scr.dataset.step=s.name==='wizard'&&wiz?String(wiz.step):'';
+  $('phone').dataset.screen=s.name;
+  $('phone').dataset.step=scr.dataset.step;
   const isNested = stack.length>1 || (s.name==="wizard" && wiz && wiz.step>1);
   $("tgleft").textContent = isNested ? "‹ Назад" : "Закрыть";
   const platform=TG?.platform&&TG.platform!=='unknown'?TG.platform:tgLaunchParam('tgWebAppPlatform');
@@ -554,8 +559,18 @@ function render(){
   if(same) scr.querySelectorAll("input[id],textarea[id]").forEach(el=>{
     inputs[el.id] = {v:el.value, f:document.activeElement===el, s:el.selectionStart};
   });
-  scr.innerHTML = '<div class="screen-inner'+(same?" nofade":"")+'">'+out.body+'</div>' + (out.mainbtn||"");
+  scr.innerHTML = '<div class="screen-inner'+(same?" nofade":"")+'">'+out.body+'</div>';
+  $('actions').innerHTML=out.mainbtn||'';
+  $('actions').hidden=!out.mainbtn;
   hideProductionUi(scr);
+  hideProductionUi($('actions'));
+  scr.querySelectorAll('div.list-item[onclick],div.action-big[onclick],div.action-half[onclick],div.card.tappable[onclick],.eq-item .grow[onclick]').forEach(el=>{
+    el.tabIndex=0;
+    el.setAttribute('role','button');
+    el.addEventListener('keydown',event=>{
+      if(event.target===el&&(event.key==='Enter'||event.key===' ')){event.preventDefault();el.click();}
+    });
+  });
   for(const id in inputs){
     const el = $(id);
     if(el && !el.value){ el.value = inputs[id].v;
@@ -612,6 +627,16 @@ function nextStep(o,studio=false){
     else if(o.status==="approved"&&!studio)action="Выдайте "+start;
   }
   return `<div class="next-step"><b>${escHtml(action)}</b><div class="booking-time">${escHtml(deadline)}</div><div class="sub">Куратор: ${escHtml(o.curator||"ещё не назначен")}</div></div>`;
+}
+function studioSummaryCard(b,actions){
+  return `<article class="card booking-card" data-booking-id="${b.id}">
+    <header class="booking-card-head"><h2 class="booking-title">${escHtml(b.goal)}</h2>
+      <div class="booking-meta"><span>${escHtml(b.author)}</span><span>${fmtIso(b.when)} · ${escHtml(b.slot)}</span></div>
+    </header>
+    <div class="booking-card-status">${statusPill(b.status,ST626)}</div>
+    ${b.needs?.length?`<p class="sub">${escHtml(b.needs.join(', '))}</p>`:''}
+    ${nextStep(b,true)}<div class="booking-card-actions">${actions}</div>
+  </article>`;
 }
 function itemsTitle(items){
   return escHtml(items[0]?.[0]||"") + (items.length>1 ? " +"+(items.length-1) : "");
@@ -873,16 +898,17 @@ SCREENS.home = () => {
     (role!=="user"?'<span class="role-chip hl">'+(role==="senior"?"старший админ":"админ")+'</span>':"");
   return {
     body:`
-      <div class="row" style="margin-bottom:10px">
+      <div class="profile-header">
         ${profile.photo
           ? '<div class="avatar" style="background:url('+profile.photo+') center/cover"></div>'
           : '<div class="avatar">'+profile.short.split(" ").map(w=>w[0]).slice(0,2).join("")+'</div>'}
-        <div class="grow">
+        <div class="profile-identity">
           <div style="font-weight:700;font-size:16px;line-height:1.25">${escHtml((SRV&&profile.name)?profile.name:profile.short)} ${(!SRV||SRV.verified==="ok")?'<span style="color:var(--ok);font-size:14px">✓</span>':""}</div>
           <div class="sub">${escHtml(profile.tg)}</div>
         </div>
-        <button class="theme-tgl" title="Тема" aria-label="Переключить тему" aria-pressed="${$("phone").classList.contains("dark")}" onclick="userToggleTheme()"><i>${$("phone").classList.contains("dark")?"🌙":"☀️"}</i></button>
+        <div class="profile-controls"><button class="theme-tgl" title="Тема" aria-label="Переключить тему" aria-pressed="${$("phone").classList.contains("dark")}" onclick="userToggleTheme()"><i>${$("phone").classList.contains("dark")?"🌙":"☀️"}</i></button>
         <button class="btn-sm" title="Изменить данные" onclick="navTo('regProfile',{edit:true})">⚙️</button>
+        </div>
       </div>
       <div class="profile-roles-wrap">
         <div id="profile-roles" class="profile-roles ${profileRolesExpanded?"expanded":""}">${roleChips}</div>
@@ -905,7 +931,7 @@ SCREENS.home = () => {
 
       ${readDraft()?'<div class="card"><b>Черновик заявки</b><p class="sub">Даты, корзина и детали сохранены.</p><button class="btn-sm primary" onclick="restoreDraft()">Продолжить</button><button class="btn-sm" onclick="clearDraft();render()">Удалить</button></div>':""}
       <div class="sec-label">Мои активные брони</div>
-      ${active.length? '<div>'+active.map(r=>`
+      ${active.length? '<div class="booking-grid">'+active.map(r=>`
         <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
           <div class="grow">
@@ -915,15 +941,15 @@ SCREENS.home = () => {
           </div>
         </div>`).join("")+'</div>'
       : '<div class="card sub" style="text-align:center">Активных броней нет — самое время что-нибудь снять 🎬</div>'}
-      ${my626.map(b=>`
+      <div class="booking-grid">${my626.map(b=>`
         <div class="list-item" style="margin-top:8px;border-radius:14px" onclick="navTo('studioDetail',{id:${b.id}})">
           <div class="emoji-badge">${uic("studio",19)}</div>
           <div class="grow"><div style="font-weight:600;font-size:14.5px">Аудитория 626${unreadBadge(b)}</div>
           <div class="hud" style="margin-top:4px">${fmtIso(b.when)} · ${b.slot}</div></div>
           ${statusPill(b.status,ST626)}${nextStep(b,true)}
-        </div>`).join("")}
+        </div>`).join("")}</div>
 
-      <div class="row"><div class="sec-label grow">История броней</div>${historyToggle()}</div>
+      <div class="section-heading"><div class="sec-label grow">История броней</div>${historyToggle()}</div>
       ${preferences.showPast?`<div>${past.map(r=>`
         <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
           <div class="emoji-badge" style="opacity:.6">${uic("done",19)}</div>
@@ -1301,7 +1327,7 @@ function wizCatalog(){
     });
     const total = groups.reduce((a,g)=>a+g.items.length,0);
     listHtml = '<div class="sec-label">Найдено: '+total+(wiz.catFilter!=="Все"?' в «'+wiz.catFilter+'»':"")+'</div>'
-      + (groups.map(g=>'<div class="sec-label">'+icon(g.cat,13)+' '+g.cat+'</div><div>'+g.items.map(renderItem).join("")+'</div>').join("")
+      + (groups.map(g=>'<div class="sec-label">'+icon(g.cat,13)+' '+g.cat+'</div><div class="catalog-grid">'+g.items.map(renderItem).join("")+'</div>').join("")
          || '<div class="card sub">Ничего не нашлось. Попробуйте название категории («свет», «звук») или снимите фильтр. Если позиции реально нет — впишите её в комментарий на следующем шаге.</div>');
   } else {
     const cats = wiz.catFilter==="Все" ? CATALOG : CATALOG.filter(c=>c.cat===wiz.catFilter);
@@ -1310,7 +1336,7 @@ function wizCatalog(){
         <div class="card" style="opacity:.85;cursor:default"><div class="row"><span style="font-size:18px">🚫</span>
         <div class="grow"><b style="font-size:14px">Категория временно недоступна</b>
         <div class="hud">${c.blocked.until?"до "+c.blocked.until:""}${c.blocked.term?" · "+c.blocked.term:""}</div></div></div></div>`;
-      return '<div class="sec-label">'+icon(c.cat,13)+" "+c.cat+'</div><div>'+c.items.map(renderItem).join("")+'</div>';
+      return '<div class="sec-label">'+icon(c.cat,13)+" "+c.cat+'</div><div class="catalog-grid">'+c.items.map(renderItem).join("")+'</div>';
     }).join("");
   }
   const cnt = cartCount();
@@ -1780,8 +1806,9 @@ SCREENS.studioDetail = ({id}) => {
       <div class="card">
         <div class="row" style="margin-bottom:8px">
           <div class="grow"><div class="hud">626 · БРОНЬ <b>${b.id}</b></div><h1 class="big">${escHtml(b.goal)}</h1></div>
-          ${statusPill(b.status,ST626)}${nextStep(b,true)}
+          ${statusPill(b.status,ST626)}
         </div>
+        ${nextStep(b,true)}
         <div class="hud">${fmtIso(b.when)}.${b.when.slice(0,4)} · <b>${b.slot}</b></div>
         ${b.lateNote?'<div class="kit-warn" style="margin-top:10px"><b>⚠️ '+b.lateNote+'</b> — команда может отказать.</div>':""}
         <div style="margin-top:10px">${b.needs.map(n=>'<span class="chip">'+n+'</span>').join("")||'<span class="sub">без допов</span>'}</div>
@@ -1906,7 +1933,7 @@ SCREENS.adminHub = () => {
         <button class="${adminTab==="history"?"on":""}" role="tab" aria-selected="${adminTab==="history"}" onclick="adminTab='history';render()">История</button>
       </div>
       ${requestFilterHtml('admin',requests)}
-      <div>${list.map(r=>`
+      <div class="booking-grid">${list.map(r=>`
         <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
           <div class="grow">
@@ -1924,12 +1951,7 @@ SCREENS.adminHub = () => {
         </div>`).join("") : ""}
 
       <div class="sec-label">626 · согласовано, нужен куратор</div>
-      ${s626free.map(b=>`
-        <div class="card">
-          <div class="row"><div class="grow"><b style="font-size:14px">${escHtml(b.goal)}</b>
-          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}</div></div>${statusPill(b.status,ST626)}${nextStep(b,true)}</div>
-          <button class="btn-sm primary" style="width:100%;margin-top:10px;padding:11px" onclick="take626(${b.id})">Стать куратором</button>
-        </div>`).join("")||'<div class="card sub">Свободных броней 626 нет</div>'}
+      <div class="booking-grid">${s626free.map(b=>studioSummaryCard(b,`<button class="btn-sm primary" onclick="take626(${b.id})">Стать куратором</button>`)).join('')||'<div class="card sub">Свободных броней 626 нет</div>'}</div>
       ${(()=>{
         const mine626 = bookings626.filter(b=>myCur(b) && !["closed","rejected","canceled"].includes(b.status));
         return mine626.length ? '<div class="sec-label">626 · мои кураторства</div>'+mine626.map(b=>`
@@ -2354,32 +2376,28 @@ SCREENS.seniorHub = () => {
       <div class="sec-label">⏳ 626 · ждут согласования</div>
       <div class="list-item" onclick="navTo('allRequests')"><div class="emoji-badge">${uic('book',19)}</div><div class="grow">Все заявки<div class="sub">оборудование и 626 · активные и завершённые</div></div><span class="chev">›</span></div>
       <div class="list-item" onclick="navTo('equipmentState')"><div class="emoji-badge">${uic('box',19)}</div><div class="grow">Что сейчас с оборудованием<div class="sub">выдано · очередь на выдачу</div></div><span class="chev">›</span></div>
-      ${s626new.map(b=>`
-        <div class="card">
-          <div class="row"><div class="grow"><b style="font-size:14px">${escHtml(b.goal)}</b>
-          <div class="hud">${b.author.split(" ")[0]} · ${fmtIso(b.when)} · ${b.slot}${b.needs.length?" · "+b.needs.join(", "):""}</div></div>${statusPill(b.status,ST626)}${nextStep(b,true)}</div>
-          <div class="btnrow" style="margin-top:10px">
+      <div class="booking-grid">${s626new.map(b=>studioSummaryCard(b,`
+          <div class="btnrow">
             <button class="btn-sm ok grow" onclick="dec626(${b.id},'approved')">Согласовать</button>
             <button class="btn-sm danger grow" onclick="rej626Modal(${b.id})">Отклонить</button>
-          </div>
-        </div>`).join("")||'<div class="card sub">Новых заявок на 626 нет</div>'}
+          </div>`)).join('')||'<div class="card sub">Новых заявок на 626 нет</div>'}</div>
 
       <div class="sec-label">Люди</div>
-      <div>
+      <div class="service-grid">
         <div class="list-item" onclick="navTo('adminUsers')"><div class="emoji-badge">${uic("users",19)}</div><div class="grow">Пользователи и верификация</div>${verifQueue.length?'<span class="badge-cnt">'+verifQueue.length+'</span>':""}<span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('blacklist')"><div class="emoji-badge">${uic("ban",19)}</div><div class="grow">Чёрный список</div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('reqChats')"><div class="emoji-badge">${uic("book",19)}</div><div class="grow">Переписки заявок</div><span class="chev">›</span></div>
         ${(()=>{const pr=requests.filter(r=>r.escalated&&r.status==="ret").length;return '<div class="list-item" onclick="navTo(\'problemReturns\')"><div class="emoji-badge">'+uic("wrench",19)+'</div><div class="grow">Проблемные возвраты</div>'+(pr?'<span class="badge-cnt">'+pr+'</span>':"")+'<span class="chev">›</span></div>';})()}
       </div>
       <div class="sec-label">Оборудование</div>
-      <div>
+      <div class="service-grid">
         <div class="list-item inventory-tool" onclick="openInventory()"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">${inventory&&inventory.active?"Инвентаризация идёт":"Провести инвентаризацию"}<div class="sub">${inventory&&inventory.active?inventory.summary.checked+" из "+inventory.summary.total+" проверено":"командная проверка всего оборудования"}</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="startAddEquip()"><div class="emoji-badge">${uic("plus",19)}</div><div class="grow">Добавить оборудование в рентал</div><span class="chev">›</span></div>
         <div class="list-item" onclick="startRemoveEquip()"><div class="emoji-badge">${uic("box",19)}</div><div class="grow">Убрать оборудование</div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('catBlocks')"><div class="emoji-badge">${uic("lock",19)}</div><div class="grow">Блокировка категорий</div><span class="chev">›</span></div>
       </div>
       <div class="sec-label">Коммуникация и данные</div>
-      <div>
+      <div class="service-grid">
         ${appealsEntry(true)}${settingsEntry()}
         <div class="list-item" onclick="doResync()"><div class="emoji-badge">${uic("refresh",19)}</div><div class="grow">Перепроверить пользователей по спискам</div><span class="chev">›</span></div>
         <div class="list-item" onclick="startBroadcast()"><div class="emoji-badge">${uic("mega",19)}</div><div class="grow">Массовая рассылка</div><span class="chev">›</span></div>
@@ -2845,6 +2863,36 @@ function confirmModal(title, text, fn){
 }
 
 /* ================= TELEGRAM INIT ================= */
+function syncAppViewport(){
+  const ph=$('phone');
+  if(!ph)return;
+  const active=document.activeElement;
+  const editing=active&&/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
+  const stable=Number(TG?.viewportStableHeight)||window.innerHeight;
+  const visible=window.visualViewport?.height||window.innerHeight;
+  const height=IN_TG?(editing?Math.min(stable,visible):stable):window.innerHeight;
+  document.documentElement.style.setProperty('--app-viewport-height',height+'px');
+  const rootStyle=getComputedStyle(document.documentElement);
+  for(const edge of ['top','bottom','left','right']){
+    for(const [name,insets,css] of [['device',TG?.safeAreaInset,'safe-area'],['content',TG?.contentSafeAreaInset,'content-safe-area']]){
+      const fallback=parseFloat(rootStyle.getPropertyValue('--tg-'+css+'-inset-'+edge))||0;
+      const value=Number(insets?.[edge]??fallback);
+      ph.style.setProperty('--app-'+name+'-'+edge,Math.max(0,Number.isFinite(value)?value:0)+'px');
+    }
+  }
+  if(editing)requestAnimationFrame(()=>{
+    if(document.activeElement!==active)return;
+    const scroller=active.closest('.sheet,.modal,#screen');
+    if(!scroller)return;
+    const field=active.getBoundingClientRect(),bounds=scroller.getBoundingClientRect(),gap=12;
+    if(field.bottom>bounds.bottom-gap)scroller.scrollTop+=field.bottom-bounds.bottom+gap;
+    else if(field.top<bounds.top+gap)scroller.scrollTop-=bounds.top+gap-field.top;
+  });
+}
+window.addEventListener('resize',syncAppViewport);
+window.visualViewport?.addEventListener('resize',syncAppViewport);
+document.addEventListener('focusin',syncAppViewport);
+document.addEventListener('focusout',()=>setTimeout(syncAppViewport,0));
 function applyTgTheme(){
   const sv = savedTheme();
   const dark = sv ? sv==="dark" : !!(TG && TG.colorScheme === "dark");
@@ -2920,7 +2968,7 @@ document.addEventListener("visibilitychange",()=>{
 });
 window.addEventListener("beforeunload",stopRealtime);
 </script>
-<script src="admin-requests.js?v=20261105-admin"></script>
+<script src="admin-requests.js?v=20261105-layout"></script>
 <script>
 if(IN_TG){
   document.body.classList.add("in-tg");
@@ -2928,9 +2976,8 @@ if(IN_TG){
   applyTgTheme();
   if(TG){ TG.onEvent("themeChanged", applyTgTheme); TG.BackButton.onClick(tgLeft); }
   /* высота строго по вьюпорту Telegram — контент не залезает под шапку/клавиатуру */
-  const setVH = ()=>{ $("phone").style.height = ((TG && TG.viewportStableHeight) || window.innerHeight) + "px"; };
-  if(TG) TG.onEvent("viewportChanged", setVH);
-  setVH();
+  if(TG)for(const event of ['viewportChanged','safeAreaChanged','contentSafeAreaChanged','fullscreenChanged'])TG.onEvent(event,syncAppViewport);
+  syncAppViewport();
   /* в Telegram моки не показываем: имя — только то, что ввели при регистрации */
   profile = {name:"", short:"", tg:"", orgs:[], deps:[], status:"—"};
   const u = TG && TG.initDataUnsafe && TG.initDataUnsafe.user;
@@ -2944,6 +2991,7 @@ if(IN_TG){
 } else {
   /* браузер: кликабельный прототип на моках, регламент — первый экран */
   try {
+    syncAppViewport();
     const sv = savedTheme();
     if(sv) $("phone").classList.toggle("dark", sv==="dark");
     resetTo("rules", {});

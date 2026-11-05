@@ -14,7 +14,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  await page.getByRole('button',{name:'Попросить изменить время',exact:true}).click();
  await page.locator('#change-time-reason').fill('Перенесите получение на 15:00');
  await page.getByRole('button',{name:'Отправить просьбу',exact:true}).click();
- assert.match(await page.locator('#screen').innerText(),/Ожидаем изменения времени/);
+ assert.equal(await page.getByRole('button',{name:'Ожидаем изменения времени',exact:true}).isDisabled(),true);
  await page.evaluate(()=>{const id=stack.at(-1).params.id;requests.find(r=>r.id===id).me=true;role='user';resetTo('reqDetail',{id});});
   await page.getByRole('button',{name:'Изменить время',exact:true}).click();
  await page.locator('#edit-date-from').fill('2030-06-04');
