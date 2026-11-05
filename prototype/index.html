@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Оборудыш — прототип Mini App</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="style.css?v=20261027-booking">
+<link rel="stylesheet" href="style.css?v=20261105-admin">
 </head>
 <body>
 
@@ -29,7 +29,7 @@
   <div id="overlay"></div>
 </div>
 
-<script src="catalog.js?v=20260721i"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
+<script src="catalog.js?v=20261105-cameras"></script><!-- необязательный файл: window.OBORUDKA_CATALOG заменяет встроенный каталог -->
 <script src="texts.js?v=20260721i"></script>
 <script>
 "use strict";
@@ -91,7 +91,7 @@ function cleanIncoming(v){ return v; }
 function chkA(on){ return 'role="checkbox" aria-checked="'+(on?"true":"false")+'" tabindex="0" onkeydown="if(event.key===' + "' '" + '||event.key===\'Enter\'){event.preventDefault();this.click();}"'; }
 /* отметить переписку прочитанной (сброс бейджа непрочитанных) */
 function markRead(kind, id){
-  const arr = kind==="req" ? requests : bookings626;
+  const arr = kind==='appeal'?appeals:kind==="req" ? requests : bookings626;
   const o = arr.find(x=>x.id===id); if(o) o.unread = 0;
   if(SRV) api("read",{kind, id}).catch(()=>{});
 }
@@ -116,6 +116,8 @@ function applyBoot(d){
   }
   requests = d.requests || [];
   bookings626 = d.bookings626 || [];
+  appeals = d.appeals || [];
+  preferences = Object.assign({startPage:'home',showPast:true},d.preferences||{});
   verifQueue = d.verifQueue || [];
   if(d.users) usersDb = d.users;
   if(d.busy626) BUSY626 = d.busy626;   // занятость 626 из boot (dayload — в SRV.dayload)
@@ -208,11 +210,11 @@ function timePickerHtml({title="Время",fromId,fromLabel,fromValue,fromTarge
     <span class="time-parts">
       <input class="time-part" data-part="hour" type="text" inputmode="numeric" maxlength="2"
         aria-label="${label}: часы" placeholder="00" value="${parts[0]}"
-        oninput="setTimePart('${target}',this);advanceTimePart(this)" onblur="timePartBlur()">
+        oninput="setTimePart('${target}',this);advanceTimePart(this,event)" onbeforeinput="timePartBeforeInput(this,event)" onkeydown="timePartKey(this,event)" onblur="timePartBlur()">
       <span class="time-colon">:</span>
       <input class="time-part" data-part="minute" type="text" inputmode="numeric" maxlength="2"
         aria-label="${label}: минуты" placeholder="00" value="${parts[1]}"
-        oninput="setTimePart('${target}',this);advanceTimePart(this)" onblur="timePartBlur()">
+        oninput="setTimePart('${target}',this);advanceTimePart(this,event)" onbeforeinput="timePartBeforeInput(this,event)" onkeydown="timePartKey(this,event)" onblur="timePartBlur()">
     </span>
   </div>`;
   };
@@ -252,13 +254,34 @@ function setTimePart(target,input){
       :!(wiz.d1&&wiz.d2&&wiz.t1&&wiz.t2&&!dateBlock());
   }
 }
-function advanceTimePart(input){
+function focusTimePart(input,direction,select=false,atStart=false){
+  const parts=[...input.closest('.time-picker').querySelectorAll('.time-part')];
+  const next=parts[parts.indexOf(input)+direction];
+  if(!next)return;
+  next.focus();
+  if(select)next.select();else{const at=atStart?0:next.value.length;next.setSelectionRange(at,at);}
+}
+function timePartBeforeInput(input,event){
+  if(input.value)return;
+  if(event.inputType==='deleteContentBackward'){event.preventDefault();focusTimePart(input,-1);}
+  else if(event.inputType==='deleteContentForward'){event.preventDefault();focusTimePart(input,1,false,true);}
+}
+function timePartKey(input,event){
+  if(event.key==='Backspace'&&(!input.value||(input.selectionStart===0&&input.selectionEnd===0))){event.preventDefault();focusTimePart(input,-1);}
+  else if(event.key==='Delete'&&(!input.value||(input.selectionStart===input.value.length&&input.selectionEnd===input.value.length))){event.preventDefault();focusTimePart(input,1,false,true);}
+  else if(event.key==='ArrowLeft'&&input.selectionStart===0&&input.selectionEnd===0){event.preventDefault();focusTimePart(input,-1);}
+  else if(event.key==='ArrowRight'&&input.selectionStart===input.value.length){event.preventDefault();focusTimePart(input,1);}
+}
+function advanceTimePart(input,event){
+  if(event?.inputType?.startsWith('delete')){
+    if(event.inputType==='deleteContentBackward'&&!input.value)focusTimePart(input,-1);
+    else if(event.inputType==='deleteContentForward'&&!input.value)focusTimePart(input,1,false,true);
+    return;
+  }
   if(input.value.length!==2) return;
   const max=input.dataset.part==="hour"?23:59;
   if(Number(input.value)>max) return;
-  const parts=[...document.querySelectorAll(".time-part")];
-  const next=parts[parts.indexOf(input)+1];
-  if(next){ next.focus(); next.select(); }
+  focusTimePart(input,1,true);
 }
 function timePartBlur(){
   setTimeout(()=>{
@@ -423,6 +446,8 @@ function initCalSRV(){
 
 /* ================= СОСТОЯНИЕ ================= */
 let role = "user";
+let preferences={startPage:'home',showPast:true},appeals=[];
+try{preferences=Object.assign(preferences,JSON.parse(localStorage.getItem('obor_demo_preferences')||'{}'));}catch(e){}
 // Выезд завершён. Для следующего выезда вернуть true: экраны и серверный код сохранены.
 const SHOW_MEDIA_TRIP = false;
 let profile = {name:"Птицын Фрукт Медийщикович", short:"Фрукт Птицын", tg:"@misterfrukt", orgs:["Media BMSTU"], deps:["Видео","Фото"], status:"активист"};
@@ -436,7 +461,8 @@ let profileRolesExpanded = false;
 const $ = id => document.getElementById(id);
 
 /* ================= НАВИГАЦИЯ ================= */
-function navTo(name, params){ stack.push({name, params: params||{}}); render(); }
+let navigationId=0;
+function navTo(name, params){ stack.push({name, params: params||{},navigationId:++navigationId}); render(); }
 function goBack(){ if(stack.length>1){ stack.pop(); render(); } }
 function resetTo(name, params){ stack = [{name, params: params||{}}]; render(); }
 function cur(){ return stack[stack.length-1]; }
@@ -490,6 +516,11 @@ document.addEventListener("keydown", e=>{
 /* ================= РЕНДЕР ================= */
 const SCREENS = {};
 let _scrKey = "";
+const screenScroll=new Map();
+function screenKey(s){
+  const tab=s.name==='adminHub'?adminTab:s.name==='allRequests'?allRequestKind+'|'+allRequestScope:s.name==='equipmentState'?equipmentScope:s.name==='appeals'?appealScope:'';
+  return role+'|'+s.name+'|'+JSON.stringify(s.params)+'|'+tab+'|'+(s.name==='wizard'&&wiz?s.navigationId+'|'+wiz.step:'');
+}
 function productionEnabled(){ return !!(SRV && SRV.features && SRV.features.productionRole); }
 function hideProductionUi(root){
   if(productionEnabled()) return;
@@ -507,17 +538,17 @@ function hideProductionUi(root){
 }
 function render(){
   const s = cur();
+  const scr = $("screen");
+  if(_scrKey)screenScroll.set(_scrKey,scr.scrollTop);
+  const key=screenKey(s),same=key===_scrKey;
+  const keep=screenScroll.get(key)||0;
   const out = SCREENS[s.name](s.params);
   const isNested = stack.length>1 || (s.name==="wizard" && wiz && wiz.step>1);
   $("tgleft").textContent = isNested ? "‹ Назад" : "Закрыть";
   const platform=TG?.platform&&TG.platform!=='unknown'?TG.platform:tgLaunchParam('tgWebAppPlatform');
   $("desktop-back").hidden = !(IN_TG && !['android','ios'].includes(platform) && isNested);
   if(IN_TG && TG && TG.BackButton){ if(isNested) TG.BackButton.show(); else TG.BackButton.hide(); }
-  /* тот же экран/шаг — сохраняем позицию скролла (выбор даты/слотов/чекбоксы не прыгают) */
-  const scr = $("screen");
-  const key = s.name+"|"+stack.length+"|"+(s.name==="wizard"&&wiz?wiz.step:"");
-  const same = key===_scrKey;
-  const keep = same ? scr.scrollTop : 0;
+  /* Позиция сохраняется при перерисовке и возвращении на экран или вкладку. */
   /* введённый текст переживает перерисовку (чат, комментарии, поиск) */
   const inputs = {};
   if(same) scr.querySelectorAll("input[id],textarea[id]").forEach(el=>{
@@ -832,6 +863,7 @@ SCREENS.rejected = () => ({
 SCREENS.home = () => {
   const active = requests.filter(r=>r.me && !["closed","rejected","canceled"].includes(r.status));
   const past = requests.filter(r=>r.me && ["closed","rejected","canceled"].includes(r.status));
+  const past626 = bookings626.filter(b=>b.me&&isPastBooking(b));
   const my626 = bookings626.filter(b=>b.me && !["closed","rejected","canceled"].includes(b.status));
   const externalOrgs = profile.orgs.filter(o=>o!=="Media BMSTU");
   const roleChips =
@@ -891,18 +923,20 @@ SCREENS.home = () => {
           ${statusPill(b.status,ST626)}${nextStep(b,true)}
         </div>`).join("")}
 
-      <div class="sec-label">История броней</div>
-      <div>${past.map(r=>`
+      <div class="row"><div class="sec-label grow">История броней</div>${historyToggle()}</div>
+      ${preferences.showPast?`<div>${past.map(r=>`
         <div class="list-item" onclick="navTo('reqDetail',{id:${r.id}})">
           <div class="emoji-badge" style="opacity:.6">${uic("done",19)}</div>
           <div class="grow"><div style="font-size:14px">${itemsTitle(r.items)}</div>
           <div class="hud">${r.takenAt?'взял '+r.takenAt+' · вернул '+(r.returnedAt||"—"):r.from+" → "+r.to}</div></div>
           <span class="chev">›</span>
-        </div>`).join("") || '<div class="card sub">Пока пусто</div>'}</div>
+        </div>`).join("") || (past626.length?'':'<div class="card sub">Пока пусто</div>')}
+        ${past626.map(b=>`<div class="list-item" onclick="navTo('studioDetail',{id:${b.id}})"><div class="emoji-badge">${uic('studio',19)}</div><div class="grow"><b>${escHtml(b.goal)}</b><div class="hud">626 · ${fmtIso(b.when)} · ${b.slot}</div></div>${statusPill(b.status,ST626)}</div>`).join('')}</div>`:''}
 
       <div class="sec-label">Ещё</div>
       <div>
         <div class="list-item" onclick="startAppeal()"><div class="emoji-badge">${uic("q",19)}</div><div class="grow">Задать вопрос<div class="sub">команде оборудыша, можно анонимно</div></div><span class="chev">›</span></div>
+        ${appealsEntry()}${settingsEntry()}
       </div>
 
       ${(!SRV || SRV.isAdmin) ? (()=>{
@@ -926,7 +960,7 @@ function openQuestion(){
   $("overlay").innerHTML = `
     <div class="sheet-veil" onclick="closeSheet()"></div>
     <div class="sheet"><div class="grab"></div><h3>❓ Задать вопрос</h3>
-      <textarea rows="3" id="q-text" maxlength="500" placeholder="Напишите обращение свободным текстом…" oninput="appealText=this.value">${appealText}</textarea>
+      <textarea rows="3" id="q-text" maxlength="500" placeholder="Напишите обращение свободным текстом…" oninput="appealText=this.value">${escHtml(appealText)}</textarea>
       <div class="check-row ${appealAnon?"on":""}" id="q-anon" ${chkA(appealAnon)} style="margin-top:10px;border-radius:14px" onclick="appealAnon=!appealAnon; if(appealAnon) appealPhotos.length=0; openQuestion()">
         <span class="checkbox">✓</span><span class="grow">Отправить анонимно</span>
       </div>
@@ -939,7 +973,8 @@ function sendAppeal(){
   if(!t){ toast("Напишите обращение"); return; }
   const anon = appealAnon;
   const photos = anon ? [] : appealPhotos.filter(Boolean);
-  if(SRV){ if(_busy) return; _busy=true; api("appeal",{text:t, anon, photos}).then(()=>{ _busy=false; appealText=""; appealAnon=false; appealPhotos.length=0; closeSheet(); toast("✅ Обращение отправлено команде оборудыша"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  if(SRV){ if(_busy) return; _busy=true; api("appeal",{text:t, anon, photos}).then(d=>{ _busy=false; applyBoot(d);appealText=""; appealAnon=false; appealPhotos.length=0; closeSheet(); toast("✅ Обращение отправлено команде оборудыша"); }).catch(e=>{ _busy=false; toast("⚠️ "+e.message); }); return; }
+  appeals.unshift({id:Date.now(),me:true,author:anon?'Аноним':profile.short,anonymous:anon,text:t,photoCount:photos.length,status:'open',createdAt:'сейчас',chat:[],unread:0});
   appealText=""; appealAnon=false; appealPhotos.length=0; closeSheet(); toast("✅ Обращение отправлено команде оборудыша");
 }
 function closeSheet(){ $("overlay").innerHTML=""; render(); }
@@ -1165,8 +1200,8 @@ function cartCount(){ return Object.values(wiz.cart).reduce((a,b)=>a+b,0); }
 function kitWarnings(){
   const cats = new Set(Object.keys(wiz.cart).map(catOf));
   const w = [];
-  const hasGopro = Object.keys(wiz.cart).some(s => s === "ГоПро 12");
-  if(cats.has("Камеры") && !cats.has("Объективы") && !hasGopro) w.push("К камере рекомендуем добавить объектив");
+  const needsLens=Object.keys(wiz.cart).some(s=>catOf(s)==='Камеры'&&!itemOf(s)?.lensIncluded&&!/GoPro|ГоПро|Osmo/i.test(s));
+  if(needsLens && !cats.has("Объективы")) w.push("К камере рекомендуем добавить объектив");
   return w;
 }
 /* --- избранные наборы --- */
@@ -1320,7 +1355,7 @@ function openCart(){
   const rows = Object.entries(wiz.cart).map(([s,q])=>{ const es=escJs(s); return `
     <div class="row" style="padding:9px 0;border-bottom:1px solid var(--sep)">
       ${thumb(s,36)}
-      <div class="grow" style="font-size:14.5px">${escHtml(s)}</div>
+      <div class="grow" style="font-size:14.5px">${escHtml(s)}${itemOf(s)?.description?`<p class="sub camera-description">${escHtml(itemOf(s).description)}</p>`:''}</div>
       <div class="stepper">
         <button aria-label="Убавить" onclick="chQty('${es}',-1);openCart()">−</button><b>${q}</b><button aria-label="Добавить" onclick="chQty('${es}',1);openCart()">+</button>
       </div>
@@ -1398,6 +1433,7 @@ function submitWizard(){
     if(r){ r.items=Object.entries(wiz.cart); r.event=wiz.event;
       r.from=fmtIso(wiz.d1)+", "+wiz.t1; r.to=fmtIso(wiz.d2)+", "+wiz.t2;
       r.d1Iso=wiz.d1; r.d2Iso=wiz.d2; r.t1=wiz.t1; r.t2=wiz.t2; r.comment=wiz.comment;
+      r.approvedBy=null;r.approvedAt='';
       if(['issued','ret'].includes(r.status))r.reviewPending=true;else r.status='new';
       r.history.push([r.status,'Данные изменены — нужно повторное согласование']); }
     resetTo(role==='user'?'reqDetail':'adminReq',{id:wiz.editId}); toast("✅ Изменения сохранены — нужно повторное согласование");
@@ -1453,17 +1489,17 @@ SCREENS.reqDetail = ({id}) => {
       }).join("");
   const editable = r.me && ["new","curator","approved"].includes(r.status);
   const fact = (r.takenAt||r.returnedAt) ? `<div class="hud" style="margin-top:8px">факт: взял ${r.takenAt||"—"}${r.returnedAt?" · вернул "+r.returnedAt:""}</div>` : "";
-  const chat = r.curator ? `
-    <div class="sec-label">Переписка с куратором · ${escHtml(r.curator)}</div>
+  const chat = `
+    <div class="sec-label">${r.curator?'Переписка с куратором · '+escHtml(r.curator):'Переписка с администраторами'}</div>
     <div class="card">
       <div class="chat">
-        ${r.chat.map(m=>chatMsg(m,false)).join("")||'<p class="sub">Куратор на связи — напишите, если что-то поменялось.</p>'}
+        ${r.chat.map(m=>chatMsg(m,false)).join("")||'<p class="sub">Можно написать команде до согласования заявки.</p>'}
       </div>
       <div class="row" style="margin-top:10px">
-        <input type="text" id="chat-inp" maxlength="1000" placeholder="Сообщение куратору…">
+        <input type="text" id="chat-inp" maxlength="1000" placeholder="Сообщение команде…">
         <button class="btn-sm primary" onclick="sendChat(${r.id})">➤</button>
       </div>
-    </div>` : '<div class="card sub">Куратор ещё не назначен — как только админ возьмёт заявку, здесь откроется переписка.</div>';
+    </div>`;
   return {
     body:`
       <div class="card">
@@ -1472,6 +1508,7 @@ SCREENS.reqDetail = ({id}) => {
           ${statusPill(r.status)}
         </div>
         ${nextStep(r)}
+        ${approvalInfo(r)}
         <div class="hud">${r.from} → <b>${r.to}</b></div>${fact}
         <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+escHtml(i[0])+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
       </div>
@@ -1482,7 +1519,7 @@ SCREENS.reqDetail = ({id}) => {
       <div class="card"><div class="tl">${tl}</div></div>
       ${chat}
       ${editable?`<div class="btnrow" style="margin-top:14px">
-        <button class="btn-sm grow" style="padding:12px" onclick="startEditReq(${r.id})">✏️ Редактировать</button>
+        <button class="btn-sm grow" style="padding:12px" onclick="startEditReq(${r.id})">Изменить состав и детали</button>
       </div><p class="sub" style="margin-top:8px;padding:0 4px">Редактирование доступно до выдачи. Изменённую заявку нужно согласовать заново.</p>`:""}
       ${r.me&&['new','curator','approved'].includes(r.status)?`<button class="btn-sm danger" style="margin-top:14px" onclick="cancelReq(${r.id})">Отменить с причиной</button><p class="sub">Отмена доступна до выдачи оборудования.</p>`:''}
       ${r.status==="issued"?(equipmentSundayError()?`<div class="kit-warn">${equipmentSundayError()}</div>`:mainBtn("🔁 Сдать оборудование","startReturn("+r.id+")")):""}
@@ -1496,10 +1533,10 @@ function sendChat(id){
   const txt = inp.value.trim();
   if(!txt) return;
   inp.value = "";
-  if(SRV){ srvDo("chat",{kind:"req", id, text:txt, asRole:"user"}, ()=>{ render(); toast("🔔 Куратору ушло уведомление от бота"); }); return; }
+  if(SRV){ srvDo("chat",{kind:"req", id, text:txt, asRole:"user"}, ()=>{ render(); toast("Сообщение отправлено команде"); }); return; }
   r.chat.push({who:"me",text:txt,tm:new Date().toTimeString().slice(0,5),label:"Пользователь"});
   render();
-  toast("🔔 Куратору "+(r.curator||"")+" ушло уведомление от бота");
+  toast("Сообщение отправлено команде");
 }
 function cancelReq(id){
   cancelReasonModal('Отменить заявку',comment=>{
@@ -1606,7 +1643,7 @@ SCREENS.studio = () => {
         <p class="sub" style="margin-top:4px">Съёмочный павильон: хромакей, циклорама, студийный свет. Можно выбрать любое время с точностью до минуты. Согласуют старшие админы, ведёт куратор.</p>
         ${!isAdminNow()?'<p class="sub">По воскресеньям бронирование недоступно, по понедельникам — с 14:00.</p>':''}
       </div>
-      <div class="sec-label">Мои брони</div>
+    <div class="sec-label">Мои брони</div>
       ${(()=>{
         const act = mine.filter(b=>!["closed","rejected","canceled"].includes(b.status)).sort((a,b)=>a.when<b.when?-1:a.when>b.when?1:(a.slot<b.slot?-1:1));
         if(!act.length) return '<div class="card sub">Броней нет</div>';
@@ -1729,15 +1766,15 @@ SCREENS.studioDetail = ({id}) => {
       }).join("");
   /* смотрю как куратор/админ (не владелец) — переписка идёт с заявителем, реплики зеркалим */
   const iCur = !b.me && (myCur(b) || (SRV?SRV.isAdmin:role!=="user"));
-  const chat = b.curator ? `
-    <div class="sec-label">${iCur?"Переписка с заявителем":"Переписка с куратором · "+b.curator}</div>
+  const chat = `
+    <div class="sec-label">${iCur?"Переписка с заявителем":b.curator?"Переписка с куратором · "+escHtml(b.curator):'Переписка с администраторами'}</div>
     <div class="card">
-      <div class="chat">${b.chat.map(m=>chatMsg(m,iCur)).join("")||'<p class="sub">'+(iCur?"Сообщений пока нет.":"Куратор на связи.")+'</p>'}</div>
+      <div class="chat">${b.chat.map(m=>chatMsg(m,iCur)).join("")||'<p class="sub">'+(iCur?"Сообщений пока нет.":"Можно написать команде до согласования.")+'</p>'}</div>
       <div class="row" style="margin-top:10px">
-        <input type="text" id="chat626-inp" maxlength="1000" placeholder="${iCur?"Сообщение заявителю…":"Сообщение куратору…"}">
+        <input type="text" id="chat626-inp" maxlength="1000" placeholder="${iCur?"Сообщение заявителю…":"Сообщение команде…"}">
         <button class="btn-sm primary" onclick="send626Chat(${b.id},${iCur})">➤</button>
       </div>
-    </div>` : '<div class="card sub">Куратор появится после согласования — админ возьмёт вашу бронь и здесь откроется переписка.</div>';
+    </div>`;
   return {
     body:`
       <div class="card">
@@ -1749,6 +1786,7 @@ SCREENS.studioDetail = ({id}) => {
         ${b.lateNote?'<div class="kit-warn" style="margin-top:10px"><b>⚠️ '+b.lateNote+'</b> — команда может отказать.</div>':""}
         <div style="margin-top:10px">${b.needs.map(n=>'<span class="chip">'+n+'</span>').join("")||'<span class="sub">без допов</span>'}</div>
         ${b.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+escHtml(b.curator)+'</b></div>':""}
+        ${approvalInfo(b)}
       </div>
       <div class="sec-label">Статус</div>
       ${adminRiskBanners(b,true)}
@@ -1843,7 +1881,7 @@ SCREENS.adminHub = () => {
   const hist626 = bookings626.filter(b=>myCur(b) && ["closed","rejected","canceled"].includes(b.status));
   const dds = SRV ? [fmtIso(isoPlus(0)), fmtIso(isoPlus(1))] : ["02.07","03.07"];
   const today = requests.filter(r=>dds.some(d=>r.from.startsWith(d)) && !["closed","rejected","canceled"].includes(r.status));
-  const list = adminTab==="queue"? noCur : adminTab==="mine"? mine : adminTab==="history"? hist : today;
+  const list = filterRequests(adminTab==="queue"? noCur : adminTab==="mine"? mine : adminTab==="history"? hist : today,'admin');
   const s626new = bookings626.filter(b=>b.status==="new");
   const s626free = bookings626.filter(b=>b.status==="approved"&&!b.curator);
   return {
@@ -1854,6 +1892,8 @@ SCREENS.adminHub = () => {
         <div class="hud">без куратора: <b>${noCur.length}</b> · мои: <b>${mine.length}</b></div></div>
       </div>
       <div class="admin-tools">
+        <div class="list-item" onclick="navTo('allRequests')"><div class="emoji-badge">${uic('book',19)}</div><div class="grow">Все заявки<div class="sub">фильтры и сортировка</div></div><span class="chev">›</span></div>
+        ${appealsEntry(true)}${settingsEntry()}
         <div class="list-item" onclick="navTo('equipmentState')"><div class="emoji-badge">${uic('box',19)}</div><div class="grow">Что сейчас с оборудованием<div class="sub">выдано · очередь на выдачу</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="adminWeek=0;navTo('adminCalendar')"><div class="emoji-badge">${uic("chart",19)}</div><div class="grow">Недельный календарь<div class="sub">все задачи команды</div></div><span class="chev">›</span></div>
         <div class="list-item" onclick="navTo('equipmentUnits')"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Паспорта экземпляров<div class="sub">состояние и история</div></div><span class="chev">›</span></div>
@@ -1865,6 +1905,7 @@ SCREENS.adminHub = () => {
         <button class="${adminTab==="today"?"on":""}" role="tab" aria-selected="${adminTab==="today"}" onclick="adminTab='today';render()">Сегодня</button>
         <button class="${adminTab==="history"?"on":""}" role="tab" aria-selected="${adminTab==="history"}" onclick="adminTab='history';render()">История</button>
       </div>
+      ${requestFilterHtml('admin',requests)}
       <div>${list.map(r=>`
         <div class="list-item" onclick="navTo('adminReq',{id:${r.id}})">
           <div class="emoji-badge">${uic("box",19)}</div>
@@ -1980,7 +2021,7 @@ SCREENS.adminReq = ({id}) => {
   if(r.status==='new'){
     actions=mainBtn('Согласовать заявку',"adminAct("+id+",'approved')",'',!!r.timeChange);
   } else if(!r.curator && ['approved','issued','ret'].includes(r.status)){
-    actions = isSeniorNow()&&r.status==='approved'?mainBtn('Выдать оборудование','openIssue('+id+')','',!!r.timeChange):mainBtn("Стать куратором","adminAct("+id+",'curator')",'',!!r.timeChange);
+    actions = mainBtn("Стать куратором","adminAct("+id+",'curator')",'',!!r.timeChange);
   } else if(r.status==="curator" && (myCur(r)||isSeniorNow())){
     actions = '<div class="mainbtn-wrap"><div style="pointer-events:auto"><div class="row" style="gap:8px"><button class="mainbtn" style="background:var(--ok);color:#fff" onclick="adminAct('+id+',\'approved\')">🟡 Согласовано</button><button class="mainbtn destructive" style="flex:0 0 38%" onclick="rejReqModal('+id+')">Отклонить</button></div><button class="mainbtn secondary" style="margin-top:8px" onclick="adminAct('+id+',\'uncurator\')">Снять с себя кураторство</button></div></div>';
   } else if(r.status==="curator"){
@@ -2007,7 +2048,7 @@ SCREENS.adminReq = ({id}) => {
     <div class="sec-label">Переписка с заявителем</div>
     <div class="card">
       <div class="chat">${r.chat.map(m=>chatMsg(m,true)).join("")||'<p class="sub">Сообщений пока нет. Когда пользователь напишет — вам придёт уведомление от бота.</p>'}</div>
-      ${(myCur(r) || isSeniorNow())?`<div class="row" style="margin-top:10px">
+      ${isAdminNow()?`<div class="row" style="margin-top:10px">
         <input type="text" id="achat-inp" maxlength="1000" placeholder="Сообщение заявителю…">
         <button class="btn-sm primary" onclick="sendAdminChat(${r.id})">➤</button>
       </div>`:""}
@@ -2029,6 +2070,7 @@ SCREENS.adminReq = ({id}) => {
         <div class="hud">${r.from} → <b>${r.to}</b></div>
         <div style="margin-top:10px">${r.items.map(i=>'<span class="chip">'+escHtml(i[0])+(i[1]>1?" × "+i[1]:"")+'</span>').join("")}</div>
         ${r.curator?'<div class="hud" style="margin-top:10px">куратор: <b>'+escHtml(r.curator)+'</b></div>':""}
+        ${approvalInfo(r)}
       </div>
       ${r.lateNote?'<div class="kit-warn"><b>⚠️ '+r.lateNote+'</b> — команда может отказать в выдаче/приёме.</div>':""}
       ${adminRiskBanners(r)}
@@ -2051,7 +2093,7 @@ function sendAdminChat(id){
   if(!txt) return;
   inp.value = "";
   if(SRV){ srvDo("chat",{kind:"req", id, text:txt, asRole:role}, ()=>{ render(); toast("Пользователю ушло уведомление от бота"); }); return; }
-  r.chat.push({who:"them",text:txt,tm:new Date().toTimeString().slice(0,5),senior:isSeniorNow(),label:isSeniorNow()?"Старший":"Куратор"});
+  r.chat.push({who:"them",text:txt,tm:new Date().toTimeString().slice(0,5),senior:isSeniorNow(),label:isSeniorNow()?"Старший":myCur(r)?"Куратор":"Админ"});
   render();
   toast("Пользователю ушло уведомление от бота");
 }
@@ -2072,6 +2114,7 @@ function adminAct(id, st, reason){
   if(st==="uncurator"){ r.curator=null; if(r.status==='curator')r.status='new'; r.history.push([r.status,tm+" · куратор снял себя"]); resetTo(role==='senior'?'allRequests':'adminHub'); toast(toastFor); return; }
   if(st==="rejected"){ r.status="rejected"; r.history.push(["rejected",tm+(reason?" · "+reason:"")]); render(); toast(toastFor); return; }
   if(st==='approved'&&r.reviewPending){r.reviewPending=false;}else if(st!=='curator')r.status=st;
+  if(st==='approved'){r.approvedBy='@you';r.approvedAt=moscowTime();}
   r.history.push([st,tm]); render();
   toast(st==="curator" ? "Вы куратор заявки ID "+id+". Переписка открыта." : "🟡 Согласовано.");
 }
@@ -2337,6 +2380,7 @@ SCREENS.seniorHub = () => {
       </div>
       <div class="sec-label">Коммуникация и данные</div>
       <div>
+        ${appealsEntry(true)}${settingsEntry()}
         <div class="list-item" onclick="doResync()"><div class="emoji-badge">${uic("refresh",19)}</div><div class="grow">Перепроверить пользователей по спискам</div><span class="chev">›</span></div>
         <div class="list-item" onclick="startBroadcast()"><div class="emoji-badge">${uic("mega",19)}</div><div class="grow">Массовая рассылка</div><span class="chev">›</span></div>
         <div class="list-item" onclick="openStats(true)"><div class="emoji-badge">${uic("doc",19)}</div><div class="grow">Статистика</div><span class="chev">›</span></div>
@@ -2350,6 +2394,7 @@ function dec626(id, st, reason){
     srvDo("626/action",body, ()=>{ render();
     toast(st==="approved" ? "🟢 Согласовано. Теперь любой админ может стать куратором." : "⛔ Отклонено — пользователю ушло уведомление"); }); return; }
   const b = bookings626.find(x=>x.id===id);
+  if(st==='approved'){b.approvedBy='@you';b.approvedAt=moscowTime();}
   b.status = st; b.history.push([st,"02.07, "+new Date().toTimeString().slice(0,5)+(reason?" · "+reason:"")]);
   render();
   toast(st==="approved" ? "🟢 Согласовано. Теперь любой админ может стать куратором этой брони." : "⛔ Отклонено — пользователю ушло уведомление");
@@ -2817,7 +2862,7 @@ async function bootApp(){
     applyBoot(d);
     initCalSRV();
     if(d.verified==="blocked") resetTo("blocked");
-    else if(d.registered && d.verified==="ok") { if(!openLaunchRequest(d)) resetTo("home"); }
+    else if(d.registered && d.verified==="ok") { if(!openLaunchRequest(d)) openStartPage(d); }
     else if(d.registered && d.verified==="pending") resetTo("regWait");
     else if(d.registered && d.verified==="rejected") resetTo("rejected");
     else resetTo("rules");
@@ -2875,7 +2920,7 @@ document.addEventListener("visibilitychange",()=>{
 });
 window.addEventListener("beforeunload",stopRealtime);
 </script>
-<script src="admin-requests.js?v=20261027-booking"></script>
+<script src="admin-requests.js?v=20261105-admin"></script>
 <script>
 if(IN_TG){
   document.body.classList.add("in-tg");

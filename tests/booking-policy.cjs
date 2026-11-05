@@ -43,7 +43,7 @@ const assert=require('node:assert/strict');
  await page.screenshot({path:'tests/booking-policy-admin.png',fullPage:true});
  await page.evaluate(id=>{role='user';resetTo('reqDetail',{id});},id);
  assert.equal(await page.locator('.admin-risk').count(),0);
- await page.getByRole('button',{name:'✏️ Редактировать',exact:true}).click();
+ await page.getByRole('button',{name:'Изменить состав и детали',exact:true}).click();
  await page.evaluate(()=>{wiz.cart[Object.keys(wiz.cart)[0]]=2;wiz.step=4;render();});
  await page.getByRole('button',{name:'Сохранить изменения',exact:true}).click();
  assert.equal(await page.evaluate(id=>requests.find(r=>r.id===id).status,id),'new');

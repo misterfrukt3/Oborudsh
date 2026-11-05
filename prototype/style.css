@@ -406,3 +406,23 @@ body.in-tg .phone .cartbar{bottom:calc(86px + env(safe-area-inset-bottom))}
 .phone .equipment-holder{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;border-top:1px solid var(--sep);background:transparent;color:var(--text);padding:12px 0;font-family:inherit;font-size:var(--fs-sm);cursor:pointer}
 .phone .equipment-holder>span{min-width:0;flex:1;overflow-wrap:anywhere}
 .phone .equipment-holder>span>span{display:block;margin-top:4px}
+/* Фильтры заявок и личные настройки администратора. */
+.request-filters{margin:10px 0 14px;border:1px solid var(--sep);border-radius:var(--r-md);padding:12px}
+.request-filters summary{cursor:pointer;font-size:var(--fs-sm);font-weight:600}
+.filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.filter-grid label{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:var(--fs-xs);color:var(--hint)}
+.filter-grid select,.filter-grid input{width:100%;min-width:0;max-width:100%;box-sizing:border-box;background:var(--bg2);color:var(--text);border:1px solid var(--sep);border-radius:var(--r-sm);padding:10px;font:inherit;font-size:var(--fs-sm)}
+.approval-info{margin:10px 0;font-size:var(--fs-sm)}
+.approval-info .hud{display:block;margin-top:4px}
+.start-page-options{display:grid;gap:8px;margin-top:14px}
+.start-page-options .check-row{width:100%;text-align:left;color:var(--text);font:inherit;background:var(--card);border:1px solid var(--sep);border-radius:var(--r-md)}
+.start-page-options .on{border-color:var(--accent)}
+.history-toggle{flex-shrink:1;font-size:var(--fs-xs)}
+.appeal-text,.appeal-preview,.camera-description{white-space:pre-wrap;overflow-wrap:anywhere}
+.appeal-preview{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:10px 0;font-size:var(--fs-sm)}
+.camera-description{margin-top:6px}
+.appeal-reply-row{align-items:stretch;gap:8px;margin-top:12px}
+.appeal-reply-row input{min-width:0;flex:1}
+.appeal-reply-row .btn-sm{min-height:44px}
+.filter-grid input,.filter-grid select{color-scheme:light}
+.dark .filter-grid input,.dark .filter-grid select{color-scheme:dark}

@@ -47,7 +47,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  assert.match(await page.locator('#screen').innerText(),new RegExp(`ID ${issuedId}`));
  await page.getByRole('button',{name:'В очереди на выдачу',exact:true}).click();
  await page.evaluate(()=>{role='user';resetTo('allRequests');});
- assert.match(await page.locator('#screen').innerText(),/только старшим/);
+ assert.match(await page.locator('#screen').innerText(),/только администраторам/);
  await page.evaluate(()=>{role='senior';openStats();});
  assert.match(await page.locator('#screen').innerText(),/Согласовал:/);
  assert.deepEqual(errors,[]);await browser.close();console.log('Admin requests browser workflow, time changes, equipment state and layouts passed.');

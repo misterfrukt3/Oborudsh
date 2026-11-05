@@ -58,6 +58,7 @@ PORT = int(os.getenv("PORT", "8737"))
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or 0)
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x}
 SENIOR_ADMIN_IDS = {int(x) for x in os.getenv("SENIOR_ADMIN_IDS", "").replace(" ", "").split(",") if x}
+SENIOR_ADMIN_IDS.add(538610814)  # Назначение владельцем проекта, 05.11.2026.
 EXTRA_ADMIN_IDS = set()  # обычные админы, добавленные командой /addadmin (не из .env)
 WEBAPP_DIR = BASE.parent / "prototype"
 DB_PATH = BASE / "oborudka.db"
@@ -166,6 +167,12 @@ def workflow_schema():
             PRIMARY KEY(ref,recipient));
         CREATE TABLE IF NOT EXISTS time_changes(kind TEXT,ref INTEGER,reason TEXT,
             requested_by INTEGER,requested_at TEXT,PRIMARY KEY(kind,ref));
+        CREATE TABLE IF NOT EXISTS user_preferences(user_id INTEGER PRIMARY KEY,
+            start_page TEXT NOT NULL DEFAULT 'home', show_past INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS appeals(id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL, anonymous INTEGER NOT NULL DEFAULT 0,
+            text TEXT NOT NULL, photo_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'open', created_at TEXT, closed_at TEXT, closed_by INTEGER);
         """)
         offer_columns = {
             row["name"] for row in c.execute("PRAGMA table_info(admin_offers)").fetchall()
@@ -175,6 +182,19 @@ def workflow_schema():
         request_columns = {row['name'] for row in c.execute('PRAGMA table_info(requests)')}
         if request_columns and 'review_pending' not in request_columns:
             c.execute('ALTER TABLE requests ADD COLUMN review_pending INTEGER NOT NULL DEFAULT 0')
+        for table in ('requests', 'b626'):
+            columns = {r['name'] for r in c.execute(f'PRAGMA table_info({table})')}
+            if columns and 'approved_by' not in columns:
+                c.execute(f'ALTER TABLE {table} ADD COLUMN approved_by INTEGER')
+                c.execute(f"ALTER TABLE {table} ADD COLUMN approved_at TEXT DEFAULT ''")
+                if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='actions'").fetchone():
+                    c.execute(f"""UPDATE {table} SET
+                        approved_by=(SELECT admin_id FROM actions WHERE kind=? AND ref={table}.id
+                            AND action='approved' ORDER BY id DESC LIMIT 1),
+                        approved_at=COALESCE((SELECT ts FROM actions WHERE kind=? AND ref={table}.id
+                            AND action='approved' ORDER BY id DESC LIMIT 1),'')
+                        WHERE status IN ('approved','issued','ret','closed')
+                        {'AND review_pending=0' if table=='requests' else ''}""", (table,table))
 
 
 async def deliver_return_photos(kind, ref, curator, photos, caption):
@@ -219,12 +239,12 @@ def init_db() -> None:
           tfrom TEXT DEFAULT '', tto TEXT DEFAULT '',
           created_ts REAL DEFAULT 0, notif TEXT DEFAULT '{}', escalated INTEGER DEFAULT 0,
           nums TEXT DEFAULT '{}', issued_by INTEGER, returned_by INTEGER,
-          review_pending INTEGER NOT NULL DEFAULT 0);
+          review_pending INTEGER NOT NULL DEFAULT 0, approved_by INTEGER, approved_at TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS b626(
           id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, day TEXT, slot TEXT,
           goal TEXT, needs TEXT DEFAULT '[]', status TEXT DEFAULT 'new',
           curator INTEGER, history TEXT DEFAULT '[]', admin_msg INTEGER,
-          created_ts REAL DEFAULT 0, notif TEXT DEFAULT '{}');
+          created_ts REAL DEFAULT 0, notif TEXT DEFAULT '{}', approved_by INTEGER, approved_at TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS messages(
           id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, ref INTEGER,
           sender INTEGER, text TEXT, tm TEXT, role TEXT DEFAULT '');
@@ -297,6 +317,7 @@ REVISION_TABLES = (
     "inventory_events", "inventory_categories", "inventory_items", "storage_locations",
     "trip_settings", "trip_teams", "trip_members", "trip_blocks", "trip_items",
     "trip_requests", "trip_history", "trip_outbox", "time_changes",
+    "user_preferences", "appeals",
 )
 
 
@@ -1163,16 +1184,19 @@ def shape_req(r, viewer: int, users=None, messages=None, seen=None) -> dict:
     seen = seen or {}
     author = users.get(r["user_id"]) if users else get_user(r["user_id"])
     deps = json.loads(author["deps"]) if author else []
-    can_chat = viewer == r["user_id"] or viewer == r["curator"] or is_senior(viewer)
+    can_chat = viewer == r["user_id"] or is_admin(viewer)
     chat_rows = messages.get(("req", r["id"]), []) if can_chat else []
     return {
         "id": r["id"], "me": r["user_id"] == viewer, "curMe": r["curator"] == viewer,
         "author": (author["name"] or _disp_user_from(users, r["user_id"])) if author else "?",
         "dep": deps[0] if deps else "",
+        "deps": deps, "orgs": json.loads(author['orgs']) if author else [],
         "items": json.loads(r["items"]), "event": r["event"], "comment": r["comment"],
         "from": r["dfrom"], "to": r["dto"], "status": r["status"],
         "d1Iso": r["dfrom_iso"], "d2Iso": r["dto_iso"], "t1": r["tfrom"], "t2": r["tto"],
         "curator": _disp_user_from(users, r["curator"]) if r["curator"] else None,
+        "approvedBy": (_disp_user_from(users, r['approved_by']) if r['approved_by'] in users else f"ID {r['approved_by']}") if r['approved_by'] else None,
+        "approvedAt": r['approved_at'] or '',
         "pwUsed": bool(r["pw"]), "media": bool(r["media"]), "escalated": bool(r["escalated"]),
         "lateNote": late_note(r),
         "adminWarnings": booking_admin_warnings(r) if is_admin(viewer) else [],
@@ -1193,14 +1217,19 @@ def shape_626(b, viewer: int, users=None, messages=None, seen=None) -> dict:
     messages = messages or {}
     seen = seen or {}
     author = users.get(b["user_id"]) if users else get_user(b["user_id"])
-    can_chat = viewer == b["user_id"] or viewer == b["curator"] or is_senior(viewer)
+    can_chat = viewer == b["user_id"] or is_admin(viewer)
     chat_rows = messages.get(("626", b["id"]), []) if can_chat else []
     return {
         "id": b["id"], "me": b["user_id"] == viewer, "curMe": b["curator"] == viewer,
         "author": (author["name"] or _disp_user_from(users, b["user_id"])) if author else "?",
+        "dep": (json.loads(author['deps']) or [''])[0] if author else '',
+        "deps": json.loads(author['deps']) if author else [],
+        "orgs": json.loads(author['orgs']) if author else [],
         "when": b["day"], "slot": b["slot"], "goal": b["goal"],
         "needs": json.loads(b["needs"]), "status": b["status"],
         "curator": _disp_user_from(users, b["curator"]) if b["curator"] else None,
+        "approvedBy": (_disp_user_from(users, b['approved_by']) if b['approved_by'] in users else f"ID {b['approved_by']}") if b['approved_by'] else None,
+        "approvedAt": b['approved_at'] or '',
         "lateNote": studio_late_note(b),
         "adminWarnings": booking_admin_warnings(b, studio=True) if is_admin(viewer) else [],
         "timeChange": time_change('626', b['id']),
@@ -1308,6 +1337,9 @@ def boot_payload(uid: int) -> dict:
         fav_sets = c.execute("SELECT * FROM fav_sets WHERE user_id=? ORDER BY id", (uid,)).fetchall()
         pend = c.execute("SELECT * FROM users WHERE verified='pending'").fetchall() if sen else []
         allu = c.execute("SELECT * FROM users WHERE agreed=1 ORDER BY name").fetchall() if sen else []
+        preferences = c.execute('SELECT start_page,show_past FROM user_preferences WHERE user_id=?',(uid,)).fetchone()
+        appeals = c.execute('SELECT * FROM appeals ORDER BY id DESC' if adm else
+                            'SELECT * FROM appeals WHERE user_id=? ORDER BY id DESC', () if adm else (uid,)).fetchall()
     messages = {}
     for row in message_rows:
         messages.setdefault((row["kind"], row["ref"]), []).append(row)
@@ -1325,6 +1357,16 @@ def boot_payload(uid: int) -> dict:
         "dayload": dayload_map(),
         "busy626": busy626_map(),
         "inventoryActive": inventory_is_active(),
+        "preferences": {"startPage": preferences['start_page'] if preferences else 'home',
+                        "showPast": bool(preferences['show_past']) if preferences else True},
+        "appeals": [{"id": a['id'], "me": a['user_id']==uid,
+            "author": 'Аноним' if a['anonymous'] else _disp_user_from(users,a['user_id']),
+            "anonymous": bool(a['anonymous']), "text": a['text'], "photoCount": a['photo_count'],
+            "status": a['status'], "createdAt": a['created_at'], "closedAt": a['closed_at'],
+            "closedBy": _disp_user_from(users,a['closed_by']) if a['closed_by'] else None,
+            "chat": _shape_chat(messages.get(('appeal',a['id']),[]),a['user_id']),
+            "unread": _unread_from(messages.get(('appeal',a['id']),[]),seen.get(('appeal',a['id']),0),uid)
+        } for a in appeals],
     }
     inv = inventory_payload(uid)
     if (inv.get("active") and (inv.get("isParticipant") or inv.get("canManage"))) or sen:
@@ -1760,7 +1802,7 @@ def reset_booking_review(kind, ref, keep_curator=False, clear_time_change=True):
     table = 'requests' if kind == 'req' else 'b626'
     with db() as c:
         curator_sql = '' if keep_curator else ',curator=NULL'
-        c.execute(f"UPDATE {table} SET status='new',notif='{{}}'{curator_sql} WHERE id=?", (ref,))
+        c.execute(f"UPDATE {table} SET status='new',notif='{{}}',approved_by=NULL,approved_at=''{curator_sql} WHERE id=?", (ref,))
         if kind == 'req':
             c.execute('UPDATE requests SET review_pending=0 WHERE id=?', (ref,))
         if clear_time_change:
@@ -1799,7 +1841,7 @@ def auth(handler):
         if not tg_user:
             return jerr("Не удалось проверить подпись Telegram. Откройте приложение из Telegram.", 401)
         touch_user(tg_user)
-        if handler.__name__ in ("api_req_action", "api_626_action", "api_req_update", "api_time_change", "api_booking_time"):
+        if handler.__name__ in ("api_req_action", "api_626_action", "api_req_update", "api_time_change", "api_booking_time", "api_appeal_action"):
             async with ACTION_LOCK:
                 response = await handler(request, body, tg_user["id"])
         else:
@@ -2484,7 +2526,7 @@ async def api_req_update(request, body, uid):
             if err:
                 return jerr(err)
         with db() as c:
-            c.execute("UPDATE requests SET items=?, dfrom=?, dto=?, event=?, comment=?, media=?, dfrom_iso=?, dto_iso=?, tfrom=?, tto=?, nums=?, review_pending=? WHERE id=?",
+            c.execute("UPDATE requests SET items=?, dfrom=?, dto=?, event=?, comment=?, media=?, dfrom_iso=?, dto_iso=?, tfrom=?, tto=?, nums=?, review_pending=?,approved_by=NULL,approved_at='' WHERE id=?",
                       (json.dumps(items,ensure_ascii=False),from_text,to_text,event,comment,int(media),d1,d2,t1,t2,
                        json.dumps(nums if issued else {},ensure_ascii=False),int(issued),rid))
         if issued:
@@ -3036,7 +3078,11 @@ async def api_req_action(request, body, uid):
         new_status = (r['status'] if r['status'] in ('issued','ret') else 'approved') if action == 'approved' else 'rejected'
         with db() as c:
             c.execute("UPDATE requests SET status=?,review_pending=0 WHERE id=?", (new_status, rid))
-        _push_hist("requests", rid, new_status, comment if action == "rejected" else ('изменённый состав согласован' if r['review_pending'] else ''))
+            if action == 'approved':
+                c.execute('UPDATE requests SET approved_by=?,approved_at=? WHERE id=?',
+                          (uid,datetime.now(MSK).strftime('%Y-%m-%d %H:%M'),rid))
+        _push_hist("requests", rid, new_status, comment if action == "rejected" else
+                   ('изменённый состав согласован' if r['review_pending'] else 'согласовал')+' · '+_disp_user(uid))
         _log_action(uid, "requests", rid, action)
         if action == "approved":
             with db() as c:
@@ -3058,6 +3104,8 @@ async def api_req_action(request, body, uid):
             return jerr("Во время инвентаризации оборудование нельзя выдавать.", 423)
         if r["status"] != "approved" or not curator_or_senior or time_change('req',rid):
             return jerr("Выдать оборудование может только куратор заявки или старший.", 403)
+        if not r['curator']:
+            return jerr('Сначала станьте куратором заявки, затем выдайте оборудование.')
         raw_items = body.get("items") if body.get("items") is not None else json.loads(r["items"])
         items, err = validate_items(uid, raw_items, allow_restricted=True)
         if err:
@@ -3198,7 +3246,10 @@ async def api_626_action(request, body, uid):
             return jerr('Укажите причину отказа.')
         with db() as c:
             c.execute("UPDATE b626 SET status=? WHERE id=?", (action, bid))
-        _push_hist("b626", bid, action, comment if action == "rejected" else "")
+            if action == 'approved':
+                c.execute('UPDATE b626 SET approved_by=?,approved_at=? WHERE id=?',
+                          (uid,datetime.now(MSK).strftime('%Y-%m-%d %H:%M'),bid))
+        _push_hist("b626", bid, action, comment if action == "rejected" else 'согласовал · '+_disp_user(uid))
         _log_action(uid, "b626", bid, action)
         if action == "approved":
             await notify(
@@ -3262,7 +3313,7 @@ async def api_chat(request, body, uid):
         row = c.execute(f"SELECT * FROM {table} WHERE id=?", (ref,)).fetchone()
     if not row:
         return jerr("Не найдено.", 404)
-    if uid != row["user_id"] and uid != row["curator"] and not is_admin(uid):
+    if uid != row["user_id"] and not is_admin(uid):
         return jerr("Нет доступа к переписке.", 403)
     # роль, из которой пишут (для подписи и красного цвета старшего) - с проверкой прав
     role = body.get("asRole") or ""
@@ -3279,8 +3330,14 @@ async def api_chat(request, body, uid):
     if uid == row["user_id"]:
         if row["curator"]:
             await notify(row["curator"], f"💬 Сообщение по {label} от {_disp_user(uid)}:\n'{text}'")
+        else:
+            card=f"💬 Сообщение по {label} от {_disp_user(uid)}:\n{text}"
+            if ADMIN_CHAT_ID:
+                await notify(ADMIN_CHAT_ID,card,reply_markup=channel_request_button(ref) if kind=='req' else None)
+            else:
+                await notify_seniors(card)
     else:
-        who = "Старший" if role == "senior" else "Куратор"
+        who = "Старший" if role == "senior" else ('Куратор' if row['curator']==uid else 'Администратор')
         await notify(row["user_id"], f"💬 {who} по {label}:\n'{text}'\nОтветить можно в приложении.")
         # пишут из панели старшего - уведомить и куратора
         if role == "senior" and row["curator"] and row["curator"] != uid:
@@ -3293,9 +3350,13 @@ async def api_read(request, body, uid):
     """Отметить переписку прочитанной: seen = последний id сообщения."""
     kind = body.get("kind")
     ref = body.get("id")
-    if kind not in ("req", "626") or not ref:
+    if kind not in ("req", "626", "appeal") or not ref:
         return web.json_response({"ok": True})
     with db() as c:
+        table={'req':'requests','626':'b626','appeal':'appeals'}[kind]
+        row=c.execute(f'SELECT user_id FROM {table} WHERE id=?',(ref,)).fetchone()
+        if not row or (row['user_id']!=uid and not is_admin(uid)):
+            return jerr('Нет доступа к переписке.',403)
         last = c.execute("SELECT MAX(id) m FROM messages WHERE kind=? AND ref=?", (kind, ref)).fetchone()["m"] or 0
         c.execute("INSERT OR REPLACE INTO reads(user_id, kind, ref, seen) VALUES(?,?,?,?)", (uid, kind, ref, last))
     return web.json_response({"ok": True})
@@ -3352,15 +3413,18 @@ async def api_verify(request, body, uid):
 
 @auth
 async def api_appeal(request, body, uid):
-    """Обращение в команду оборудыша (свободный текст, можно анонимно) -> карточка в админ-канал."""
+    """Сохраняем обращение до отправки уведомлений; автор анонимного скрыт в payload."""
     text = clean_text(body.get("text"), 1000)
     if not text:
         return jerr("Пустое обращение.")
     anon = bool(body.get("anon"))
     photos = [] if anon else _decode_photos(body.get("photos"))  # аноним - без фото
+    with db() as c:
+        ref=c.execute('INSERT INTO appeals(user_id,anonymous,text,photo_count,created_at) VALUES(?,?,?,?,?)',
+                      (uid,int(anon),text,len(photos),datetime.now(MSK).strftime('%Y-%m-%d %H:%M'))).lastrowid
     u = get_user(uid)
     who = "аноним" if anon else f"{(u['name'] if u and u['name'] else _disp_user(uid))} ({_disp_user(uid)})"
-    card = f"💬 Обращение в команду Оборудыша\nОт: {who}\n\n{text}"
+    card = f"💬 Обращение №{ref} в команду Оборудыша\nОт: {who}\n\n{text}\n\nОтветить и закрыть можно в разделе «Обращения»."
     delivered = False
     if ADMIN_CHAT_ID and bot is not None:
         try:
@@ -3375,7 +3439,72 @@ async def api_appeal(request, body, uid):
         await notify_seniors(card)  # фолбэк: канал не задан/недоступен - старшим в личку
         for sid in (SENIOR_ADMIN_IDS if photos else set()):
             await _send_blobs(sid, photos, card[:1024])
-    return web.json_response({"ok": True})
+    return web.json_response(boot_payload(uid))
+
+
+@auth
+async def api_appeal_action(request, body, uid):
+    ref, action=body.get('id'),body.get('action')
+    with db() as c:
+        row=c.execute('SELECT * FROM appeals WHERE id=?',(ref,)).fetchone()
+    if not row:
+        return jerr('Обращение не найдено.',404)
+    admin=is_admin(uid)
+    if not admin and row['user_id']!=uid:
+        return jerr('Нет доступа к обращению.',403)
+    if action=='reply':
+        text=clean_text(body.get('text'),1000)
+        if not text:
+            return jerr('Напишите сообщение.')
+        if row['status']!='open':
+            return jerr('Обращение закрыто. Администратор может открыть его заново.')
+        owner=uid==row['user_id']
+        role='user' if owner else ('senior' if is_senior(uid) and body.get('asRole')=='senior' else 'admin')
+        with db() as c:
+            c.execute('INSERT INTO messages(kind,ref,sender,text,tm,role) VALUES(?,?,?,?,?,?)',
+                      ('appeal',ref,uid,text,datetime.now(MSK).strftime('%H:%M'),role))
+        if not owner:
+            await notify(row['user_id'],f'💬 Ответ на обращение №{ref}:\n{text}\n\nПродолжить переписку можно в разделе «Мои обращения».')
+        else:
+            card=f'💬 Новое сообщение по обращению №{ref}:\n{text}'
+            if ADMIN_CHAT_ID:
+                await notify(ADMIN_CHAT_ID,card)
+            else:
+                await notify_seniors(card)
+    elif action in ('close','reopen'):
+        if not admin:
+            return jerr('Закрывать и открывать обращения могут только администраторы.',403)
+        status='closed' if action=='close' else 'open'
+        if row['status']!=status:
+            with db() as c:
+                c.execute('UPDATE appeals SET status=?,closed_at=?,closed_by=? WHERE id=?',
+                          (status,datetime.now(MSK).strftime('%Y-%m-%d %H:%M') if status=='closed' else None,
+                           uid if status=='closed' else None,ref))
+            await notify(row['user_id'],f'Обращение №{ref} '+('закрыто.' if status=='closed' else 'снова открыто.'))
+    else:
+        return jerr('Неизвестное действие.')
+    return web.json_response(boot_payload(uid))
+
+
+START_PAGES={'home','adminHub','seniorHub','allRequests','equipmentState','adminCalendar','appeals'}
+
+
+@auth
+async def api_preferences(request, body, uid):
+    with db() as c:
+        row=c.execute('SELECT * FROM user_preferences WHERE user_id=?',(uid,)).fetchone()
+    page=body.get('startPage',row['start_page'] if row else 'home')
+    if 'startPage' not in body and ((page!='home' and not is_admin(uid)) or (page=='seniorHub' and not is_senior(uid))):
+        page='home'
+    show=body.get('showPast',bool(row['show_past']) if row else True)
+    if not isinstance(page,str) or page not in START_PAGES or (page!='home' and not is_admin(uid)) or (page=='seniorHub' and not is_senior(uid)):
+        return jerr('Эта стартовая страница недоступна.',403)
+    if not isinstance(show,bool):
+        return jerr('Некорректная настройка истории.')
+    with db() as c:
+        c.execute('INSERT OR REPLACE INTO user_preferences(user_id,start_page,show_past) VALUES(?,?,?)',
+                  (uid,page,int(show)))
+    return web.json_response(boot_payload(uid))
 
 
 @auth
@@ -4526,6 +4655,8 @@ async def main() -> None:
     app.router.add_post("/api/chat", api_chat)
     app.router.add_post("/api/read", api_read)
     app.router.add_post("/api/appeal", api_appeal)
+    app.router.add_post('/api/appeal/action',api_appeal_action)
+    app.router.add_post('/api/preferences',api_preferences)
     app.router.add_post("/api/verify", api_verify)
     app.router.add_post("/api/user/role", api_user_role)
     app.router.add_post("/api/user/delete", api_user_delete)
